@@ -1,11 +1,14 @@
 """Container lifecycle of the engines: one shared scaffold in ``TTSEngine``."""
 from __future__ import annotations
 
+import errno
+import socket
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
+import requests
 
 from tts_suite import docker_ctl
 from tts_suite.constants import TTS_READY_STATE_CHECK_INTERVAL_S
@@ -229,3 +232,58 @@ def test_is_installed_without_docker_is_false(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(subprocess, "run", no_docker)
     assert not XTTSEngine().is_installed()
+
+
+# ── Reachability of the engine's host (from the health request alone) ──
+
+
+def _free_port() -> int:
+    """A loopback port nothing listens on: bound to learn a free number, then released."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def _failing_get(error: Exception) -> Any:
+    def get(*args: Any, **kwargs: Any) -> Any:
+        raise error
+    return get
+
+
+def _caused_by(error: Exception, cause: BaseException) -> Exception:
+    error.__cause__ = cause
+    return error
+
+
+def test_a_closed_port_on_a_reachable_host_is_refused() -> None:
+    engine = XTTSEngine().at_host("127.0.0.1", _free_port())
+    assert engine.reachability() == "refused"
+    assert not engine.is_running()
+
+
+@pytest.mark.parametrize(("error", "expected"), [
+    (requests.ConnectTimeout("timed out"), "unreachable"),
+    (_caused_by(requests.ConnectionError("no route"), OSError(errno.EHOSTUNREACH, "No route to host")), "unreachable"),
+    (_caused_by(requests.ConnectionError("no net"), OSError(errno.ENETUNREACH, "Network is unreachable")), "unreachable"),
+    (_caused_by(requests.ConnectionError("no name"), socket.gaierror(-2, "Name or service not known")), "unreachable"),
+    (_caused_by(requests.ConnectionError("refused"), ConnectionRefusedError(errno.ECONNREFUSED, "refused")), "refused"),
+    (_caused_by(requests.ConnectionError("cut off"), ConnectionResetError(errno.ECONNRESET, "reset")), "answering"),
+    (requests.ReadTimeout("no answer"), "answering"),
+])
+def test_the_kind_of_connection_error_tells_whether_the_host_is_there(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, expected: str,
+) -> None:
+    monkeypatch.setattr(requests, "get", _failing_get(error))
+    engine = XTTSEngine().at_host("192.0.2.2")
+    assert engine.reachability() == expected
+    assert not engine.is_running()
+
+
+def test_an_http_answer_that_is_not_ready_means_the_host_is_there(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Answer:
+        ok = False
+        headers: dict[str, str] = {}
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: Answer())
+    engine = XTTSEngine().at_host("192.0.2.2")
+    assert engine.reachability() == "answering" and not engine.is_running()

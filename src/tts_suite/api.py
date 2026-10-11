@@ -22,6 +22,8 @@ Unit = Literal["sentence", "paragraph", "whole"]
 """How much text an engine takes at once. The client cuts the text by it."""
 
 EntryStatus = Literal["running", "stopped", "starting", "unreachable"]
+"""``running`` = speaks; ``starting`` = a start is under way; ``stopped`` = nothing runs, the host (if any)
+is up, so it can be started; ``unreachable`` = the host does not answer, or a cloud engine has no access."""
 
 SkipReason = Literal["disabled", "deactivated", "stopped", "no_vram"]
 """Why an entry is passed over BEFORE an attempt."""

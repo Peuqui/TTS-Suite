@@ -13,6 +13,7 @@ from speech_fakes import FakeEngine, FakeLauncher
 
 from tts_suite.api import EngineDefaults, EntryStatus, Host, SuiteConfig
 from tts_suite.engines import registry
+from tts_suite.engines.base import Reachability
 from tts_suite.escalation import EscalationEntry, Skip
 from tts_suite.host_ctl import HostControlError
 from tts_suite.placement import GpuInfo
@@ -41,10 +42,14 @@ class ContainerEngine(FakeEngine):
         self.placements: list[tuple[str, int | None]] = []
         self.stops = 0
         self.ready_calls = 0
+        self.reach: Reachability | None = None  # what the host answers; None = follows ``up``
         self.started_at = self.finished_at = 0.0  # when ``ensure_ready`` ran (monotonic seconds)
 
     def is_running(self) -> bool:
         return self.up
+
+    def reachability(self) -> Reachability:
+        return self.reach or ("answering" if self.up else "refused")
 
     def is_installed(self) -> bool:
         return self.installed

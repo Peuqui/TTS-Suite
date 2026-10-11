@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from container_fakes import (
     ARAGON,
     ContainerEngine,
     FakeManagedLauncher,
+    FakeSsh,
     install,
     make_config,
 )
@@ -29,8 +31,9 @@ from tts_suite.api import (
     VoiceInfo,
 )
 from tts_suite.engines import registry
-from tts_suite.engines.base import TTSEngine
+from tts_suite.engines.base import Reachability, TTSEngine
 from tts_suite.escalation import Skip
+from tts_suite.launcher import SuiteLauncher
 from tts_suite.suite import Suite, create_suite
 
 
@@ -119,6 +122,36 @@ def test_each_host_gets_a_row_for_every_engine_with_a_rest_api_and_for_no_other(
 def test_a_host_that_does_not_answer_is_a_row_not_an_error(tmp_path: Path) -> None:
     suite, _ = _suite(make_config(tmp_path, hosts=(ARAGON,)), FakeManagedLauncher(statuses={"xtts@Aragon": "unreachable"}))
     assert _rows(run_async(suite.engines()))[("xtts", "Aragon")].status == "unreachable"
+
+
+class HostAwareEngine(ContainerEngine):
+    """An engine whose binding to a host yields its own object, reachable or not by address."""
+
+    default_port = 5000
+    reach_by_address: dict[str, Reachability]
+
+    def _bound(self, **changes: Any) -> Any:
+        bound = HostAwareEngine(self.key)
+        bound.reach_by_address = self.reach_by_address
+        bound.address = changes.get("address", self.address)
+        return bound
+
+    def reachability(self) -> Reachability:
+        return self.reach_by_address[self.address]
+
+
+def test_the_catalog_tells_a_host_that_is_off_from_a_host_whose_container_is_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = HostAwareEngine("hostfake")
+    engine.reach_by_address = {"localhost": "refused", "192.0.2.2": "unreachable", "192.0.2.3": "refused"}
+    install(monkeypatch, engine)
+    config = make_config(tmp_path, hosts=(ARAGON, Host("Basti", "192.0.2.3")))
+    suite, _ = _suite(config, SuiteLauncher(config, gpus=lambda: [], host_command=FakeSsh()))  # type: ignore[arg-type]
+    rows = _rows(run_async(suite.engines()))
+    assert rows[("hostfake", "Aragon")].status == "unreachable"
+    assert rows[("hostfake", "Basti")].status == "stopped"  # up, the container is off
+    assert rows[("hostfake", None)].status == "stopped"
 
 
 def test_the_rows_are_asked_in_parallel_so_a_silent_host_delays_only_by_one_wait(tmp_path: Path) -> None:

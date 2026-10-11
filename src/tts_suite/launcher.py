@@ -113,6 +113,8 @@ class SuiteLauncher:
 
     async def ensure_serving(self, entry: EscalationEntry, *, wait: bool) -> Skip | None:
         if not self._in_flight(entry.label):
+            if (unreachable := await self._unreachable_host(entry)) is not None:
+                return unreachable
             if (failure := self._failures.get(entry.label)) is not None:
                 return failure  # no new wait for a start that did not work; ``start`` tries again
             unstartable = await self._unstartable(entry)
@@ -165,6 +167,15 @@ class SuiteLauncher:
             self._failures.pop(label, None)  # the card choice is tried again at the next request
         else:
             self._failures[label] = skip
+
+    async def _unreachable_host(self, entry: EscalationEntry) -> Skip | None:
+        """``stopped`` when the entry's remote host cannot be reached at all (a refusal means the host is up).
+        Asked before any SSH attempt, so a host that is off costs one health timeout, not the SSH connect wait."""
+        if entry.host is None or not entry.engine.is_remote:  # a deactivated placeholder has no address to ask
+            return None
+        if await asyncio.to_thread(entry.engine.reachability) != "unreachable":
+            return None
+        return Skip("stopped", f"host {entry.host.name} unreachable")
 
     async def _unstartable(self, entry: EscalationEntry) -> Skip | None:
         """Why the suite has no way to start this entry; ``None`` = it has."""
@@ -239,6 +250,8 @@ class SuiteLauncher:
         """What the entry would do right now, by checks only — nothing is started."""
         if self._in_flight(entry.label):
             return "starting"
+        if await self._unreachable_host(entry) is not None:
+            return "unreachable"
         if await asyncio.to_thread(entry.engine.is_running):
             return "running"
         if not entry.engine.runs_in_container:

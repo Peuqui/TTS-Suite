@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import subprocess
 import sys
 import time
@@ -11,7 +12,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import Executor
 from functools import partial
 from pathlib import Path
-from typing import Any, Iterator, Optional, Self, get_args
+from typing import Any, Iterator, Literal, Optional, Self, get_args
 
 from ..api import FailureReason, SuiteError, Unit
 from ..constants import (
@@ -20,6 +21,7 @@ from ..constants import (
     COMPOSE_FILE_NAME,
     DOCKER_INSPECT_TIMEOUT_S,
     DOCKER_TTS_DIR,
+    HOST_UNREACHABLE_ERRNOS,
     ENGINE_QUEUE_DEFAULT,
     MEDIA_TYPE_WAV,
     TTS_CONNECT_TIMEOUT_S,
@@ -41,6 +43,10 @@ logger = logging.getLogger(__name__)
 SPEECH_UNITS: tuple[str, ...] = get_args(Unit)
 
 LOCALHOST = "localhost"
+
+Reachability = Literal["answering", "refused", "unreachable"]
+"""What the health request of an engine found: ``answering`` = the host replied over HTTP (ready or not),
+``refused`` = the host is up and nothing listens (the container is off), ``unreachable`` = no route to the host."""
 
 
 class TTSFailure(SuiteError):
@@ -77,6 +83,25 @@ def request_failure(source: str, error: Exception) -> TTSFailure:
     if isinstance(error, requests.Timeout):
         return TTSFailure("timeout", f"{source} did not answer in time: {error}")
     return TTSFailure("engine", f"{source}: {type(error).__name__}: {error}")
+
+
+def connection_reachability(error: Exception) -> Reachability:
+    """Reachability from a failed ``requests`` call: a connect timeout, an unresolvable name or a
+    missing route is ``unreachable``, a refusal is ``refused``; a connection that was made and then
+    cut off proves the host is there (``answering``). The socket error sits below the wrappers of
+    ``requests`` and ``urllib3`` in the ``__cause__`` / ``__context__`` chain."""
+    import requests
+
+    if isinstance(error, requests.ConnectTimeout):
+        return "unreachable"
+    cause: BaseException | None = error
+    while cause is not None:
+        if isinstance(cause, ConnectionRefusedError):
+            return "refused"
+        if isinstance(cause, socket.gaierror) or getattr(cause, "errno", None) in HOST_UNREACHABLE_ERRNOS:
+            return "unreachable"
+        cause = cause.__cause__ or cause.__context__
+    return "answering"
 
 
 class TTSEngine(ABC):
@@ -361,22 +386,33 @@ class TTSEngine(ABC):
         health = self._health()
         return health is not None and self._model_ready(health)
 
+    def reachability(self) -> Reachability:
+        """Whether the engine's host answers, from the health request alone (no ping): see :data:`Reachability`."""
+        return self._probe()[0]
+
     def _health(self, timeout: float | None = None) -> dict[str, Any] | None:
         """JSON of the engine's health endpoint; ``{}`` when it answers 2xx
         without JSON; ``None`` when it is not reachable or answers an error."""
+        return self._probe(timeout)[1]
+
+    def _probe(self, timeout: float | None = None) -> tuple[Reachability, dict[str, Any] | None]:
+        """THE health request: what it found out about the host, and the health JSON (see :meth:`_health`)."""
         import requests
         try:
-            response = requests.get(
-                f"{self.service_url}/health", timeout=timeout or TTS_HEALTH_TIMEOUT_S,
-            )
-            if not response.ok:
-                return None
-            if not response.headers.get("content-type", "").startswith("application/json"):
-                return {}
+            response = requests.get(f"{self.service_url}/health", timeout=timeout or TTS_HEALTH_TIMEOUT_S)
+        except requests.ConnectionError as exc:  # ConnectTimeout is one as well
+            return connection_reachability(exc), None
+        except OSError:  # no answer in time after connecting (ReadTimeout), or any other request error
+            return "answering", None
+        if not response.ok:
+            return "answering", None
+        if not response.headers.get("content-type", "").startswith("application/json"):
+            return "answering", {}
+        try:
             data: dict[str, Any] = response.json()
-            return data
-        except (OSError, ValueError):
-            return None
+        except ValueError:
+            return "answering", None
+        return "answering", data
 
     def _model_ready(self, health: dict[str, Any]) -> bool:
         """Whether a health answer means "model loaded, can synthesise"."""

@@ -6,6 +6,7 @@ Values marked "source" carry the value AIfred Intelligence has used so far
 
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 
@@ -43,6 +44,10 @@ TTS_READ_TIMEOUT_S = 600
 #: Health query of a container; the escalation asks every entry with it before it speaks.
 #: Source: ``TTS_HEALTH_TIMEOUT_S``.
 TTS_HEALTH_TIMEOUT_S = 0.5
+
+#: Socket errors of a connect attempt that mean "no route to that host" (as opposed to a refusal, which
+#: means the host is up and nothing listens). A connect timeout and an unresolvable name say the same.
+HOST_UNREACHABLE_ERRNOS = frozenset({errno.EHOSTUNREACH, errno.ENETUNREACH})
 
 #: Heartbeat of ``/keep_alive`` against the container's idle timer, and the timeout of one such ping
 #: (the endpoint only resets a timer). Source: ``TTS_KEEPALIVE_INTERVAL_SECONDS`` / ``TTS_KEEPALIVE_HTTP_TIMEOUT``.

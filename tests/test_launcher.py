@@ -162,6 +162,31 @@ def test_a_remote_container_that_never_serves_is_a_skip_after_the_startup_time(t
     assert skip == Skip("stopped", "not ready on Aragon within 0 s")
 
 
+def test_an_unreachable_host_is_a_skip_at_once_without_an_ssh_attempt(tmp_path: Path) -> None:
+    engine = ContainerEngine("q", remote=True)
+    engine.reach = "unreachable"
+    ssh = FakeSsh()
+    launcher = _launcher(tmp_path, ssh=ssh)
+    skip = run_async(launcher.ensure_serving(remote_entry(engine), wait=True))
+    assert skip == Skip("stopped", "host Aragon unreachable") and ssh.commands == []
+    assert launcher.start_failure(remote_entry(engine)) is None  # transient: the next request asks the host again
+    assert run_async(launcher.status(remote_entry(engine))) == "unreachable"
+
+
+def test_a_reachable_host_with_the_container_off_is_stopped_and_started_over_ssh(tmp_path: Path) -> None:
+    engine = ContainerEngine("q", remote=True)  # up = False: the host refuses the connection
+    ssh = FakeSsh(then=lambda *command: setattr(engine, "up", True))
+    launcher = _launcher(tmp_path, ssh=ssh)
+
+    async def scenario() -> None:
+        assert engine.reachability() == "refused" and await launcher.status(remote_entry(engine)) == "stopped"
+        assert await launcher.ensure_serving(remote_entry(engine), wait=True) is None
+        assert await launcher.status(remote_entry(engine)) == "running"
+
+    run_async(scenario())
+    assert ssh.commands == [("Aragon", "start", "q")]
+
+
 # ── Entries without a container ─────────────────────────────────────
 
 
