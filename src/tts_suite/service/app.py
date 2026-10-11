@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from ..api import SpeakRequest, SuiteError, TTSSuite
 from .auth import Access
 from .config_store import ConfigStore
-from .errors import ServiceError, bad_request
+from .errors import ServiceError, bad_request, text_too_long
 from .frames import FRAMES_MEDIA_TYPE, audio_frame, error_frame, summary_frame
 from .wire import (
     config_from_json,
@@ -61,7 +61,7 @@ async def _json_body(request: Request) -> dict[str, Any]:
     return body
 
 
-def create_app(suite: TTSSuite, access: Access, store: ConfigStore) -> FastAPI:
+def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_chars: int) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
@@ -142,6 +142,8 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore) -> FastAPI:
         text = body.pop("text", None)
         if not isinstance(text, str):
             raise bad_request("`text` is missing or no text")
+        if len(text) > max_text_chars:
+            raise text_too_long(max_text_chars)
         stream = suite.speak(text, _head(body))
         segments = stream.segments()
         # Nothing is promised before the first piece exists: a reading that cannot start ends
@@ -175,7 +177,7 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore) -> FastAPI:
             return
         await socket.accept()
         try:
-            await _serve_stream(socket, suite)
+            await _serve_stream(socket, suite, max_text_chars)
         except WebSocketDisconnect:
             log.info("the client of a stream left")
 
@@ -187,7 +189,7 @@ async def _refuse(socket: WebSocket, body: dict[str, Any]) -> None:
     await socket.close()
 
 
-async def _serve_stream(socket: WebSocket, suite: TTSSuite) -> None:
+async def _serve_stream(socket: WebSocket, suite: TTSSuite, max_text_chars: int) -> None:
     """One reading over the WebSocket: the client sends its head (`{"type": "start", ...}`), then
     pieces of text and the end; the frames go back as they exist."""
     try:
@@ -214,10 +216,14 @@ async def _serve_stream(socket: WebSocket, suite: TTSSuite) -> None:
             await socket.send_bytes(error_frame(error_answer(error)[1]))
 
     async def take_text() -> None:
+        taken = 0
         while True:
             message = json.loads(await socket.receive_text())
             kind = message.get("type") if isinstance(message, dict) else None
             if kind == "text" and isinstance(message.get("text"), str):
+                taken += len(message["text"])
+                if taken > max_text_chars:
+                    raise text_too_long(max_text_chars)
                 await stream.feed(message["text"])
             elif kind == "finish":
                 await stream.finish()

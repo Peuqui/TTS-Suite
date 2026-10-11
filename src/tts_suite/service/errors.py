@@ -20,3 +20,7 @@ class ServiceError(Exception):
 
 def bad_request(detail: str) -> ServiceError:
     return ServiceError(400, "bad_request", detail)
+
+
+def text_too_long(limit: int) -> ServiceError:
+    return ServiceError(413, "text_too_long", f"a reading takes at most {limit} characters")

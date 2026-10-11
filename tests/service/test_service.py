@@ -30,10 +30,13 @@ TOKEN = "secret-token"
 BEARER = {"Authorization": f"Bearer {TOKEN}"}
 
 
+MAX_TEXT_CHARS = 100
+
+
 def build(tmp_path: Path, token_for_everything: bool = False) -> tuple[TestClient, FakeSuite, ConfigStore]:
     suite = FakeSuite(default_config(tmp_path))
     store = ConfigStore(tmp_path / "state" / "config.json")
-    app = create_app(suite, Access(token=TOKEN, token_for_everything=token_for_everything), store)
+    app = create_app(suite, Access(token=TOKEN, token_for_everything=token_for_everything), store, MAX_TEXT_CHARS)
     return TestClient(app), suite, store
 
 
@@ -85,7 +88,9 @@ def test_the_commands_work_with_the_token(tmp_path: Path) -> None:
 
 def test_without_a_token_configured_the_commands_stay_locked(tmp_path: Path) -> None:
     suite = FakeSuite(default_config(tmp_path))
-    app = create_app(suite, Access(token=None, token_for_everything=False), ConfigStore(tmp_path / "c.json"))
+    app = create_app(
+        suite, Access(token=None, token_for_everything=False), ConfigStore(tmp_path / "c.json"), MAX_TEXT_CHARS
+    )
     refused = TestClient(app).post("/engines/reload")
     assert refused.status_code == 401 and "none is configured" in refused.json()["detail"]
 
@@ -294,7 +299,9 @@ def test_a_stream_on_a_network_needs_the_token(tmp_path: Path) -> None:
 
 def test_the_suite_is_closed_when_the_service_ends(tmp_path: Path) -> None:
     suite = FakeSuite(default_config(tmp_path))
-    app = create_app(suite, Access(token=TOKEN, token_for_everything=False), ConfigStore(tmp_path / "c.json"))
+    app = create_app(
+        suite, Access(token=TOKEN, token_for_everything=False), ConfigStore(tmp_path / "c.json"), MAX_TEXT_CHARS
+    )
     with TestClient(app):
         assert not suite.closed
     assert suite.closed
@@ -323,3 +330,29 @@ def test_the_token_is_made_once_for_the_user_alone(tmp_path: Path) -> None:
     assert len(token) >= 40 and read_token(path) == token
     assert path.stat().st_mode & 0o777 == 0o600
     assert create_token(path) == token
+
+
+def test_a_text_beyond_the_limit_is_refused_before_anything_is_made(tmp_path: Path) -> None:
+    client, suite, _ = build(tmp_path)
+    answer = client.post("/speak", json={"text": "x" * (MAX_TEXT_CHARS + 1), "language": "en"})
+    assert (answer.status_code, answer.json()["error"]) == (413, "text_too_long")
+    assert suite.requests == []
+    assert client.post("/speak", json={"text": "x" * MAX_TEXT_CHARS, "language": "en"}).status_code == 200
+
+
+def test_the_text_of_a_stream_counts_over_all_its_pieces(tmp_path: Path) -> None:
+    client, suite, _ = build(tmp_path)
+    suite.stream = FakeStream([audio()])
+    with client.websocket_connect("/speak/stream") as socket:
+        socket.send_text(json.dumps({"type": "start", "language": "en"}))
+        for _ in range(3):
+            socket.send_text(json.dumps({"type": "text", "text": "y" * 40}))
+        kinds = []
+        while True:
+            try:
+                header, body = decode_frames(socket.receive_bytes())[0]
+            except WebSocketDisconnect:
+                break
+            kinds.append((header["kind"], json.loads(body)["error"] if header["kind"] == "error" else None))
+    assert ("error", "text_too_long") in kinds
+    assert suite.stream.closed

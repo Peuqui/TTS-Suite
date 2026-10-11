@@ -18,6 +18,8 @@ from .config_store import ConfigStore
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5090
+# The most text one reading takes; the cleaning of the text grows with its length.
+DEFAULT_MAX_TEXT_CHARS = 50_000
 CONFIG_FILE_NAME = "config.json"
 TOKEN_FILE_NAME = "token"
 
@@ -36,6 +38,7 @@ def parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=DEFAULT_PORT)
     serve.add_argument("--config", type=Path, default=config_dir() / CONFIG_FILE_NAME)
     serve.add_argument("--token-file", type=Path, default=config_dir() / TOKEN_FILE_NAME)
+    serve.add_argument("--max-text-chars", type=int, default=DEFAULT_MAX_TEXT_CHARS)
     serve.add_argument("--voices-dir", type=Path, help="the shared voices folder, for the first start")
     token = commands.add_parser("token", help="make the token file if there is none")
     token.add_argument("--token-file", type=Path, default=config_dir() / TOKEN_FILE_NAME)
@@ -56,7 +59,11 @@ def serve(arguments: argparse.Namespace) -> None:
     except ValueError as error:
         sys.exit(str(error))
     store.save(config)
-    uvicorn.run(create_app(create_suite(config), access, store), host=arguments.host, port=arguments.port)
+    uvicorn.run(
+        create_app(create_suite(config), access, store, arguments.max_text_chars),
+        host=arguments.host,
+        port=arguments.port,
+    )
 
 
 def main() -> None:
