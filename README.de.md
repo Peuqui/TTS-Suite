@@ -46,7 +46,9 @@ Datei.
 Als Dienst deines Benutzers: `deploy/install.sh` legt eine venv an (mit dem Code dieses Klons, editierbar: die
 Compose-Dateien der Engines liegen hier), verlinkt `tts-suite` nach `~/.local/bin` und installiert
 `tts-suite.service`. Einmal `tts-suite serve --voices-dir <Ordner>` starten, damit die Konfiguration entsteht,
-dann beenden und `systemctl --user enable --now tts-suite`.
+dann beenden und `systemctl --user enable --now tts-suite`. Wo andere Programme (eine Dienst-Seite, AIfred) den
+Dienst starten und stoppen sollen, läuft er stattdessen als System-Unit `tts-suite@<Benutzer>`:
+`sudo deploy/switch-to-system-unit.sh` (beendet zuerst die Benutzer-Unit; beide nutzen Port 5090).
 
 Die Seite des Dienstes, `http://127.0.0.1:5090/ui/`, zeigt den Katalog (Zustand, Starten und Stoppen jeder Engine
 auf jedem Rechner), bearbeitet die Konfiguration, listet die Stimmen (mit dem Abgleich einer Cloud-Engine) und
