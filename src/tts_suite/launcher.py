@@ -1,4 +1,4 @@
-"""The launcher: brings the containers of the escalation list up and down.
+"""The launcher: brings the containers of the entries up and down.
 
 Ported from AIfred Intelligence (``tts_escalation``): a local GPU engine starts on the card the
 rules choose (one local GPU start at a time), an engine on another host starts over SSH, an engine

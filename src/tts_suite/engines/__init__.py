@@ -22,8 +22,6 @@ from .base import (
 )
 from .registry import (
     TTS_ENGINES,
-    default_escalation,
-    engine_unit,
     get_engine,
     gpu_engine_keys,
     gpu_engines,
@@ -32,7 +30,6 @@ from .registry import (
     parse_speed_factor,
     reload_engines,
     require_engine,
-    speech_unit,
     voice_names,
 )
 
@@ -42,8 +39,6 @@ __all__ = [
     "TTSEngine",
     "TTSFailure",
     "TTS_ENGINES",
-    "default_escalation",
-    "engine_unit",
     "get_engine",
     "gpu_engine_keys",
     "gpu_engines",
@@ -53,7 +48,6 @@ __all__ = [
     "reload_engines",
     "require_engine",
     "shared_voice_names",
-    "speech_unit",
     "validate_audio",
     "voice_names",
 ]

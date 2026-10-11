@@ -2,17 +2,21 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 import pytest
 from speech_fakes import (
     FakeEngine,
     FakeLauncher,
     GatedFailEngine,
+    collect,
     entry,
     frames_for,
+    lengths,
     make_run,
+    request,
     run_async,
+    SENTENCES,
+    TEXT,
     wav_info,
 )
 
@@ -20,30 +24,15 @@ from tts_suite.api import (
     AudioSegment,
     EngineDefaults,
     EngineStarting,
-    EntryConfig,
     Host,
     NoEngineAvailable,
     Overloaded,
     SpeakRequest,
-    SuiteConfig,
-    UnknownEngine,
-    UnsupportedLanguage,
 )
 from tts_suite.constants import MEDIA_TYPE_MP3, MEDIA_TYPE_OGG, MEDIA_TYPE_WAV
-from tts_suite.speaker import Speaker
 from tts_suite.stream import Stream
 
-REQUEST = SpeakRequest(language="de")
-SENTENCES = ["Der erste Satz kommt hier.", "Danach folgt der zweite Satz noch.", "Zuletzt kommt noch ein dritter Satz hier."]
-TEXT = " ".join(SENTENCES)
-
-
-async def collect(stream: Stream) -> list[AudioSegment]:
-    return [segment async for segment in stream.segments()]
-
-
-def lengths(segments: list[AudioSegment]) -> list[int]:
-    return [wav_info(segment.audio)[0] for segment in segments]
+REQUEST = request("a")
 
 
 def test_a_text_is_spoken_sentence_by_sentence_in_order() -> None:
@@ -252,25 +241,27 @@ def test_there_is_no_silence_before_the_first_segment() -> None:
 
 
 def test_an_error_before_the_first_segment_comes_from_the_first_step() -> None:
+    browser = FakeEngine("a")
+    browser.renders_in_browser = True
     cases = [
-        (make_run([entry(FakeEngine("a"), enabled=False)]), SpeakRequest(language="de"), NoEngineAvailable),
-        (make_run([entry(FakeEngine("a"))], FakeLauncher({"a": None})), SpeakRequest(language="de", wait=False), EngineStarting),
+        (make_run([entry(browser)]), REQUEST, NoEngineAvailable),
+        (make_run([entry(FakeEngine("a"))], FakeLauncher({"a": None})), request("a", wait=False), EngineStarting),
         (make_run([entry(FakeEngine("a"))], defaults={"a": EngineDefaults(max_parallel=1, max_queue=0)}), REQUEST, Overloaded),
     ]
-    for run, request, expected in cases:
-        async def scenario(run=run, request=request, expected=expected) -> None:
+    for run, head, expected in cases:
+        async def scenario(run=run, head=head, expected=expected) -> None:
             if expected is Overloaded:
                 run_slots = run._slots.for_engine(run._entries[0].engine)  # type: ignore[attr-defined]
                 async with run_slots.slot():
-                    await _expect_first_step_error(run, request, expected)
+                    await _expect_first_step_error(run, head, expected)
             else:
-                await _expect_first_step_error(run, request, expected)
+                await _expect_first_step_error(run, head, expected)
 
         run_async(scenario())
 
 
-async def _expect_first_step_error(run: object, request: SpeakRequest, expected: type[Exception]) -> None:
-    stream = Stream(request, run)  # type: ignore[arg-type]
+async def _expect_first_step_error(run: object, head: SpeakRequest, expected: type[Exception]) -> None:
+    stream = Stream(head, run)  # type: ignore[arg-type]
     await stream.feed(TEXT)
     await stream.finish()
     segments = stream.segments()
@@ -319,7 +310,7 @@ def test_a_failure_in_mid_text_is_announced_in_a_segment_of_its_own_in_front_of_
 
 def test_the_announcement_names_a_remote_successor_and_speaks_the_language_of_the_request() -> None:
     first, second = FakeEngine("a", fail="engine", fail_after=1), FakeEngine("b", remote=True)
-    stream = Stream(SpeakRequest(language="en"), make_run([entry(first), entry(second, Host("Aragon", "192.0.2.2"))]))
+    stream = Stream(request("a", "b", language="en"), make_run([entry(first), entry(second, Host("Aragon", "192.0.2.2"))]))
 
     async def scenario() -> None:
         await stream.feed("One sentence here. Another sentence here.")
@@ -468,233 +459,6 @@ def test_aclose_after_a_normal_end_does_nothing() -> None:
     run_async(scenario())
 
 
-# ── The speaker (run table, named engine, speak) ────────────────────
-
-
-def test_speak_hands_over_the_whole_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    engine = FakeEngine("fake")
-    _install(monkeypatch, engine)
-    speaker = Speaker(_config(tmp_path, ["fake"]), FakeLauncher())
-
-    async def scenario() -> list[AudioSegment]:
-        return await collect(speaker.speak(TEXT, REQUEST))
-
-    assert lengths(run_async(scenario())) == [frames_for(s) for s in SENTENCES]
-
-
-def test_the_state_of_a_run_is_kept_for_the_next_call_with_the_same_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    broken, healthy = FakeEngine("brokenfake", fail="engine"), FakeEngine("healthyfake")
-    _install(monkeypatch, broken, healthy)
-    now = [0.0]
-    speaker = Speaker(_config(tmp_path, ["brokenfake", "healthyfake"]), FakeLauncher(), clock=lambda: now[0])
-    named = SpeakRequest(language="de", run="reading-1")
-
-    async def scenario() -> None:
-        await collect(speaker.speak(SENTENCES[0], named))
-        broken.fail = None                              # healthy again, but the run remembers
-        await collect(speaker.speak(SENTENCES[1], named))
-        await collect(speaker.speak(SENTENCES[2], SpeakRequest(language="de", run="reading-2")))
-        now[0] = 601                                    # reading-1 is forgotten
-        await collect(speaker.speak(SENTENCES[0], named))
-
-    run_async(scenario())
-    assert len(broken.texts) == 3 and len(healthy.texts) == 2  # tries: first call, reading-2, after the expiry
-
-
-def test_a_new_configuration_does_not_double_the_capacity_of_an_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    engine = FakeEngine("slowfake")
-    engine.max_parallel_requests = 1
-    engine.gates = {"Satz": asyncio.Event()}
-    _install(monkeypatch, engine)
-    config = _config(tmp_path, ["slowfake"])
-    speaker = Speaker(config, FakeLauncher())
-
-    async def scenario() -> None:
-        first = asyncio.create_task(collect(speaker.speak("Der erste Satz hier.", REQUEST)))
-        await asyncio.sleep(0.02)
-        speaker.set_config(config)                       # a reload, a changed voice ...
-        second = asyncio.create_task(collect(speaker.speak("Der zweite Satz hier.", REQUEST)))
-        await asyncio.sleep(0.02)
-        engine.gates["Satz"].set()
-        await asyncio.gather(first, second)
-
-    run_async(scenario())
-    assert engine.peak == 1
-
-
-def test_a_code_block_that_opens_in_one_call_and_closes_in_the_next_of_the_same_run_does_not_swallow_the_rest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    engine = FakeEngine("fake")
-    _install(monkeypatch, engine)
-    speaker = Speaker(_config(tmp_path, ["fake"]), FakeLauncher())
-    named = SpeakRequest(language="de", run="reading-1")
-
-    async def scenario() -> None:
-        await collect(speaker.speak("Hier kommt ein Beispiel für dich:\n\n```python\nprint(x)\n", named))
-        await collect(speaker.speak("```\n\nDanach geht es wirklich weiter. Und noch ein ganz normaler Satz.", named))
-
-    run_async(scenario())
-    # (the second call starts with a lone fence, so its cutter sees an unclosed block and keeps the rest as one unit)
-    assert engine.texts[-1] == "Danach geht es wirklich weiter. Und noch ein ganz normaler Satz."
-
-
-def test_a_named_engine_speaks_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    first, second = FakeEngine("onefake", fail="engine"), FakeEngine("twofake")
-    _install(monkeypatch, first, second)
-    speaker = Speaker(_config(tmp_path, ["onefake", "twofake"]), FakeLauncher())
-
-    async def scenario() -> None:
-        pinned = speaker.speak(SENTENCES[0], SpeakRequest(language="de", engines=("onefake",)))
-        with pytest.raises(NoEngineAvailable):
-            await collect(pinned)
-        assert second.texts == []                       # the escalation is skipped
-        assert lengths(await collect(speaker.speak(SENTENCES[0], SpeakRequest(language="de", engines=("twofake",))))) == [
-            frames_for(SENTENCES[0]),
-        ]
-        with pytest.raises(UnknownEngine):
-            speaker.speak("x", SpeakRequest(language="de", engines=("nope",)))
-
-    run_async(scenario())
-
-
-def test_a_named_engine_outside_the_list_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _install(monkeypatch, FakeEngine("onefake"), FakeEngine("twofake"))
-    speaker = Speaker(_config(tmp_path, ["onefake"]), FakeLauncher())
-    with pytest.raises(NoEngineAvailable, match="not in the escalation list"):
-        speaker.open_stream(SpeakRequest(language="de", engines=("twofake",)))
-
-
-def test_the_engines_of_a_request_set_the_order_and_leave_the_others_unchecked(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    one, two, three = FakeEngine("onefake"), FakeEngine("twofake"), FakeEngine("threefake")
-    _install(monkeypatch, one, two, three)
-    launcher = FakeLauncher()
-    speaker = Speaker(_config(tmp_path, ["onefake", "twofake", "threefake"]), launcher)
-
-    async def scenario() -> list[AudioSegment]:
-        return await collect(speaker.speak(SENTENCES[0], SpeakRequest(language="de", engines=("threefake", "twofake"))))
-
-    segments = run_async(scenario())
-    assert [segment.engine for segment in segments] == ["threefake"]  # the request's order beats the list's
-    assert launcher.asked == ["threefake"]                             # onefake and twofake: not even checked
-    assert one.texts == [] and two.texts == []
-
-
-def test_a_request_goes_on_to_the_next_named_engine_but_never_to_an_unnamed_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    broken, other, spare = FakeEngine("brokenfake", fail="engine"), FakeEngine("otherfake"), FakeEngine("sparefake")
-    _install(monkeypatch, broken, other, spare)
-    speaker = Speaker(_config(tmp_path, ["sparefake", "otherfake", "brokenfake"]), FakeLauncher())
-
-    async def scenario() -> list[AudioSegment]:
-        return await collect(speaker.speak(SENTENCES[0], SpeakRequest(language="de", engines=("brokenfake", "otherfake"))))
-
-    assert {segment.engine for segment in run_async(scenario()) if segment.audio} >= {"otherfake"}
-    assert spare.texts == []
-
-
-def test_entries_of_one_engine_keep_the_order_of_the_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from container_fakes import ARAGON, ContainerEngine
-
-    one, two = ContainerEngine("onefake"), FakeEngine("twofake")
-    _install(monkeypatch, one, two)
-    config = SuiteConfig(
-        voices_dir=tmp_path, hosts=(ARAGON,),
-        entries=(EntryConfig("onefake", ARAGON.name), EntryConfig("twofake"), EntryConfig("onefake")),
-    )
-    monkeypatch.setattr(ContainerEngine, "at_host", lambda self, address, port=None: self)
-    speaker = Speaker(config, FakeLauncher())
-    request = SpeakRequest(language="de", engines=("twofake", "onefake", "twofake"))  # a repeat changes nothing
-    assert [entry.label for entry in speaker._entries_for(request)] == ["twofake", f"onefake@{ARAGON.name}", "onefake"]
-
-
-def test_an_engine_key_that_is_unknown_or_not_in_the_list_is_refused_at_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install(monkeypatch, FakeEngine("onefake"), FakeEngine("twofake"))
-    launcher = FakeLauncher({"onefake": None})
-    speaker = Speaker(_config(tmp_path, ["onefake"]), launcher)
-    with pytest.raises(UnknownEngine):
-        speaker.open_stream(SpeakRequest(language="de", engines=("onefake", "nope")))
-    with pytest.raises(NoEngineAvailable):
-        speaker.open_stream(SpeakRequest(language="de", engines=("onefake", "twofake")))
-    assert launcher.asked == [] and launcher.starts == []
-
-
-def test_runs_with_the_same_id_but_other_engines_are_separate_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    broken, healthy = FakeEngine("brokenfake", fail="engine"), FakeEngine("healthyfake")
-    _install(monkeypatch, broken, healthy)
-    speaker = Speaker(_config(tmp_path, ["brokenfake", "healthyfake"]), FakeLauncher())
-
-    async def scenario() -> None:
-        both = SpeakRequest(language="de", run="r-1", engines=("brokenfake", "healthyfake"))
-        await collect(speaker.speak(SENTENCES[0], both))          # brokenfake fails inside this run
-        broken.fail = None
-        await collect(speaker.speak(SENTENCES[1], both))          # same run: still remembers the failure
-        assert len(broken.texts) == 1
-        await collect(speaker.speak(SENTENCES[2], SpeakRequest(language="de", run="r-1", engines=("brokenfake",))))
-        assert len(broken.texts) == 2                             # other engines: a run of its own, tries again
-
-    run_async(scenario())
-
-
-def test_a_broken_configuration_leaves_the_old_one_in_place(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _install(monkeypatch, FakeEngine("onefake"))
-    speaker = Speaker(_config(tmp_path, ["onefake"]), FakeLauncher())
-    from tts_suite.api import ConfigInvalid
-
-    with pytest.raises(ConfigInvalid):
-        speaker.set_config(_config(tmp_path, ["nope"]))
-    assert len(run_async(_collect_text(speaker))) == 3
-
-
-async def _collect_text(speaker: Speaker) -> list[AudioSegment]:
-    return await collect(speaker.speak(TEXT, REQUEST))
-
-
-@pytest.mark.parametrize("language", ["fr", "", "DE"])
-def test_a_language_without_suite_texts_is_refused_at_once_and_nothing_is_started(
-    language: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    engine = FakeEngine("fake")
-    _install(monkeypatch, engine)
-    launcher = FakeLauncher({"fake": None})  # down: a reading would start it
-    speaker = Speaker(_config(tmp_path, ["fake"]), launcher)
-    request = SpeakRequest(language=language)
-    with pytest.raises(UnsupportedLanguage):
-        speaker.open_stream(request)
-    with pytest.raises(UnsupportedLanguage):
-        speaker.speak("Ein Satz kommt hier.", request)
-    assert launcher.asked == [] and launcher.starts == [] and engine.texts == []
-
-
-@pytest.mark.parametrize("language", ["de", "en"])
-def test_the_languages_of_the_suite_texts_are_spoken(
-    language: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install(monkeypatch, FakeEngine("fake"))
-    speaker = Speaker(_config(tmp_path, ["fake"]), FakeLauncher())
-    async def scenario() -> list[AudioSegment]:
-        return await collect(speaker.speak("Ein Satz kommt hier.", SpeakRequest(language=language)))
-
-    assert len(run_async(scenario())) == 1
-
-
-def _config(tmp_path: Path, keys: list[str]) -> SuiteConfig:
-    return SuiteConfig(voices_dir=tmp_path, entries=tuple(EntryConfig(key) for key in keys))
-
-
-def _install(monkeypatch: pytest.MonkeyPatch, *engines: FakeEngine) -> None:
-    """Put fake engines into the registry for the test (the binding looks engines up there)."""
-    from tts_suite.engines import registry
-
-    for engine in engines:
-        monkeypatch.setitem(registry.TTS_ENGINES, engine.key, engine)
-
-
 # ── Text cleaning in the stream ─────────────────────────────────────
 
 
@@ -717,19 +481,6 @@ def test_units_are_cleaned_before_the_engine_and_empty_ones_drop_out_in_order() 
         "Alfred sagt hier etwas Wichtiges.", "Hier steht Code.", "Danach folgt noch ein langer Satz hier.", "Zum Schluss kommt noch einer.",
     ]
     assert lengths(segments) == [frames_for(spoken) for spoken in engine.texts]
-
-
-def test_the_speaker_hands_its_pronunciations_to_the_stream(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    engine = FakeEngine("fake")
-    _install(monkeypatch, engine)
-    config = SuiteConfig(voices_dir=tmp_path, entries=(EntryConfig("fake"),), pronunciations={"AIfred": "Alfred"})
-    speaker = Speaker(config, FakeLauncher())
-
-    async def scenario() -> list[AudioSegment]:
-        return await collect(speaker.speak("AIfred spricht hier einen vollständigen Satz.", REQUEST))
-
-    run_async(scenario())
-    assert engine.texts == ["Alfred spricht hier einen vollständigen Satz."]
 
 
 def test_a_reading_of_only_unspeakable_text_ends_without_audio() -> None:

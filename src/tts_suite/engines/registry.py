@@ -17,10 +17,10 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
-from typing import Iterator, Mapping, Protocol
+from typing import Iterator, Protocol
 
-from ..api import EngineDefaults, EntryConfig, Unit, UnknownEngine
-from .base import SPEECH_UNITS, TTSEngine
+from ..api import UnknownEngine
+from .base import TTSEngine
 
 ENGINES_DIR = Path(__file__).parent
 #: Engine folders moved here are not loaded.
@@ -97,13 +97,6 @@ def require_engine(key: str) -> TTSEngine:
     return engine
 
 
-def default_escalation() -> tuple[EntryConfig, ...]:
-    """Escalation list of a fresh install: the engines with
-    ``in_default_escalation``, in ``display_order`` (the browser, which speaks
-    last, has the highest)."""
-    return tuple(EntryConfig(engine=e.key) for e in TTS_ENGINES.values() if e.in_default_escalation)
-
-
 def gpu_engine_keys() -> set[str]:
     """Keys of the engines that occupy GPU VRAM (container engines on a card)."""
     return {e.key for e in gpu_engines()}
@@ -118,21 +111,6 @@ def installed_gpu_engines() -> list[TTSEngine]:
     """GPU engines whose Docker image is built on this host — i.e.
     engines that can actually be started right now."""
     return [e for e in gpu_engines() if e.is_installed()]
-
-
-def engine_unit(engine: TTSEngine, defaults: Mapping[str, EngineDefaults]) -> Unit:
-    """Unit of speech of an engine instance: the configured choice (``EngineDefaults.unit``) or the
-    engine's default. Pure function of the configuration; applies to every client alike."""
-    configured = defaults[engine.key].unit if engine.key in defaults else None
-    unit = configured or engine.default_speech_unit
-    if unit not in SPEECH_UNITS:
-        raise ValueError(f"speech unit of {engine.key!r} must be one of {SPEECH_UNITS}, got {unit!r}")
-    return unit
-
-
-def speech_unit(engine_key: str, defaults: Mapping[str, EngineDefaults]) -> Unit:
-    """:func:`engine_unit` for a registered engine named by its key."""
-    return engine_unit(require_engine(engine_key), defaults)
 
 
 class VoiceCatalog(Protocol):

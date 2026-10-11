@@ -7,9 +7,10 @@ import wave
 from concurrent.futures import Executor, ThreadPoolExecutor
 from typing import Any, Coroutine, TypeVar
 
-from tts_suite.api import EngineDefaults, EngineStarting, Unit
+from tts_suite.api import AudioSegment, EngineDefaults, EngineRef, EngineStarting, SpeakRequest, Unit
 from tts_suite.engines.base import TTSEngine, TTSFailure
 from tts_suite.escalation import EngineSlotTable, EscalationEntry, Skip, SpeechRun
+from tts_suite.stream import Stream
 
 SAMPLE_RATE = 24000
 FRAMES_PER_CHARACTER = 10
@@ -44,6 +45,19 @@ def wav_info(audio: bytes) -> tuple[int, int]:
 
 def frames_for(text: str) -> int:
     return len(text) * FRAMES_PER_CHARACTER
+
+
+SENTENCES = ["Der erste Satz kommt hier.", "Danach folgt der zweite Satz noch.", "Zuletzt kommt noch ein dritter Satz hier."]
+TEXT = " ".join(SENTENCES)
+
+
+async def collect(stream: Stream) -> list[AudioSegment]:
+    return [segment async for segment in stream.segments()]
+
+
+def lengths(segments: list[AudioSegment]) -> list[int]:
+    """The frame counts of the segments — the identity of what was spoken (``frames_for``)."""
+    return [wav_info(segment.audio)[0] for segment in segments]
 
 
 class FakeEngine(TTSEngine):
@@ -151,8 +165,19 @@ class FakeLauncher:
         self.held.remove(entry.label)
 
 
-def entry(engine: TTSEngine, host: Any = None, enabled: bool = True) -> EscalationEntry:
-    return EscalationEntry(engine, host, enabled)
+def entry(engine: TTSEngine, host: Any = None, unit: Unit | None = None) -> EscalationEntry:
+    """An entry of a request's list; the unit is the engine's own unless the test says otherwise."""
+    return EscalationEntry(engine, host, unit or engine.default_speech_unit)
+
+
+def refs(*keys: str, unit: Unit = "sentence", host: str | None = None) -> tuple[EngineRef, ...]:
+    """The list of a request: these engines, in this order, all with the same unit and host."""
+    return tuple(EngineRef(key, unit, host) for key in keys)
+
+
+def request(*keys: str, language: str = "de", **kwargs: Any) -> SpeakRequest:
+    """A request whose list names these engines (all by sentence, on this machine)."""
+    return SpeakRequest(language=language, engines=refs(*keys), **kwargs)
 
 
 def make_run(

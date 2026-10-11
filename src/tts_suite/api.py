@@ -54,19 +54,9 @@ class VoiceSettings:
 
 
 @dataclass(frozen=True)
-class EntryConfig:
-    """One entry of the escalation list (order = speaking order)."""
-
-    engine: str
-    host: str | None = None  # name of a Host; None = this machine
-    enabled: bool = True
-
-
-@dataclass(frozen=True)
 class EngineDefaults:
-    """Per-engine defaults the list does not carry."""
+    """Per-engine defaults the request's list does not carry (the unit is the request's, per entry)."""
 
-    unit: Unit | None = None  # None = the engine's own default
     voice: VoiceSettings = field(default_factory=VoiceSettings)
     vram_budget_mib: int | None = None  # GPU engines: VRAM the engine may use (card choice + cap in the container)
     max_parallel: int | None = None  # requests running at once; None = the engine's own default
@@ -94,7 +84,9 @@ class SuiteConfig:
     the environment or in files only the user can read).
 
     GPU placement is a rule set, not a callback: the suite owns the cards' use for all
-    programs that talk to it. An engine starts on the first card of ``gpus`` whose free
+    programs that talk to it. The suite offers every engine it knows (the catalog,
+    :meth:`TTSSuite.engines`); it keeps NO escalation list: each request brings its own, so no
+    program owns a list the others share. An engine starts on the first card of ``gpus`` whose free
     VRAM (``nvidia-smi``) minus ``reserve_mib`` covers the engine's ``vram_budget_mib``
     plus ``headroom_mib``. The container gets the budget itself as its cap; the headroom
     only keeps a card from being filled to the last MiB. The cap counts PyTorch memory only,
@@ -109,8 +101,7 @@ class SuiteConfig:
     """
 
     voices_dir: Path
-    entries: tuple[EntryConfig, ...] = ()
-    hosts: tuple[Host, ...] = ()  # optional other machines; empty = this machine only
+    hosts: tuple[Host, ...] = ()  # optional other machines (SSH keys are the service's); empty = this machine only
     engines: Mapping[str, EngineDefaults] = field(default_factory=dict)
     gpus: tuple[GpuRule, ...] = ()
     headroom_mib: int = HEADROOM_MIB_DEFAULT
@@ -122,17 +113,16 @@ class SuiteConfig:
 
 @dataclass(frozen=True)
 class EngineInfo:
-    """One entry of ``GET /engines``."""
+    """One row of the catalog, ``GET /engines``: an engine on this machine (``host`` None) or, for an
+    engine with a REST API, on one of the configured hosts. Not a list the suite speaks by: the
+    request says which of these rows it uses, in which order and by which unit."""
 
     engine: str
     host: str | None
     label: Mapping[str, str]  # language → name for a user interface
     label_short: Mapping[str, str]
-    enabled: bool
-    deactivated: bool  # its folder sits in ``disabled/``
     status: EntryStatus
-    unit: Unit  # the user's choice
-    unit_default: Unit  # what the engine says
+    unit_default: Unit  # what the engine recommends as the unit of an entry
     needs_gpu: bool
     cloud: bool
     browser: bool  # stands for the client's own voice; the suite always skips it
@@ -161,18 +151,30 @@ class TraceStep:
 
 
 @dataclass(frozen=True)
+class EngineRef:
+    """One entry of the list a request brings. Nothing is optional: ``host=None`` is the explicit
+    value "this machine"."""
+
+    engine: str
+    unit: Unit  # how much text this entry takes at once; the text is cut by the unit of the entry that speaks
+    host: str | None  # name of a configured Host; None = this machine
+
+
+@dataclass(frozen=True)
 class SpeakRequest:
     """Header of one reading; the text itself is given whole to :meth:`TTSSuite.speak`
     or in pieces to the stream from :meth:`TTSSuite.open_stream`."""
 
     language: str  # must be one the suite has texts in, else ``UnsupportedLanguage`` at ``speak`` / ``open_stream``
+    # The list of THIS request, in escalation order: the first entry that can speak speaks. The suite
+    # keeps no list of its own and no program shares one with another (list per request, no shared
+    # list). Empty, a repeated engine@host, an unknown engine or host, or an engine without REST API on
+    # a host is refused at once (``InvalidRequest``, ``UnknownEngine``, ``UnknownHost``). Not to be
+    # confused with ``SuiteConfig.engines`` (defaults per engine).
+    engines: tuple[EngineRef, ...]
     voice: str | None = None  # default voice (valid for the container engines)
     speed: float | None = None
     pitch: float | None = None
-    # Engine keys the reading may use, in the order given (the escalation order of this request): only
-    # the entries of the configured list with these engines are tried, all others are neither checked nor
-    # started. Empty = the whole list. Not to be confused with ``SuiteConfig.engines`` (defaults per engine).
-    engines: tuple[str, ...] = ()
     voices: Mapping[str, VoiceSettings] = field(default_factory=dict)  # per engine key
     run: str | None = None  # client-made ID of one reading; state is kept ~10 min
     wait: bool = True  # False: ``EngineStarting`` instead of waiting for a cold start
@@ -256,7 +258,16 @@ class Overloaded(SuiteError):
 
 
 class UnknownEngine(SuiteError):
-    pass
+    """An entry, a ``start`` or a ``stop`` names an engine the suite does not know."""
+
+
+class UnknownHost(SuiteError):
+    """An entry, a ``start`` or a ``stop`` names a host that is not in ``SuiteConfig.hosts``."""
+
+
+class InvalidRequest(SuiteError):
+    """The list of a request cannot work: empty, the same engine@host twice, an engine without REST
+    API on a host, a unit that does not exist. Raised at once, before anything is started."""
 
 
 class UnsupportedLanguage(SuiteError):
@@ -276,8 +287,8 @@ class EngineControlFailed(SuiteError):
 
 
 class ConfigInvalid(SuiteError):
-    """``set_config`` was given something that cannot work: an unknown engine, a
-    host not in ``hosts``, a missing ``voices_dir`` (HTTP 400). The check lives here,
+    """``set_config`` was given something that cannot work: defaults for an unknown engine, a
+    bad host, a missing ``voices_dir`` (HTTP 400). The check lives here,
     once; the service does not repeat it."""
 
 
@@ -300,15 +311,19 @@ class TTSSuite(Protocol):
         :class:`ConfigInvalid` for a configuration that cannot work."""
         ...
 
-    async def engines(self) -> list[EngineInfo]: ...
+    async def engines(self) -> list[EngineInfo]:
+        """The catalog: a row per registered engine on this machine and, for each configured host, a
+        row per engine with a REST API. A host that does not answer shows ``unreachable``/``stopped``
+        rows, not an error; the hosts are asked in parallel."""
+        ...
 
     async def voices(self, engine: str | None = None) -> list[VoiceInfo]: ...
 
     def speak(self, text: str, request: SpeakRequest) -> SpeechStream:
         """The whole text at once. Same behaviour as :meth:`open_stream` with one ``feed``
         and a ``finish``: the first segment is out as soon as it is generated. Raises
-        :class:`UnsupportedLanguage` (language without suite texts), :class:`UnknownEngine` and
-        :class:`NoEngineAvailable` (named engine) at once, before anything is started."""
+        :class:`UnsupportedLanguage` (language without suite texts), :class:`InvalidRequest`,
+        :class:`UnknownEngine` and :class:`UnknownHost` (the list) at once, before anything is started."""
         ...
 
     def open_stream(self, request: SpeakRequest) -> SpeechStream:
@@ -316,8 +331,8 @@ class TTSSuite(Protocol):
         ...
 
     async def start(self, engine: str, host: str | None = None) -> None:
-        """Start the container and wait until it serves. Forgets why an earlier start of this entry
-        took it out of the list."""
+        """Start the container of any catalog row and wait until it serves. Forgets why an earlier start
+        of it failed."""
         ...
 
     async def stop(self, engine: str, host: str | None = None) -> None: ...
@@ -325,8 +340,8 @@ class TTSSuite(Protocol):
     async def reload(self) -> tuple[list[str], list[str]]:
         """Read the engine folders again; returns (removed, added) engine keys. Forgets the
         remembered start failures of all entries. Raises :class:`ConfigInvalid` when an engine
-        folder was deleted (not moved to ``disabled/``) that the list still names: the engine is
-        gone from the registry, the list stays as it was until a corrected configuration is set."""
+        folder was deleted (not moved to ``disabled/``) that the defaults still name: the engine is
+        gone from the registry, the configuration stays as it was until a corrected one is set."""
         ...
 
     async def sync_voices(self, engine: str) -> list[VoiceInfo]:

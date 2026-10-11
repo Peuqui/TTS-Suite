@@ -13,6 +13,18 @@ Several programs share the same cards; a library in each program would give seve
 that do not know each other. Other machines (over SSH) are an optional list in the
 configuration; the normal case is the machine itself.
 
+**A list per request, a catalog, no shared list (2026-10-11).** The service keeps no
+escalation list that all programs share. It offers every engine (the catalog, `GET /engines`:
+a row per engine on this machine and, for each configured host, per engine with a REST API;
+cloud and browser engines run locally only). Each request brings its own list: selection,
+order, unit and host per entry. No program owns a list that another one uses; AIfred is not
+privileged, other programs are conceivable. Nothing in the request is optional: an empty
+list, a repeated entry (the same engine on the same host) and an unknown host are refused at
+once, before anything is started. What concerns the cards stays shared: the engine
+instances and the slots per engine and address (`max_parallel` holds across all requests and
+programs), because the capacity belongs to the service. Start and stop work on any row of
+the catalog, without a list.
+
 ## Card choice and memory limit
 
 The card is chosen by rules in the configuration (`gpus`: order and reserve per card,
@@ -35,8 +47,9 @@ PyTorch interface that may break with an update.
 
 The caller sends text as it has it: whole (`POST /speak`) or in pieces while a language
 model is still writing (WebSocket `/speak/stream`). Cutting by the unit of the speaking
-engine (sentence, paragraph, whole) happens in the service, because only it knows which
-engine speaks when the escalation list moves on. Audio always comes back as a stream of
+entry (sentence, paragraph, whole) happens in the service, because only it knows which
+entry of the list speaks when the escalation moves on. The unit is part of the request's
+entry, not of the configuration; the engine only recommends a default (`unit_default`). Audio always comes back as a stream of
 pieces in speaking order, as soon as each is ready.
 
 ## Text cleaning in the service

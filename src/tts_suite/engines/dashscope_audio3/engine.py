@@ -73,7 +73,6 @@ class DashScopeAudio3Engine(TTSEngine):
     needs_speed_postprocess = True
     supports_language = True
     display_order = 50
-    in_default_escalation = True
     cloud = True
     default_voice = "Mary"
 

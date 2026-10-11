@@ -11,15 +11,15 @@ from pathlib import Path
 import pytest
 
 from container_fakes import CardList, ContainerEngine, FakeSsh, install, local_entry, make_config
-from speech_fakes import FakeEngine, FakeLauncher, frames_for, run_async, wav_bytes
+from speech_fakes import FakeEngine, FakeLauncher, frames_for, request, run_async, wav_bytes
 
-from tts_suite.api import AudioSegment, EngineDefaults, SpeakRequest, SuiteError
+from tts_suite.api import AudioSegment, EngineDefaults, SuiteError
 from tts_suite.engines.base import TTSEngine
 from tts_suite.launcher import SuiteLauncher
 from tts_suite.speaker import Speaker
 from tts_suite.stream import Stream
 
-REQUEST = SpeakRequest(language="de")
+REQUEST = request("blocking")
 
 
 class ThreadEngine(FakeEngine):
@@ -53,7 +53,7 @@ async def collect(stream: Stream) -> list[AudioSegment]:
 
 def _speaker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine: ThreadEngine) -> Speaker:
     install(monkeypatch, engine)
-    config = make_config(tmp_path, [engine.key], {engine.key: EngineDefaults(max_parallel=100, max_queue=100)})
+    config = make_config(tmp_path, {engine.key: EngineDefaults(max_parallel=100, max_queue=100)})
     return Speaker(config, FakeLauncher())
 
 
@@ -65,7 +65,7 @@ def test_a_health_check_is_not_starved_by_syntheses_that_fill_the_default_execut
     default_executor_size = min(32, (os.cpu_count() or 1) + 4)
     container = ContainerEngine("container")
     container.up = True
-    launcher = SuiteLauncher(make_config(tmp_path, []), gpus=CardList(20000), host_command=FakeSsh())
+    launcher = SuiteLauncher(make_config(tmp_path), gpus=CardList(20000), host_command=FakeSsh())
 
     async def scenario() -> float:
         streams = [speaker.speak(f"Satz Nummer {number} hier.", REQUEST) for number in range(default_executor_size + 2)]

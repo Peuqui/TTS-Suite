@@ -22,7 +22,6 @@ class EdgeEngine(TTSEngine):
     needs_speed_postprocess = False
     audio_media_type = MEDIA_TYPE_MP3
     display_order = 80
-    in_default_escalation = True
     cloud = True
 
     # display name → Microsoft Neural Voice id. Static catalogue —

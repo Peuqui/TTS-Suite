@@ -18,7 +18,6 @@ class XTTSEngine(TTSEngine):
 
     # XTTS allocates statically at model load — no dynamic peak above idle.
     display_order = 20
-    in_default_escalation = True
 
     image_name = "xtts-rtx8000"
 

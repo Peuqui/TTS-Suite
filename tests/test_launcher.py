@@ -16,14 +16,13 @@ from container_fakes import (
     make_config,
     remote_entry,
 )
-from speech_fakes import FakeEngine, run_async
+from speech_fakes import FakeEngine, request, run_async
 
 from tts_suite.api import (
     EngineControlFailed,
     EngineInUse,
     EngineStarting,
     GpuRule,
-    SpeakRequest,
     SuiteConfig,
     TraceStep,
 )
@@ -337,14 +336,14 @@ def test_a_held_container_gets_a_heartbeat_until_the_last_hold_is_released() -> 
 
 # ── In a reading ────────────────────────────────────────────────────
 
-REQUEST = SpeakRequest(language="de")
+REQUEST = request("a")
 
 
 def test_a_reading_holds_its_container_until_the_stream_has_ended(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     engine = ContainerEngine("a")
     engine.up = True
     install(monkeypatch, engine)
-    config = make_config(tmp_path, ["a"])
+    config = make_config(tmp_path)
     launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh())
     speaker = Speaker(config, launcher)
 
@@ -354,10 +353,10 @@ def test_a_reading_holds_its_container_until_the_stream_has_ended(tmp_path: Path
         reading = asyncio.ensure_future(_collect(stream))
         await asyncio.sleep(0.05)
         with pytest.raises(EngineInUse):
-            await launcher.stop(speaker.entries[0])
+            await launcher.stop(speaker.entry_for("a", None, "sentence"))
         gate.set()
         assert len(await reading) == 1
-        await launcher.stop(speaker.entries[0])  # the stream ended: the container is free again
+        await launcher.stop(speaker.entry_for("a", None, "sentence"))  # the stream ended: the container is free again
         await launcher.aclose()
 
     run_async(scenario())
@@ -368,10 +367,10 @@ def test_a_second_stream_of_the_same_run_holds_the_container_again(tmp_path: Pat
     engine = ContainerEngine("a")
     engine.up = True
     install(monkeypatch, engine)
-    config = make_config(tmp_path, ["a"])
+    config = make_config(tmp_path)
     launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh())
     speaker = Speaker(config, launcher)
-    named = SpeakRequest(language="de", run="r-1")
+    named = request("a", run="r-1")
 
     async def scenario() -> None:
         await _collect(speaker.speak("Der erste Satz kommt hier.", named))  # its end lets go of the run's holds
@@ -379,10 +378,10 @@ def test_a_second_stream_of_the_same_run_holds_the_container_again(tmp_path: Pat
         reading = asyncio.ensure_future(_collect(speaker.speak("Der Satz mit zwei Wörtern kommt hier.", named)))
         await asyncio.sleep(0.05)
         with pytest.raises(EngineInUse):
-            await launcher.stop(speaker.entries[0])
+            await launcher.stop(speaker.entry_for("a", None, "sentence"))
         gate.set()
         await reading
-        await launcher.stop(speaker.entries[0])
+        await launcher.stop(speaker.entry_for("a", None, "sentence"))
         await launcher.aclose()
 
     run_async(scenario())
@@ -393,7 +392,7 @@ def test_an_aborted_stream_lets_go_of_the_container(tmp_path: Path, monkeypatch:
     engine = ContainerEngine("a")
     engine.up = True
     install(monkeypatch, engine)
-    config = make_config(tmp_path, ["a"])
+    config = make_config(tmp_path)
     launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh())
     speaker = Speaker(config, launcher)
 
@@ -405,7 +404,7 @@ def test_an_aborted_stream_lets_go_of_the_container(tmp_path: Path, monkeypatch:
         await stream.aclose()
         await stream.aclose()  # twice does not release twice
         await asyncio.gather(reading, return_exceptions=True)
-        await launcher.stop(speaker.entries[0])
+        await launcher.stop(speaker.entry_for("a", None, "sentence"))
         await launcher.aclose()
 
     run_async(scenario())
@@ -421,7 +420,7 @@ def test_the_skip_detail_of_the_launcher_reaches_the_trace(tmp_path: Path, monke
 
     engine = ContainerEngine("a")
     install(monkeypatch, engine)
-    config = make_config(tmp_path, ["a"])
+    config = make_config(tmp_path)
     launcher = SuiteLauncher(config, gpus=CardList(1000), host_command=FakeSsh())
     speaker = Speaker(config, launcher)
 

@@ -110,7 +110,7 @@ class Stream:
             entry = await self._run.select(self._request)
             # One reading never fills the queue; a place is given back when its segment is delivered
             self._window = asyncio.Semaphore(self._run.max_parallel(entry))
-            self._release(self._cutter.set_unit(self._run.unit(entry)))
+            self._release(self._cutter.set_unit(entry.unit))
             if self._finished:
                 self._end_input()
             while (raw_unit := await self._units.get()) is not None:

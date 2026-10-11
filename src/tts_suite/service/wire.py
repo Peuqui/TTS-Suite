@@ -13,6 +13,7 @@ from ..api import (
     EngineInfo,
     EngineInUse,
     EngineStarting,
+    InvalidRequest,
     NoEngineAvailable,
     Overloaded,
     SpeakRequest,
@@ -20,6 +21,7 @@ from ..api import (
     SuiteConfig,
     SuiteError,
     UnknownEngine,
+    UnknownHost,
     VoiceInfo,
 )
 from ..i18n import UnsupportedLanguage
@@ -36,6 +38,8 @@ ERROR_ANSWERS: dict[type[SuiteError], tuple[int, str]] = {
     EngineStarting: (503, "starting"),
     Overloaded: (429, "overloaded"),
     UnknownEngine: (404, "unknown_engine"),
+    UnknownHost: (404, "unknown_host"),
+    InvalidRequest: (422, "invalid_request"),
     EngineInUse: (409, "engine_in_use"),
     EngineControlFailed: (502, "engine_control_failed"),
     ConfigInvalid: (400, "config_invalid"),

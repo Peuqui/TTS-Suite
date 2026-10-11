@@ -45,7 +45,7 @@ LOCALHOST = "localhost"
 
 class TTSFailure(SuiteError):
     """An engine delivered no speech. Every engine raises this instead of returning
-    ``None`` — the escalation list decides who goes on."""
+    ``None`` — the request's list decides who goes on."""
 
     def __init__(self, reason: FailureReason, detail: str) -> None:
         super().__init__(f"{reason}: {detail}")
@@ -130,8 +130,8 @@ class TTSEngine(ABC):
     #: Media type of the audio :meth:`generate_speech` returns (a key of ``AUDIO_EXTENSIONS``).
     audio_media_type: str = MEDIA_TYPE_WAV
 
-    #: Default unit of this engine (see ``SPEECH_UNITS``); the user's choice per engine
-    #: is ``EngineDefaults.unit``. Fast engines stream sentence by sentence, slow local
+    #: Default unit of this engine (see ``SPEECH_UNITS``); the request's entry
+    #: carries the unit actually used. Fast engines stream sentence by sentence, slow local
     #: ones render better as a whole.
     default_speech_unit: Unit = "sentence"
 
@@ -162,16 +162,12 @@ class TTSEngine(ABC):
     #: locally and on a TTS host alike. 0 for engines without a container.
     startup_timeout_s: int = 0
 
-    #: True if the engine is part of the escalation list a fresh install starts
-    #: with (:func:`registry.default_escalation`), in ``display_order``.
-    in_default_escalation: bool = False
-
-    #: True only for :class:`DeactivatedEngine`, the placeholder of a list entry whose
+    #: True only for :class:`DeactivatedEngine`, the placeholder of an entry whose
     #: engine folder was moved to ``engines/disabled/``.
     deactivated: bool = False
 
     #: True for engines that run in someone else's cloud (DashScope, Edge) —
-    #: the text leaves the house. Shown as a label in the escalation list.
+    #: the text leaves the house. Shown as a label in the catalog.
     cloud: bool = False
 
     #: Port of the engine's REST API — set by engines that run as an HTTP
@@ -570,9 +566,8 @@ class TTSEngine(ABC):
 
 
 class DeactivatedEngine(TTSEngine):
-    """Placeholder for an escalation-list entry whose engine folder lies in
-    ``engines/disabled/``: the entry stays in the list, is shown as off and
-    is skipped like any other switched-off entry. Never registered."""
+    """Placeholder for a request's entry whose engine folder lies in
+    ``engines/disabled/``: the entry is skipped with ``deactivated``. Never registered."""
 
     deactivated = True
 

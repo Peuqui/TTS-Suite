@@ -13,6 +13,19 @@ nutzen. Mehrere Programme teilen dieselben Karten; eine Bibliothek in jedem Prog
 hätte mehrere Besitzer, die einander nicht kennen. Weitere Rechner (SSH) sind eine
 optionale Liste in der Konfiguration, der Normalfall ist der eigene Rechner.
 
+**Liste je Anfrage, Katalog, keine gemeinsame Liste (11.10.2026).** Der Dienst führt
+keine Eskalationsliste, die alle Programme mitbenutzen. Er bietet alle Engines an
+(Katalog, `GET /engines`: eine Zeile je Engine auf diesem Rechner und je konfiguriertem
+Rechner für jede Engine mit REST-Schnittstelle; Cloud- und Browser-Engines laufen nur
+lokal). Jede Anfrage bringt ihre eigene Liste mit: Auswahl, Reihenfolge, Einheit und
+Rechner je Eintrag. Kein Programm besitzt eine Liste, die ein anderes mitbenutzt; AIfred
+ist nicht privilegiert, weitere Programme sind denkbar. Nichts in der Anfrage ist
+optional: eine leere Liste, ein doppelter Eintrag (dieselbe Engine auf demselben Rechner)
+und ein unbekannter Rechner werden sofort abgelehnt, bevor etwas gestartet wird. Geteilt
+bleibt, was die Karten betrifft: die Engine-Instanzen und die Plätze je Engine und Adresse
+(`max_parallel` gilt über alle Anfragen und Programme), denn die Kapazität gehört dem Dienst.
+Start und Stopp arbeiten auf jeder Zeile des Katalogs, ohne Liste.
+
 ## Kartenwahl und Speichergrenze
 
 Die Wahl der Karte folgt Regeln der Konfiguration (`gpus`: Reihenfolge und Reserve je
@@ -36,8 +49,10 @@ eine private PyTorch-Schnittstelle, die bei einem Update brechen kann.
 
 Der Aufrufer schickt Text so, wie er ihn hat: ganz (`POST /speak`) oder in Stücken, während
 ein Sprachmodell noch schreibt (WebSocket `/speak/stream`). Die Zerlegung nach der
-Einheit der sprechenden Engine (Satz, Absatz, ganz) geschieht im Dienst, weil nur er weiß,
-welche Engine gerade spricht, wenn die Eskalationsliste weiterspringt. Das Audio kommt
+Einheit des sprechenden Eintrags (Satz, Absatz, ganz) geschieht im Dienst, weil nur er weiß,
+welcher Eintrag der Liste gerade spricht, wenn die Eskalation weiterspringt. Die Einheit
+steht im Eintrag der Anfrage, nicht in der Konfiguration; die Engine empfiehlt nur einen
+Standard (`unit_default`). Das Audio kommt
 immer als Strom von Teilstücken in Sprechreihenfolge zurück, sobald sie fertig sind.
 
 ## Textbereinigung im Dienst

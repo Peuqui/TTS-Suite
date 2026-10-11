@@ -1,6 +1,6 @@
 """Escalation: which entry of the list speaks, and what happens when one fails.
 
-Ported from AIfred Intelligence (``tts_escalation.py``). The list is ordered; the first
+Ported from AIfred Intelligence (``tts_escalation.py``). The list is the request's and ordered; the first
 entry that can speak speaks.
 
 * Before the first sound an entry that fails drops out silently, the next one takes over.
@@ -24,13 +24,16 @@ import time
 from concurrent.futures import Executor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import AsyncIterator, Callable, Mapping, Protocol
 
 from .api import (
     ConfigInvalid,
     EngineDefaults,
+    EngineRef,
     FailureReason,
     Host,
+    InvalidRequest,
     NoEngineAvailable,
     Overloaded,
     SkipReason,
@@ -39,12 +42,13 @@ from .api import (
     SuiteError,
     TraceStep,
     Unit,
+    UnknownEngine,
     VoiceSettings,
 )
 from .cleaning import TextCleaner
 from .constants import HOST_ADDRESS_PATTERN, HOST_SSH_USER_PATTERN, PITCH_DEFAULT, RUN_TTL_S, SPEED_DEFAULT
-from .engines.base import SPEECH_UNITS, DeactivatedEngine, TTSEngine, TTSFailure
-from .engines.registry import engine_unit, get_engine, is_deactivated
+from .engines.base import DeactivatedEngine, TTSEngine, TTSFailure
+from .engines.registry import get_engine, is_deactivated
 from .i18n import translate
 from .synthesis import synthesize
 
@@ -54,18 +58,23 @@ logger = logging.getLogger(__name__)
 # ── Entries ─────────────────────────────────────────────────────────
 
 
+def entry_label(engine_key: str, host: Host | None) -> str:
+    """``engine@host``, or ``engine`` on this machine — the name in traces and segments."""
+    return engine_key if host is None else f"{engine_key}@{host.name}"
+
+
 @dataclass(frozen=True)
 class EscalationEntry:
-    """One entry of the list: an engine, bound to a host (``None`` = this machine)."""
+    """One entry of a request's list: an engine, bound to a host (``None`` = this machine), with the
+    unit the request asked for."""
 
     engine: TTSEngine
     host: Host | None
-    enabled: bool
+    unit: Unit
 
     @property
     def label(self) -> str:
-        """``engine@host``, or ``engine`` on this machine — the name in traces and segments."""
-        return self.engine.key if self.host is None else f"{self.engine.key}@{self.host.name}"
+        return entry_label(self.engine.key, self.host)
 
 
 @dataclass(frozen=True)
@@ -120,8 +129,6 @@ def _check_defaults(config: SuiteConfig) -> None:
     for key, defaults in config.engines.items():
         if not _known(key):
             raise ConfigInvalid(f"engines: defaults for unknown TTS engine {key!r}")
-        if defaults.unit is not None and defaults.unit not in SPEECH_UNITS:
-            raise ConfigInvalid(f"engines[{key}]: unit must be one of {SPEECH_UNITS}, got {defaults.unit!r}")
         if defaults.max_parallel is not None and defaults.max_parallel < 1:
             raise ConfigInvalid(f"engines[{key}]: max_parallel must be at least 1")
         if defaults.max_queue is not None and defaults.max_queue < 0:
@@ -134,47 +141,35 @@ def _check_pronunciations(config: SuiteConfig) -> None:
             raise ConfigInvalid("pronunciations: a word must not be empty")
 
 
-def _bind_entry(engine_key: str, host_name: str | None, enabled: bool, config: SuiteConfig,
-                hosts: Mapping[str, Host]) -> EscalationEntry:
-    engine = get_engine(engine_key)
-    if engine is None and not is_deactivated(engine_key):
-        raise ConfigInvalid(f"entries: unknown TTS engine {engine_key!r}")
-    host = None
-    if host_name is not None:
-        host = hosts.get(host_name)
-        if host is None:
-            raise ConfigInvalid(f"entries: entry {engine_key!r} names unknown host {host_name!r}")
-    if engine is None:
-        # The engine folder lies in engines/disabled/: the entry stays in the list, shown as off
-        return EscalationEntry(DeactivatedEngine(engine_key), host, enabled=False)
-    engine = engine.with_voices_dir(config.voices_dir)
-    if host is not None:
-        try:
-            engine = engine.at_host(host.address)
-        except ValueError as exc:
-            raise ConfigInvalid(f"entries: {exc}") from exc
-    return EscalationEntry(engine, host, enabled)
-
-
-def bind_entries(config: SuiteConfig) -> tuple[EscalationEntry, ...]:
-    """The escalation list of a configuration, in its order (disabled entries included), with every
-    engine bound to its host and to the shared voices tree. THE check of a configuration: whatever
-    cannot work (unknown engine or host, a missing ``voices_dir``, an engine without a REST API on a
-    remote host, the same entry twice, bad limits) is :class:`ConfigInvalid` — a broken list is
-    never passed over silently."""
+def check_config(config: SuiteConfig) -> dict[str, Host]:
+    """THE check of a configuration: whatever cannot work (a missing ``voices_dir``, a bad host,
+    defaults for an unknown engine or with bad limits) is :class:`ConfigInvalid`. Returns the hosts
+    by name — what a request's entries are bound to."""
     if not config.voices_dir.is_dir():
         raise ConfigInvalid(f"voices_dir {config.voices_dir} is not a directory")
     hosts = _index_hosts(config)
     _check_defaults(config)
     _check_pronunciations(config)
-    entries = tuple(
-        _bind_entry(raw.engine, raw.host, raw.enabled, config, hosts) for raw in config.entries
-    )
-    labels = [entry.label for entry in entries]
-    for label in labels:
-        if labels.count(label) > 1:
-            raise ConfigInvalid(f"entries: {label!r} is in the list twice")
-    return entries
+    return hosts
+
+
+def bind_engine(engine_key: str, host: Host | None, voices_dir: Path) -> TTSEngine:
+    """The registry's engine bound to the shared voices tree and to ``host`` (``None`` = this machine).
+    :class:`UnknownEngine` for an engine the suite does not have; :class:`InvalidRequest` for an engine
+    without a REST API on a host. An engine whose folder lies in ``engines/disabled/`` becomes a
+    placeholder that is passed over."""
+    engine = get_engine(engine_key)
+    if engine is None:
+        if is_deactivated(engine_key):
+            return DeactivatedEngine(engine_key)
+        raise UnknownEngine(f"unknown TTS engine {engine_key!r}")
+    engine = engine.with_voices_dir(voices_dir)
+    if host is None:
+        return engine
+    try:
+        return engine.at_host(host.address)
+    except ValueError as exc:
+        raise InvalidRequest(str(exc)) from exc
 
 
 # ── Engine slots ────────────────────────────────────────────────────
@@ -355,9 +350,6 @@ class SpeechRun:
         """The stream announced a voice change."""
         self._switch = self._switch or reason
 
-    def unit(self, entry: EscalationEntry) -> Unit:
-        return engine_unit(entry.engine, self._defaults)
-
     def max_parallel(self, entry: EscalationEntry) -> int:
         return self._slots.for_engine(entry.engine).max_parallel
 
@@ -390,8 +382,6 @@ class SpeechRun:
         started by the launcher if it can be."""
         if entry.engine.deactivated:
             return Skip("deactivated")
-        if not entry.enabled:
-            return Skip("disabled")
         if entry.engine.renders_in_browser:
             return Skip("disabled", "speaks only in the client's own browser")
         if await self._launcher.is_serving(entry):
@@ -458,24 +448,28 @@ class SpeechRun:
 # ── The table of runs ───────────────────────────────────────────────
 
 
+RunKey = tuple[str, tuple[EngineRef, ...]]
+"""Run ID and the list of the request: the same ID with another list is another run."""
+
+
 class RunTable:
-    """The runs that clients named with a run ID. A run is forgotten ``ttl_s`` seconds after its
+    """The runs that clients named with a run ID (a run is the reading of one run ID with one list). A run is forgotten ``ttl_s`` seconds after its
     last use — a run a stream is attached to is in use, however long it speaks; expired runs are
     dropped when the table is used (no background task)."""
 
     def __init__(self, ttl_s: float = RUN_TTL_S, clock: Callable[[], float] = time.monotonic) -> None:
         self._ttl_s = ttl_s
         self._clock = clock
-        self._runs: dict[tuple[str, tuple[str, ...]], tuple[SpeechRun, float]] = {}
+        self._runs: dict[RunKey, tuple[SpeechRun, float]] = {}
 
-    def get_or_create(self, key: tuple[str, tuple[str, ...]], create: Callable[[], SpeechRun]) -> SpeechRun:
+    def get_or_create(self, key: RunKey, create: Callable[[], SpeechRun]) -> SpeechRun:
         now = self._clock()
         self._runs = {k: (run, expires) for k, (run, expires) in self._runs.items() if run.attached or expires > now}
         run = self._runs[key][0] if key in self._runs else create()
         self._runs[key] = (run, now + self._ttl_s)
         return run
 
-    def touch(self, key: tuple[str, tuple[str, ...]]) -> None:
+    def touch(self, key: RunKey) -> None:
         """The last stream of a run ended: its time to live starts now."""
         if key in self._runs:
             self._runs[key] = (self._runs[key][0], self._clock() + self._ttl_s)

@@ -2,6 +2,7 @@
 that need no Docker, ``nvidia-smi``, network or GPU."""
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import Any
 import pytest
 from speech_fakes import FakeEngine, FakeLauncher
 
-from tts_suite.api import EngineDefaults, EntryConfig, EntryStatus, Host, SuiteConfig
+from tts_suite.api import EngineDefaults, EntryStatus, Host, SuiteConfig
 from tts_suite.engines import registry
 from tts_suite.escalation import EscalationEntry, Skip
 from tts_suite.host_ctl import HostControlError
@@ -107,11 +108,11 @@ class Clock:
 
 
 def local_entry(engine: FakeEngine) -> EscalationEntry:
-    return EscalationEntry(engine, None, True)
+    return EscalationEntry(engine, None, engine.default_speech_unit)
 
 
 def remote_entry(engine: FakeEngine, host: Host = ARAGON) -> EscalationEntry:
-    return EscalationEntry(engine, host, True)
+    return EscalationEntry(engine, host, engine.default_speech_unit)
 
 
 def install(monkeypatch: pytest.MonkeyPatch, *engines: FakeEngine) -> None:
@@ -120,21 +121,20 @@ def install(monkeypatch: pytest.MonkeyPatch, *engines: FakeEngine) -> None:
         monkeypatch.setitem(registry.TTS_ENGINES, engine.key, engine)
 
 
-def make_config(
-    tmp_path: Path, keys: list[str], engines: dict[str, EngineDefaults] | None = None, **kwargs: Any,
-) -> SuiteConfig:
-    return SuiteConfig(
-        voices_dir=tmp_path, entries=tuple(EntryConfig(key) for key in keys), engines=engines or {}, **kwargs,
-    )
+def make_config(tmp_path: Path, engines: dict[str, EngineDefaults] | None = None, **kwargs: Any) -> SuiteConfig:
+    return SuiteConfig(voices_dir=tmp_path, engines=engines or {}, **kwargs)
 
 
 class FakeManagedLauncher(FakeLauncher):
     """A launcher for ``Suite`` tests: the escalation's questions from ``FakeLauncher``, plus the
     calls the suite makes itself. ``statuses``: label -> status (default ``running``)."""
 
-    def __init__(self, down: Any = None, statuses: dict[str, EntryStatus] | None = None) -> None:
+    def __init__(self, down: Any = None, statuses: dict[str, EntryStatus] | None = None, status_delay_s: float = 0.0) -> None:
         super().__init__(down)
         self.statuses = statuses or {}
+        self.status_delay_s = status_delay_s  # how long a status question takes (a slow or silent host)
+        self.status_in_flight = 0
+        self.status_peak = 0  # most status questions asked at the same time
         self.configs: list[SuiteConfig] = []
         self.cleared: list[str | None] = []  # labels whose failures were forgotten (None = all)
         self.stopped: list[str] = []
@@ -158,6 +158,12 @@ class FakeManagedLauncher(FakeLauncher):
         self.stopped.append(entry.label)
 
     async def status(self, entry: EscalationEntry) -> EntryStatus:
+        self.status_in_flight += 1
+        self.status_peak = max(self.status_peak, self.status_in_flight)
+        try:
+            await asyncio.sleep(self.status_delay_s)
+        finally:
+            self.status_in_flight -= 1
         return self.statuses.get(entry.label, "running")
 
     def start_failure(self, entry: EscalationEntry) -> Skip | None:

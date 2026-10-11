@@ -13,12 +13,15 @@ from tts_suite.api import (
     ConfigInvalid,
     EngineControlFailed,
     EngineInUse,
+    EngineRef,
     EngineStarting,
+    InvalidRequest,
     NoEngineAvailable,
     Overloaded,
     SpeakSummary,
     TraceStep,
     UnknownEngine,
+    UnknownHost,
 )
 from tts_suite.i18n import UnsupportedLanguage
 from tts_suite.service.app import create_app
@@ -31,6 +34,7 @@ BEARER = {"Authorization": f"Bearer {TOKEN}"}
 
 
 MAX_TEXT_CHARS = 100
+ENGINES = [{"engine": "xtts", "unit": "sentence", "host": None}]  # the list every request brings
 
 
 def build(tmp_path: Path, token_for_everything: bool = False) -> tuple[TestClient, FakeSuite, ConfigStore]:
@@ -100,14 +104,13 @@ def test_on_a_network_everything_needs_the_token(tmp_path: Path) -> None:
     assert client.get("/health").status_code == 200
     assert client.get("/engines").status_code == 401
     assert client.get("/engines", headers=BEARER).status_code == 200
-    assert client.post("/speak", json={"text": "Hi", "language": "en"}).status_code == 401
+    assert client.post("/speak", json={"text": "Hi", "language": "en", "engines": ENGINES}).status_code == 401
 
 
 def test_a_new_configuration_is_set_and_kept(tmp_path: Path) -> None:
     client, suite, store = build(tmp_path)
     wanted = {
         "voices_dir": str(tmp_path / "other"),
-        "entries": [{"engine": "xtts", "host": None, "enabled": True}],
         "gpus": [{"gpu": "0", "reserve_mib": 2048}],
         "pronunciations": {"AIfred": "Alfred"},
     }
@@ -131,7 +134,7 @@ def test_a_configuration_the_suite_refuses_is_not_kept(tmp_path: Path) -> None:
 
 def test_a_configuration_that_makes_no_sense_is_a_bad_request(tmp_path: Path) -> None:
     client, _, _ = build(tmp_path)
-    assert client.post("/config", json={"entries": "xtts"}, headers=BEARER).json()["error"] == "bad_request"
+    assert client.post("/config", json={"hosts": "aragon"}, headers=BEARER).json()["error"] == "bad_request"
     assert client.post("/config", content=b"{", headers=BEARER).json()["error"] == "bad_request"
     assert client.post("/config", json=[1], headers=BEARER).status_code == 400
 
@@ -140,6 +143,8 @@ def test_errors_of_the_suite_have_their_status_and_code(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
     cases = [
         (UnknownEngine("nope"), 404, "unknown_engine"),
+        (UnknownHost("nope"), 404, "unknown_host"),
+        (InvalidRequest("empty list"), 422, "invalid_request"),
         (Overloaded("queue full"), 429, "overloaded"),
         (EngineInUse("in use"), 409, "engine_in_use"),
         (EngineControlFailed("docker failed"), 502, "engine_control_failed"),
@@ -147,14 +152,14 @@ def test_errors_of_the_suite_have_their_status_and_code(tmp_path: Path) -> None:
     ]
     for error, status, code in cases:
         suite.refuses = error
-        answer = client.post("/speak", json={"text": "Hi", "language": "en"})
+        answer = client.post("/speak", json={"text": "Hi", "language": "en", "engines": ENGINES})
         assert (answer.status_code, answer.json()["error"]) == (status, code)
 
 
 def test_a_start_that_goes_on_says_when_to_ask_again(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
     suite.stream = FakeStream([EngineStarting("xtts is starting")])
-    answer = client.post("/speak", json={"text": "Hi", "language": "en", "wait": False})
+    answer = client.post("/speak", json={"text": "Hi", "language": "en", "engines": ENGINES, "wait": False})
     assert answer.status_code == 503 and answer.json()["error"] == "starting"
     assert answer.headers["retry-after"] == "5"
     assert suite.stream.closed
@@ -164,7 +169,7 @@ def test_no_engine_to_speak_gives_the_course_of_the_escalation(tmp_path: Path) -
     client, suite, _ = build(tmp_path)
     trace = (TraceStep(entry="xtts", outcome="skipped", reason="no_vram"),)
     suite.stream = FakeStream([NoEngineAvailable("nobody can speak", trace)])
-    answer = client.post("/speak", json={"text": "Hi", "language": "en"})
+    answer = client.post("/speak", json={"text": "Hi", "language": "en", "engines": ENGINES})
     assert answer.status_code == 503
     assert answer.json()["trace"][0] == {"entry": "xtts", "outcome": "skipped", "reason": "no_vram", "detail": ""}
 
@@ -172,7 +177,7 @@ def test_no_engine_to_speak_gives_the_course_of_the_escalation(tmp_path: Path) -
 def test_a_reading_comes_back_as_frames_in_order_with_the_summary(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
     suite.stream = FakeStream([audio(data=b"one"), audio(engine="edge@aragon", data=b"two"), audio("", b"", True)])
-    answer = client.post("/speak", json={"text": "Hello world.", "language": "en", "voice": "Alice"})
+    answer = client.post("/speak", json={"text": "Hello world.", "language": "en", "engines": ENGINES, "voice": "Alice"})
     assert answer.status_code == 200
     assert answer.headers["content-type"] == FRAMES_MEDIA_TYPE
     frames = decode_frames(answer.content)
@@ -201,19 +206,19 @@ def test_the_head_may_carry_the_voices_of_the_engines_and_the_run(tmp_path: Path
         "language": "de",
         "run": "r-42",
         "wait": False,
-        "engines": ["edge"],
+        "engines": [{"engine": "edge", "unit": "paragraph", "host": "aragon"}],
         "voices": {"edge": {"voice": "de-DE-KatjaNeural", "speed": 1.1}},
     }
     assert client.post("/speak", json=head).status_code == 200
     _, request = suite.requests[0]
-    assert (request.run, request.wait, request.engines) == ("r-42", False, ("edge",))
+    assert (request.run, request.wait, request.engines) == ("r-42", False, (EngineRef("edge", "paragraph", "aragon"),))
     assert request.voices["edge"].voice == "de-DE-KatjaNeural" and request.voices["edge"].speed == 1.1
 
 
 def test_a_failure_after_the_first_frame_ends_the_stream_with_an_error_frame(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
     suite.stream = FakeStream([audio(data=b"one"), NoEngineAvailable("all failed", ())])
-    answer = client.post("/speak", json={"text": "Hi", "language": "en"})
+    answer = client.post("/speak", json={"text": "Hi", "language": "en", "engines": ENGINES})
     assert answer.status_code == 200
     frames = decode_frames(answer.content)
     assert [header["kind"] for header, _ in frames] == ["audio", "error"]
@@ -224,14 +229,18 @@ def test_a_failure_after_the_first_frame_ends_the_stream_with_an_error_frame(tmp
 def test_a_reading_without_audio_still_ends_with_its_summary(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
     suite.stream = FakeStream([], SpeakSummary(switch="engine"))
-    frames = decode_frames(client.post("/speak", json={"text": "", "language": "en"}).content)
+    frames = decode_frames(client.post("/speak", json={"text": "", "language": "en", "engines": ENGINES}).content)
     assert [header["kind"] for header, _ in frames] == ["summary"]
     assert json.loads(frames[0][1])["switch"] == "engine"
 
 
 def test_a_request_without_text_or_language_is_a_bad_request(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
-    for body in ({"language": "en"}, {"text": "Hi"}, {"text": 5, "language": "en"}):
+    for body in (
+        {"language": "en", "engines": ENGINES}, {"text": "Hi", "engines": ENGINES},
+        {"text": 5, "language": "en", "engines": ENGINES}, {"text": "Hi", "language": "en"},
+        {"text": "Hi", "language": "en", "engines": [{"engine": "xtts", "unit": "sentence"}]},
+    ):
         answer = client.post("/speak", json=body)
         assert (answer.status_code, answer.json()["error"]) == (400, "bad_request")
     assert suite.requests == []
@@ -241,7 +250,7 @@ def test_a_stream_over_the_websocket_gets_its_text_in_pieces(tmp_path: Path) -> 
     client, suite, _ = build(tmp_path)
     suite.stream = FakeStream([audio(data=b"one"), audio(data=b"two")])
     with client.websocket_connect("/speak/stream") as socket:
-        socket.send_text(json.dumps({"type": "start", "language": "en", "run": "r-1"}))
+        socket.send_text(json.dumps({"type": "start", "language": "en", "engines": ENGINES, "run": "r-1"}))
         socket.send_text(json.dumps({"type": "text", "text": "First "}))
         socket.send_text(json.dumps({"type": "text", "text": "sentence."}))
         socket.send_text(json.dumps({"type": "finish"}))
@@ -256,7 +265,7 @@ def test_a_stream_that_cannot_start_ends_with_an_error_frame(tmp_path: Path) -> 
     client, suite, _ = build(tmp_path)
     suite.refuses = UnknownEngine("nope")
     with client.websocket_connect("/speak/stream") as socket:
-        socket.send_text(json.dumps({"type": "start", "language": "en", "engines": ["nope"]}))
+        socket.send_text(json.dumps({"type": "start", "language": "en", "engines": [{"engine": "nope", "unit": "sentence", "host": None}]}))
         header, body = decode_frames(socket.receive_bytes())[0]
     assert header["kind"] == "error" and json.loads(body)["error"] == "unknown_engine"
 
@@ -275,7 +284,7 @@ def test_a_stream_refuses_an_unknown_message_and_releases_the_suite(tmp_path: Pa
     client, suite, _ = build(tmp_path)
     suite.stream = FakeStream([audio()])
     with client.websocket_connect("/speak/stream") as socket:
-        socket.send_text(json.dumps({"type": "start", "language": "en"}))
+        socket.send_text(json.dumps({"type": "start", "language": "en", "engines": ENGINES}))
         socket.send_text(json.dumps({"type": "bogus"}))
         kinds = []
         while True:
@@ -292,7 +301,7 @@ def test_a_stream_on_a_network_needs_the_token(tmp_path: Path) -> None:
     with pytest.raises(WebSocketDisconnect), client.websocket_connect("/speak/stream"):
         pass
     with client.websocket_connect("/speak/stream", headers=BEARER) as socket:
-        socket.send_text(json.dumps({"type": "start", "language": "en"}))
+        socket.send_text(json.dumps({"type": "start", "language": "en", "engines": ENGINES}))
         socket.send_text(json.dumps({"type": "finish"}))
         assert decode_frames(socket.receive_bytes())[0][0]["kind"] == "audio"
 
@@ -334,17 +343,17 @@ def test_the_token_is_made_once_for_the_user_alone(tmp_path: Path) -> None:
 
 def test_a_text_beyond_the_limit_is_refused_before_anything_is_made(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
-    answer = client.post("/speak", json={"text": "x" * (MAX_TEXT_CHARS + 1), "language": "en"})
+    answer = client.post("/speak", json={"text": "x" * (MAX_TEXT_CHARS + 1), "language": "en", "engines": ENGINES})
     assert (answer.status_code, answer.json()["error"]) == (413, "text_too_long")
     assert suite.requests == []
-    assert client.post("/speak", json={"text": "x" * MAX_TEXT_CHARS, "language": "en"}).status_code == 200
+    assert client.post("/speak", json={"text": "x" * MAX_TEXT_CHARS, "language": "en", "engines": ENGINES}).status_code == 200
 
 
 def test_the_text_of_a_stream_counts_over_all_its_pieces(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
     suite.stream = FakeStream([audio()])
     with client.websocket_connect("/speak/stream") as socket:
-        socket.send_text(json.dumps({"type": "start", "language": "en"}))
+        socket.send_text(json.dumps({"type": "start", "language": "en", "engines": ENGINES}))
         for _ in range(3):
             socket.send_text(json.dumps({"type": "text", "text": "y" * 40}))
         kinds = []

@@ -15,12 +15,11 @@ from .api import (
     EntryStatus,
     SpeakRequest,
     SuiteConfig,
-    UnknownEngine,
     VoiceInfo,
 )
 from .constants import LABEL_LANGUAGES
 from .engines.base import shared_voice_names
-from .engines.registry import engine_unit, reload_engines, require_engine, voice_names
+from .engines.registry import reload_engines, require_engine, voice_names
 from .escalation import EscalationEntry
 from .launcher import ManagedLauncher, SuiteLauncher
 from .speaker import Speaker
@@ -52,35 +51,26 @@ class Suite:
         self._launcher.set_config(config)
 
     async def engines(self) -> list[EngineInfo]:
-        config = self._speaker.config
-        statuses = await asyncio.gather(*(self._status(entry) for entry in self._speaker.entries))
-        vram = await asyncio.gather(*(self._vram_mib(entry, status) for entry, status in zip(self._speaker.entries, statuses)))
-        installed = await asyncio.gather(*(self._installed(entry) for entry in self._speaker.entries))
-        return [
-            EngineInfo(
-                engine=entry.engine.key,
-                host=entry.host.name if entry.host is not None else None,
-                label={language: self._label(entry, language) for language in LABEL_LANGUAGES},
-                label_short={language: entry.engine.label_short for language in LABEL_LANGUAGES},
-                enabled=entry.enabled,
-                deactivated=entry.engine.deactivated,
-                status=status,
-                unit=engine_unit(entry.engine, config.engines),
-                unit_default=entry.engine.default_speech_unit,
-                needs_gpu=entry.engine.needs_gpu,
-                cloud=entry.engine.cloud,
-                browser=entry.engine.renders_in_browser,
-                installed=is_installed,
-                start_hint=self._start_hint(entry),
-                vram_mib=vram_mib,
-            )
-            for entry, status, vram_mib, is_installed in zip(self._speaker.entries, statuses, vram, installed)
-        ]
+        # One task per row, so a host that does not answer delays only its own rows by the health timeout
+        return list(await asyncio.gather(*(self._info(entry) for entry in self._speaker.catalog_entries())))
 
-    async def _status(self, entry: EscalationEntry) -> EntryStatus:
-        if entry.engine.deactivated:
-            return "stopped"
-        return await self._launcher.status(entry)
+    async def _info(self, entry: EscalationEntry) -> EngineInfo:
+        status = await self._launcher.status(entry)
+        vram_mib, installed = await asyncio.gather(self._vram_mib(entry, status), self._installed(entry))
+        return EngineInfo(
+            engine=entry.engine.key,
+            host=entry.host.name if entry.host is not None else None,
+            label={language: entry.engine.label(language) for language in LABEL_LANGUAGES},
+            label_short={language: entry.engine.label_short for language in LABEL_LANGUAGES},
+            status=status,
+            unit_default=entry.engine.default_speech_unit,
+            needs_gpu=entry.engine.needs_gpu,
+            cloud=entry.engine.cloud,
+            browser=entry.engine.renders_in_browser,
+            installed=installed,
+            start_hint=self._start_hint(entry),
+            vram_mib=vram_mib,
+        )
 
     @staticmethod
     async def _installed(entry: EscalationEntry) -> bool:
@@ -106,12 +96,6 @@ class Suite:
         except VramMeasurementFailed as failed:
             logger.error("TTS: VRAM of %s could not be measured: %s", entry.label, failed)
             return None
-
-    @staticmethod
-    def _label(entry: EscalationEntry, language: str) -> str:
-        if entry.engine.deactivated:
-            return entry.engine.key  # its folder lies in disabled/ — it has no i18n.json to read here
-        return entry.engine.label(language)
 
     # ── Voices ──────────────────────────────────────────────────────
 
@@ -139,7 +123,7 @@ class Suite:
     # ── Containers ──────────────────────────────────────────────────
 
     async def start(self, engine: str, host: str | None = None) -> None:
-        entry = self._entry(engine, host)
+        entry = self._catalog_entry(engine, host)
         self._launcher.clear_failures(entry)  # an explicit start tries again, whatever happened before
         if await self._launcher.is_serving(entry):
             return
@@ -148,20 +132,17 @@ class Suite:
             raise EngineControlFailed(f"{entry.label} not started ({skip.reason}): {skip.detail}")
 
     async def stop(self, engine: str, host: str | None = None) -> None:
-        await self._launcher.stop(self._entry(engine, host))
+        await self._launcher.stop(self._catalog_entry(engine, host))
 
     async def reload(self) -> tuple[list[str], list[str]]:
         removed, added = await asyncio.to_thread(reload_engines)
         self._launcher.clear_failures(None)
-        self._speaker.set_config(self._speaker.config)  # bind the list to the engines as they are now
+        self._speaker.set_config(self._speaker.config)  # bind to the engines as they are now
         return removed, added
 
-    def _entry(self, engine: str, host: str | None) -> EscalationEntry:
-        """The entry of the list for an engine on a host (``None`` = this machine)."""
-        for entry in self._speaker.entries:
-            if entry.engine.key == engine and (entry.host.name if entry.host else None) == host:
-                return entry
-        raise UnknownEngine(f"{engine}@{host or 'this machine'} is not in the escalation list")
+    def _catalog_entry(self, engine: str, host: str | None) -> EscalationEntry:
+        """The handle of a catalog row; the same errors as an entry of a request."""
+        return self._speaker.entry_for(engine, host, require_engine(engine).default_speech_unit)
 
 
 def create_suite(config: SuiteConfig, *, launcher: ManagedLauncher | None = None) -> Suite:

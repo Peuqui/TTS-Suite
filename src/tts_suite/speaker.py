@@ -1,7 +1,8 @@
 """The speaking part of the suite: configuration -> runs and streams.
 
-Owns what readings share — the escalation list, the engine slots, the table of runs — and
-opens the streams. ``TTSSuite`` (api) wraps it together with the engine management.
+Owns what readings share — the bound engines, the engine slots, the table of runs — and
+opens the streams. It keeps no escalation list: every request brings its own, bound here.
+``TTSSuite`` (api) wraps it together with the engine management.
 """
 
 from __future__ import annotations
@@ -12,21 +13,26 @@ from functools import partial
 from typing import Any, Callable
 
 from .api import (
-    NoEngineAvailable,
+    Host,
+    InvalidRequest,
     SpeakRequest,
     SuiteConfig,
-    UnknownEngine,
+    Unit,
+    UnknownHost,
     UnsupportedLanguage,
 )
 from .constants import KEEPALIVE_SEC, RUN_TTL_S, SYNTHESIS_THREADS
-from .engines.registry import get_engine
+from .engines.base import SPEECH_UNITS, TTSEngine
+from .engines.registry import TTS_ENGINES
 from .escalation import (
     EngineLauncher,
     EngineSlotTable,
     EscalationEntry,
     RunTable,
     SpeechRun,
-    bind_entries,
+    bind_engine,
+    check_config,
+    entry_label,
 )
 from .i18n import supported_languages
 from .stream import Stream
@@ -66,25 +72,54 @@ class Speaker:
         self._keepalive_s = keepalive_s
         self._runs = RunTable(run_ttl_s, clock)
         self._slots = EngineSlotTable(config.engines)
+        self._engines: dict[str, TTSEngine] = {}  # engine@host -> the bound engine, shared by all requests
+        self._hosts: dict[str, Host] = {}
         # Blocking syntheses only; health checks and starts keep the default executor to themselves.
         self._executor = ThreadPoolExecutor(SYNTHESIS_THREADS, thread_name_prefix="tts-synthesis")
         self.set_config(config)
 
     def set_config(self, config: SuiteConfig) -> None:
         """Replace the configuration; :class:`ConfigInvalid` leaves the old one in place. Runs
-        under way keep the list they started with; the engine slots are shared by all readings."""
-        self._entries = bind_entries(config)
+        under way keep the entries they started with; the engine slots are shared by all readings."""
+        hosts = check_config(config)
+        self._hosts = hosts
         self._config = config
+        self._engines.clear()  # bound to the old hosts, voices tree or registry
         self._slots.reconfigure(config.engines)
 
     @property
     def config(self) -> SuiteConfig:
         return self._config
 
-    @property
-    def entries(self) -> tuple[EscalationEntry, ...]:
-        """The escalation list of the configuration, bound (disabled entries included)."""
-        return self._entries
+    def entry_for(self, engine_key: str, host_name: str | None, unit: Unit) -> EscalationEntry:
+        """The entry for an engine on a host (``None`` = this machine). The bound engine is the one
+        every request and every catalog row of the same engine@host uses, so they share its slots.
+        :class:`UnknownEngine`, :class:`UnknownHost`, :class:`InvalidRequest` (unit, engine without
+        REST API on a host)."""
+        if unit not in SPEECH_UNITS:
+            raise InvalidRequest(f"unit must be one of {SPEECH_UNITS}, got {unit!r}")
+        host = self._host(host_name)
+        label = entry_label(engine_key, host)
+        if label not in self._engines:
+            self._engines[label] = bind_engine(engine_key, host, self._config.voices_dir)
+        return EscalationEntry(self._engines[label], host, unit)
+
+    def catalog_entries(self) -> list[EscalationEntry]:
+        """What the suite offers: every registered engine on this machine, and on each configured host
+        every engine with a REST API (cloud and browser engines cannot run there). The unit of such an
+        entry is the engine's recommendation; it only serves as a handle for status, start and stop."""
+        engines = list(TTS_ENGINES.values())
+        placements: list[tuple[TTSEngine, str | None]] = [(engine, None) for engine in engines]
+        for host in self._config.hosts:
+            placements.extend((engine, host.name) for engine in engines if engine.default_port is not None)
+        return [self.entry_for(engine.key, host_name, engine.default_speech_unit) for engine, host_name in placements]
+
+    def _host(self, host_name: str | None) -> Host | None:
+        if host_name is None:
+            return None
+        if host_name not in self._hosts:
+            raise UnknownHost(f"unknown host {host_name!r}")
+        return self._hosts[host_name]
 
     def open_stream(self, request: SpeakRequest) -> Stream:
         self._require_supported_language(request)
@@ -116,30 +151,19 @@ class Speaker:
             )
 
     def _entries_for(self, request: SpeakRequest) -> tuple[EscalationEntry, ...]:
-        """The list, or — for a request that names engines — only their entries, in the order of the
-        request (several entries of one engine keep the order of the list)."""
-        keys = self._requested_engines(request)
-        if not keys:
-            return self._entries
-        for key in keys:
-            if get_engine(key) is None:
-                raise UnknownEngine(f"unknown TTS engine {key!r}")
-        chosen: list[EscalationEntry] = []
-        for key in keys:
-            entries = [entry for entry in self._entries if entry.engine.key == key]
-            if not entries:
-                raise NoEngineAvailable(f"engine {key!r} is not in the escalation list", ())
-            chosen.extend(entries)
-        return tuple(chosen)
-
-    @staticmethod
-    def _requested_engines(request: SpeakRequest) -> tuple[str, ...]:
-        """The engine keys of the request without repeats: naming an engine twice asks for nothing more."""
-        return tuple(dict.fromkeys(request.engines))
+        """The request's list, bound, in its order. Nothing is optional: an empty list is refused."""
+        if not request.engines:
+            raise InvalidRequest("the request's list of engines is empty")
+        entries = tuple(self.entry_for(ref.engine, ref.host, ref.unit) for ref in request.engines)
+        labels = [entry.label for entry in entries]
+        for label in labels:
+            if labels.count(label) > 1:
+                raise InvalidRequest(f"{label!r} is in the list twice")
+        return entries
 
     def _run_ended(self, request: SpeakRequest) -> None:
         if request.run is not None:
-            self._runs.touch((request.run, self._requested_engines(request)))
+            self._runs.touch((request.run, request.engines))
 
     def _run_for(self, request: SpeakRequest, entries: tuple[EscalationEntry, ...]) -> SpeechRun:
         def create() -> SpeechRun:
@@ -147,4 +171,4 @@ class Speaker:
 
         if request.run is None:
             return create()
-        return self._runs.get_or_create((request.run, self._requested_engines(request)), create)
+        return self._runs.get_or_create((request.run, request.engines), create)

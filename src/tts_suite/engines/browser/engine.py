@@ -1,6 +1,6 @@
 """Browser TTS — the client's browser speaks (Web Speech API, speechSynthesis).
 
-No audio leaves the server: the escalation list hands the text to the page,
+No audio leaves the server: the escalation hands the text to the page,
 which speaks it with a voice of the device. The suite lists this entry but never
 speaks with it (the client decides whether and how it speaks). It stands last in
 the list: the server cannot tell whether the device has a voice, so nothing could
@@ -24,7 +24,6 @@ class BrowserEngine(TTSEngine):
     needs_speed_postprocess = False
     supports_language = True
     display_order = 90
-    in_default_escalation = True
     default_voice = BROWSER_AUTO_VOICE
 
     @property

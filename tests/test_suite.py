@@ -1,4 +1,4 @@
-"""The Suite: configuration, the list of engines, voices, start/stop, reload, speaking."""
+"""The Suite: configuration, the catalog of engines, voices, start/stop, reload, speaking."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,20 +11,21 @@ from container_fakes import (
     install,
     make_config,
 )
-from speech_fakes import FakeEngine, run_async
+from speech_fakes import FakeEngine, request, run_async
 
-from tts_suite import escalation
 from tts_suite import suite as suite_module
 from tts_suite.api import (
     ConfigInvalid,
     EngineControlFailed,
     EngineDefaults,
     EngineInUse,
-    EntryConfig,
-    SpeakRequest,
+    EngineInfo,
+    Host,
+    InvalidRequest,
     SuiteConfig,
     TTSSuite,
     UnknownEngine,
+    UnknownHost,
     VoiceInfo,
 )
 from tts_suite.engines import registry
@@ -34,9 +35,12 @@ from tts_suite.suite import Suite, create_suite
 
 
 @pytest.fixture(autouse=True)
-def no_docker(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The real engines in these tests would ask Docker whether their image is built."""
+def no_docker_no_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real engines in these tests would ask Docker whether their image is built and ``nvidia-smi``
+    what they hold; the fakes have no ``i18n.json`` for their labels."""
     monkeypatch.setattr(TTSEngine, "is_installed", lambda self: True)
+    monkeypatch.setattr(suite_module, "engine_vram_mib", lambda engine: {})
+    monkeypatch.setattr(TTSEngine, "label", lambda self, language: self.key)
 
 
 def _suite(config: SuiteConfig, launcher: FakeManagedLauncher | None = None) -> tuple[Suite, FakeManagedLauncher]:
@@ -50,26 +54,25 @@ def _suite(config: SuiteConfig, launcher: FakeManagedLauncher | None = None) -> 
 
 
 def test_the_configuration_is_replaced_for_the_speaker_and_the_launcher(tmp_path: Path) -> None:
-    suite, launcher = _suite(make_config(tmp_path, ["xtts"]))
-    new = make_config(tmp_path, ["edge"], headroom_mib=100)
+    suite, launcher = _suite(make_config(tmp_path))
+    new = make_config(tmp_path, headroom_mib=100)
 
     async def scenario() -> SuiteConfig:
         await suite.set_config(new)
         return await suite.config()
 
     assert run_async(scenario()) is new and launcher.configs == [new]
-    assert [entry.engine.key for entry in suite._speaker.entries] == ["edge"]
 
 
 def test_an_invalid_configuration_is_refused_and_changes_nothing(tmp_path: Path) -> None:
-    config = make_config(tmp_path, ["xtts"])
+    config = make_config(tmp_path)
     suite, launcher = _suite(config)
 
     async def scenario() -> None:
         with pytest.raises(ConfigInvalid, match="unknown TTS engine"):
-            await suite.set_config(make_config(tmp_path, ["nope"]))
+            await suite.set_config(make_config(tmp_path, {"nope": EngineDefaults()}))
         with pytest.raises(ConfigInvalid, match="voices_dir"):
-            await suite.set_config(make_config(tmp_path / "missing", ["xtts"]))
+            await suite.set_config(make_config(tmp_path / "missing"))
         assert await suite.config() is config
 
     run_async(scenario())
@@ -78,80 +81,86 @@ def test_an_invalid_configuration_is_refused_and_changes_nothing(tmp_path: Path)
 
 def test_a_broken_configuration_cannot_create_a_suite(tmp_path: Path) -> None:
     with pytest.raises(ConfigInvalid):
-        create_suite(make_config(tmp_path, ["nope"]), launcher=FakeManagedLauncher())
+        create_suite(make_config(tmp_path, {"nope": EngineDefaults()}), launcher=FakeManagedLauncher())
 
 
-# ── The list of engines ─────────────────────────────────────────────
+# ── The catalog ─────────────────────────────────────────────────────
 
 
-def test_engines_lists_the_entries_in_order_with_everything_a_surface_needs(tmp_path: Path) -> None:
-    config = SuiteConfig(
-        voices_dir=tmp_path,
-        entries=(EntryConfig("xtts"), EntryConfig("edge", enabled=False), EntryConfig("browser")),
-        engines={"edge": EngineDefaults(unit="whole")},
-    )
-    suite, _ = _suite(config, FakeManagedLauncher(statuses={"xtts": "stopped", "edge": "running", "browser": "running"}))
-    xtts, edge, browser = run_async(suite.engines())
-    assert [info.engine for info in (xtts, edge, browser)] == ["xtts", "edge", "browser"]
-    assert (xtts.host, xtts.status, xtts.enabled, xtts.needs_gpu, xtts.cloud, xtts.browser, xtts.deactivated) == (
-        None, "stopped", True, True, False, False, False,
-    )
+def _rows(infos: list[EngineInfo]) -> dict[tuple[str, str | None], EngineInfo]:
+    return {(info.engine, info.host): info for info in infos}
+
+
+def test_the_catalog_has_a_row_per_registered_engine_on_this_machine(tmp_path: Path) -> None:
+    suite, _ = _suite(make_config(tmp_path), FakeManagedLauncher(statuses={"xtts": "stopped", "edge": "running"}))
+    rows = _rows(run_async(suite.engines()))
+    assert [key for key in rows] == [(key, None) for key in registry.TTS_ENGINES]  # registry order, no list involved
+    xtts, edge, browser = rows[("xtts", None)], rows[("edge", None)], rows[("browser", None)]
+    assert (xtts.host, xtts.status, xtts.needs_gpu, xtts.cloud, xtts.browser) == (None, "stopped", True, False, False)
     assert set(xtts.label) == set(xtts.label_short) == {"de", "en"} and all(xtts.label.values())
-    assert xtts.label_short["de"] == "XTTS" and xtts.unit == xtts.unit_default
-    assert (edge.enabled, edge.cloud, edge.status, edge.unit, edge.unit_default) == (False, True, "running", "whole", "sentence")
+    assert xtts.label_short["de"] == "XTTS" and xtts.unit_default == "sentence"
+    assert (edge.cloud, edge.status, edge.unit_default) == (True, "running", "sentence")
     assert browser.browser and not browser.needs_gpu
 
 
-def test_a_remote_entry_names_its_host_and_a_deactivated_one_is_listed_as_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(escalation, "is_deactivated", lambda key: key == "ghost")
-    config = SuiteConfig(
-        voices_dir=tmp_path, hosts=(ARAGON,),
-        entries=(EntryConfig("qwen3local", host="Aragon"), EntryConfig("ghost")),
-    )
-    suite, _ = _suite(config, FakeManagedLauncher(statuses={"qwen3local@Aragon": "unreachable"}))
-    remote, ghost = run_async(suite.engines())
-    assert (remote.host, remote.status) == ("Aragon", "unreachable")
-    assert (ghost.deactivated, ghost.enabled, ghost.status, ghost.label["de"]) == (True, False, "stopped", "ghost")
+def test_each_host_gets_a_row_for_every_engine_with_a_rest_api_and_for_no_other(tmp_path: Path) -> None:
+    suite, _ = _suite(make_config(tmp_path, hosts=(ARAGON, Host("Basti", "192.0.2.3"))))
+    rows = _rows(run_async(suite.engines()))
+    for host in ("Aragon", "Basti"):
+        assert {key for key, name in rows if name == host} == {
+            key for key, engine in registry.TTS_ENGINES.items() if engine.default_port is not None
+        }
+        assert ("xtts", host) in rows and ("qwen3local", host) in rows
+        for no_rest_api in ("piper", "edge", "dashscope_audio3", "browser"):  # cloud, CLI and browser engines stay local
+            assert (no_rest_api, host) not in rows
+    assert rows[("xtts", "Aragon")].host == "Aragon"
 
 
-def test_installed_tells_whether_an_entry_can_be_started(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_host_that_does_not_answer_is_a_row_not_an_error(tmp_path: Path) -> None:
+    suite, _ = _suite(make_config(tmp_path, hosts=(ARAGON,)), FakeManagedLauncher(statuses={"xtts@Aragon": "unreachable"}))
+    assert _rows(run_async(suite.engines()))[("xtts", "Aragon")].status == "unreachable"
+
+
+def test_the_rows_are_asked_in_parallel_so_a_silent_host_delays_only_by_one_wait(tmp_path: Path) -> None:
+    launcher = FakeManagedLauncher(status_delay_s=0.05)
+    suite, _ = _suite(make_config(tmp_path, hosts=(ARAGON, Host("Basti", "192.0.2.3"))), launcher)
+    infos = run_async(suite.engines())
+    assert len(infos) > 10 and launcher.status_peak == len(infos)  # all asked at the same time, not one after the other
+
+
+def test_installed_tells_whether_a_row_can_be_started(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     built, missing = ContainerEngine("builtfake"), ContainerEngine("missingfake", installed=False)
-    remote = ContainerEngine("remotefake", remote=True, installed=False)  # the suite cannot see that host's Docker
     cloud = FakeEngine("cloudfake", cloud=True)
-    install(monkeypatch, built, missing, remote, cloud)
-    monkeypatch.setattr(Suite, "_label", staticmethod(lambda entry, language: entry.engine.key))  # fakes have no i18n.json
-    monkeypatch.setattr(ContainerEngine, "at_host", lambda self, address, port=None: self)
-    config = SuiteConfig(
-        voices_dir=tmp_path, hosts=(ARAGON,),
-        entries=(EntryConfig("builtfake"), EntryConfig("missingfake"), EntryConfig("remotefake", host="Aragon"), EntryConfig("cloudfake")),
-    )
-    suite, _ = _suite(config)
-    assert [info.installed for info in run_async(suite.engines())] == [True, False, True, True]
+    built.default_port = missing.default_port = 5000
+    install(monkeypatch, built, missing, cloud)
+    suite, _ = _suite(make_config(tmp_path, hosts=(ARAGON,)))
+    rows = _rows(run_async(suite.engines()))
+    assert rows[("builtfake", None)].installed and not rows[("missingfake", None)].installed and rows[("cloudfake", None)].installed
+    assert rows[("missingfake", "Aragon")].installed  # the suite cannot see that host's Docker
 
 
 def test_start_hint_is_the_reason_of_the_last_failed_start_until_it_is_forgotten(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install(monkeypatch, ContainerEngine("brokenfake"), ContainerEngine("fine"))
-    monkeypatch.setattr(Suite, "_label", staticmethod(lambda entry, language: entry.engine.key))  # fakes have no i18n.json
-    suite, launcher = _suite(make_config(tmp_path, ["brokenfake", "fine"]))
-    assert [info.start_hint for info in run_async(suite.engines())] == [None, None]
+    suite, launcher = _suite(make_config(tmp_path))
+
+    def hints() -> tuple[str | None, str | None]:
+        rows = _rows(run_async(suite.engines()))
+        return rows[("brokenfake", None)].start_hint, rows[("fine", None)].start_hint
+
+    assert hints() == (None, None)
     launcher.failures["brokenfake"] = Skip("stopped", "start failed: model did not load")
-    assert [info.start_hint for info in run_async(suite.engines())] == ["start failed: model did not load", None]
-    run_async(suite.set_config(make_config(tmp_path, ["brokenfake", "fine"])))  # the real launcher forgets here
+    assert hints() == ("start failed: model did not load", None)
+    run_async(suite.set_config(make_config(tmp_path)))  # the real launcher forgets here
     launcher.clear_failures(None)
-    assert [info.start_hint for info in run_async(suite.engines())] == [None, None]
+    assert hints() == (None, None)
 
 
 def test_vram_is_reported_for_running_local_gpu_engines_only_and_a_failed_measurement_is_logged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
 ) -> None:
-    config = SuiteConfig(
-        voices_dir=tmp_path, hosts=(ARAGON,),
-        entries=(EntryConfig("xtts"), EntryConfig("qwen3local"), EntryConfig("qwen3local", host="Aragon"), EntryConfig("edge")),
-    )
-    launcher = FakeManagedLauncher(statuses={"xtts": "running", "qwen3local": "running", "qwen3local@Aragon": "running", "edge": "running"})
-    suite, _ = _suite(config, launcher)
+    suite, _ = _suite(make_config(tmp_path, hosts=(ARAGON,)))
 
     def measure(engine: object) -> dict[str, int]:
         if engine.key == "qwen3local":  # type: ignore[attr-defined]
@@ -160,8 +169,9 @@ def test_vram_is_reported_for_running_local_gpu_engines_only_and_a_failed_measur
 
     monkeypatch.setattr(suite_module, "engine_vram_mib", measure)
     with caplog.at_level("ERROR"):
-        infos = run_async(suite.engines())
-    assert [info.vram_mib for info in infos] == [{"GPU-a": 3500}, None, {}, {}]
+        rows = _rows(run_async(suite.engines()))
+    assert rows[("xtts", None)].vram_mib == {"GPU-a": 3500} and rows[("qwen3local", None)].vram_mib is None
+    assert rows[("qwen3local", "Aragon")].vram_mib == {} and rows[("edge", None)].vram_mib == {}
     assert "qwen3local could not be measured" in caplog.text and "gone" in caplog.text
 
 
@@ -173,7 +183,7 @@ def test_voices_without_an_engine_are_the_folders_of_the_shared_directory(tmp_pa
         (tmp_path / name).mkdir()
         (tmp_path / name / f"{name}.wav").write_bytes(b"x")
     (tmp_path / "Stray").mkdir()  # a folder without its <name>.wav is no voice
-    suite, _ = _suite(make_config(tmp_path, []))
+    suite, _ = _suite(make_config(tmp_path))
     assert run_async(suite.voices()) == [VoiceInfo("Alice", "Alice"), VoiceInfo("Bob", "Bob")]
 
 
@@ -182,7 +192,7 @@ def test_the_voices_of_an_engine_are_its_live_ones_else_its_catalog(tmp_path: Pa
     monkeypatch.setattr(live, "get_voices", lambda: {"Katja": "k1", "Conrad": "c1"})
     monkeypatch.setattr(type(silent), "voices_fallback", {"Static": "s"})
     install(monkeypatch, live, silent)
-    suite, _ = _suite(make_config(tmp_path, []))
+    suite, _ = _suite(make_config(tmp_path))
     assert run_async(suite.voices("live")) == [VoiceInfo("Katja", "Katja"), VoiceInfo("Conrad", "Conrad")]
     assert run_async(suite.voices("silent")) == [VoiceInfo("Static", "Static")]
     with pytest.raises(UnknownEngine):
@@ -200,18 +210,18 @@ def test_sync_voices_has_the_engine_prepare_them_and_returns_the_voices(tmp_path
     monkeypatch.setattr(cloud, "prepare_voices", prepare)
     monkeypatch.setattr(cloud, "get_voices", lambda: {"Alice": "a"})
     install(monkeypatch, cloud)
-    suite, _ = _suite(make_config(tmp_path, []))
+    suite, _ = _suite(make_config(tmp_path))
     assert run_async(suite.sync_voices("cloudfake")) == [VoiceInfo("Alice", "Alice")] and prepared == ["done"]
 
 
 # ── Starting, stopping, reloading ───────────────────────────────────
 
 
-def test_start_does_nothing_for_a_serving_entry_and_starts_a_stopped_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_does_nothing_for_a_serving_row_and_starts_a_stopped_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     serving, stopped = FakeEngine("servingfake"), FakeEngine("stoppedfake")
     install(monkeypatch, serving, stopped)
     launcher = FakeManagedLauncher(down={"stoppedfake": None})
-    suite, _ = _suite(make_config(tmp_path, ["servingfake", "stoppedfake"]), launcher)
+    suite, _ = _suite(make_config(tmp_path), launcher)
 
     async def scenario() -> None:
         await suite.start("servingfake")
@@ -226,43 +236,53 @@ def test_start_does_nothing_for_a_serving_entry_and_starts_a_stopped_one(tmp_pat
 def test_a_start_that_does_not_work_says_why(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, FakeEngine("novram"))
     launcher = FakeManagedLauncher(down={"novram": Skip("no_vram", "needs 4512 MiB, most free 900 MiB on GPU 1")})
-    suite, _ = _suite(make_config(tmp_path, ["novram"]), launcher)
+    suite, _ = _suite(make_config(tmp_path), launcher)
     with pytest.raises(EngineControlFailed, match=r"novram not started \(no_vram\): needs 4512 MiB, most free 900 MiB on GPU 1"):
         run_async(suite.start("novram"))
 
 
-def test_start_and_stop_address_an_entry_of_the_list_by_engine_and_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    local, remote = ContainerEngine("lo"), ContainerEngine("re", remote=True)
+def test_start_and_stop_work_on_any_catalog_row_without_a_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    local, remote = ContainerEngine("lo"), ContainerEngine("re")
+    remote.default_port = 5000
     install(monkeypatch, local, remote)
-    config = SuiteConfig(
-        voices_dir=tmp_path, hosts=(ARAGON,), entries=(EntryConfig("lo"), EntryConfig("re", host="Aragon")),
-    )
-    monkeypatch.setattr(ContainerEngine, "at_host", lambda self, address, port=None: self)
-    suite, launcher = _suite(config)
+    suite, launcher = _suite(make_config(tmp_path, hosts=(ARAGON,)), FakeManagedLauncher(down={"re@Aragon": None}))
 
     async def scenario() -> None:
         await suite.stop("lo")
         await suite.stop("re", "Aragon")
-        for engine, host in (("nope", None), ("lo", "Aragon"), ("xtts", None)):
-            with pytest.raises(UnknownEngine):
-                await suite.stop(engine, host)
-            with pytest.raises(UnknownEngine):
-                await suite.start(engine, host)
+        await suite.start("re", "Aragon")
 
     run_async(scenario())
-    assert launcher.stopped == ["lo", "re@Aragon"]
+    assert launcher.stopped == ["lo", "re@Aragon"] and launcher.starts == ["re@Aragon"]
+
+
+def test_start_and_stop_refuse_what_is_not_a_catalog_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch, ContainerEngine("lo"))  # no REST API: it has no row on a host
+    suite, launcher = _suite(make_config(tmp_path, hosts=(ARAGON,)))
+
+    async def scenario() -> None:
+        for call in (suite.stop, suite.start):
+            with pytest.raises(UnknownEngine):
+                await call("nope", None)
+            with pytest.raises(UnknownHost):
+                await call("xtts", "Ghost")
+            with pytest.raises(InvalidRequest, match="no REST API"):
+                await call("lo", "Aragon")
+
+    run_async(scenario())
+    assert launcher.stopped == [] and launcher.starts == []
 
 
 def test_a_container_in_use_cannot_be_stopped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, ContainerEngine("busy"))
     launcher = FakeManagedLauncher()
     launcher.stop_error = EngineInUse("busy is in use by a reading")
-    suite, _ = _suite(make_config(tmp_path, ["busy"]), launcher)
+    suite, _ = _suite(make_config(tmp_path), launcher)
     with pytest.raises(EngineInUse):
         run_async(suite.stop("busy"))
 
 
-def test_reload_rereads_the_engine_folders_and_binds_the_list_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reload_rereads_the_engine_folders_and_binds_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
     def reload_engines() -> tuple[list[str], list[str]]:
@@ -270,18 +290,19 @@ def test_reload_rereads_the_engine_folders_and_binds_the_list_again(tmp_path: Pa
         return ["gone"], ["new"]
 
     monkeypatch.setattr(suite_module, "reload_engines", reload_engines)
-    suite, launcher = _suite(make_config(tmp_path, ["xtts"]))
-    bound_before = suite._speaker.entries
+    suite, launcher = _suite(make_config(tmp_path))
+    suite._speaker.entry_for("xtts", None, "sentence")
+    assert suite._speaker._engines != {}
     assert run_async(suite.reload()) == (["gone"], ["new"]) and calls == ["reload"]
-    assert launcher.cleared == [None]
-    assert suite._speaker.entries is not bound_before and [e.engine.key for e in suite._speaker.entries] == ["xtts"]
+    assert launcher.cleared == [None] and suite._speaker._engines == {}
 
 
-def test_reload_with_an_engine_folder_that_was_deleted_is_a_config_error_and_keeps_the_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    engine = FakeEngine("vanishing")
-    install(monkeypatch, engine)
-    suite, _ = _suite(make_config(tmp_path, ["vanishing"]))
-    entries_before = suite._speaker.entries
+def test_reload_with_a_deleted_engine_folder_that_the_defaults_name_is_a_config_error_and_keeps_the_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install(monkeypatch, FakeEngine("vanishing"))
+    config = make_config(tmp_path, {"vanishing": EngineDefaults()})
+    suite, _ = _suite(config)
 
     def reload_engines() -> tuple[list[str], list[str]]:
         del registry.TTS_ENGINES["vanishing"]
@@ -290,7 +311,7 @@ def test_reload_with_an_engine_folder_that_was_deleted_is_a_config_error_and_kee
     monkeypatch.setattr(suite_module, "reload_engines", reload_engines)
     with pytest.raises(ConfigInvalid, match="unknown TTS engine 'vanishing'"):
         run_async(suite.reload())
-    assert suite._speaker.entries is entries_before
+    assert suite._speaker.config is config
 
 
 # ── Speaking and closing ────────────────────────────────────────────
@@ -298,12 +319,12 @@ def test_reload_with_an_engine_folder_that_was_deleted_is_a_config_error_and_kee
 
 def test_speak_and_open_stream_deliver_audio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, FakeEngine("fake"))
-    suite, _ = _suite(make_config(tmp_path, ["fake"]))
-    request = SpeakRequest(language="de")
+    suite, _ = _suite(make_config(tmp_path))
+    head = request("fake")
 
     async def scenario() -> tuple[int, int]:
-        whole = [segment async for segment in suite.speak("Hallo Welt hier.", request).segments()]
-        stream = suite.open_stream(request)
+        whole = [segment async for segment in suite.speak("Hallo Welt hier.", head).segments()]
+        stream = suite.open_stream(head)
         await stream.feed("Und noch ein Satz hier.")
         await stream.finish()
         piecewise = [segment async for segment in stream.segments()]
@@ -313,6 +334,6 @@ def test_speak_and_open_stream_deliver_audio(tmp_path: Path, monkeypatch: pytest
 
 
 def test_closing_the_suite_closes_the_launcher(tmp_path: Path) -> None:
-    suite, launcher = _suite(make_config(tmp_path, []))
+    suite, launcher = _suite(make_config(tmp_path))
     run_async(suite.aclose())
     assert launcher.closed

@@ -8,13 +8,12 @@ from typing import Iterator
 
 import pytest
 
-from tts_suite.api import EngineDefaults, EntryConfig, UnknownEngine
+from tts_suite.api import UnknownEngine
 from tts_suite.engines import (
     SPEECH_UNITS,
     TTS_ENGINES,
     DeactivatedEngine,
     TTSEngine,
-    default_escalation,
     get_engine,
     gpu_engine_keys,
     installed_gpu_engines,
@@ -23,7 +22,6 @@ from tts_suite.engines import (
     registry,
     reload_engines,
     require_engine,
-    speech_unit,
     voice_names,
 )
 
@@ -75,13 +73,6 @@ def test_browser_entry_is_listed_but_marked_as_the_clients_voice() -> None:
     assert [e.key for e in TTS_ENGINES.values() if e.renders_in_browser] == ["browser"]
 
 
-def test_default_escalation_comes_from_the_engines_and_the_browser_speaks_last() -> None:
-    entries = default_escalation()
-    assert [e.engine for e in entries] == [e.key for e in TTS_ENGINES.values() if e.in_default_escalation]
-    assert entries[-1].engine == "browser"
-    assert all(isinstance(e, EntryConfig) and e.host is None and e.enabled for e in entries)
-
-
 def test_gpu_engines_are_the_container_engines() -> None:
     assert gpu_engine_keys() == {"qwen3local", "xtts"}
 
@@ -105,28 +96,11 @@ def test_unknown_engine_key() -> None:
 
 # ── Units ──────────────────────────────────────────────────────────
 
-def test_slow_local_engines_default_to_the_whole_text_fast_ones_to_sentences() -> None:
-    assert {key: speech_unit(key, {}) for key in ("piper", "espeak")} == {
+def test_slow_local_engines_recommend_the_whole_text_fast_ones_sentences() -> None:
+    assert {key: require_engine(key).default_speech_unit for key in ("piper", "espeak")} == {
         "piper": "whole", "espeak": "whole",
     }
-    assert speech_unit("edge", {}) == "sentence" and speech_unit("dashscope_audio3", {}) == "sentence"
-
-
-def test_the_configured_unit_wins_for_its_engine_only() -> None:
-    defaults = {"piper": EngineDefaults(unit="paragraph"), "edge": EngineDefaults()}
-    assert speech_unit("piper", defaults) == "paragraph"
-    assert speech_unit("edge", defaults) == "sentence"  # unit None = the engine's own default
-
-
-def test_an_invalid_unit_is_an_error() -> None:
-    bad = {"edge": EngineDefaults(unit="word")}  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="speech unit"):
-        speech_unit("edge", bad)
-
-
-def test_unit_of_an_unknown_engine_is_an_error() -> None:
-    with pytest.raises(UnknownEngine):
-        speech_unit("nope", {})
+    assert all(require_engine(key).default_speech_unit == "sentence" for key in ("edge", "dashscope_audio3"))
 
 
 # ── Small helpers ──────────────────────────────────────────────────

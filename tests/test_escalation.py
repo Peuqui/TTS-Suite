@@ -1,4 +1,4 @@
-"""Escalation: binding the list, selection and skips, failover, slots, voices, the table of runs."""
+"""Escalation: binding, checking the configuration, selection and skips, failover, slots, voices, the table of runs."""
 from __future__ import annotations
 
 import asyncio
@@ -12,6 +12,7 @@ from speech_fakes import (
     entry,
     frames_for,
     make_run,
+    request,
     run_async,
     wav_info,
 )
@@ -21,13 +22,14 @@ from tts_suite.api import (
     ConfigInvalid,
     EngineDefaults,
     EngineStarting,
-    EntryConfig,
     Host,
+    InvalidRequest,
     NoEngineAvailable,
     Overloaded,
     SpeakRequest,
     SuiteConfig,
     TraceStep,
+    UnknownEngine,
     VoiceSettings,
 )
 from tts_suite.engines import get_engine
@@ -35,108 +37,117 @@ from tts_suite.escalation import (
     EngineSlots,
     RunTable,
     Skip,
-    bind_entries,
+    bind_engine,
+    check_config,
+    entry_label,
     resolve_voice,
 )
 
 ARAGON = Host("Aragon", "192.0.2.2")
-REQUEST = SpeakRequest(language="de")
+REQUEST = request("a")
 
 
-def _config(tmp_path: Path, entries: list[EntryConfig], **kwargs: object) -> SuiteConfig:
-    return SuiteConfig(voices_dir=tmp_path, entries=tuple(entries), **kwargs)  # type: ignore[arg-type]
+def _config(tmp_path: Path, **kwargs: object) -> SuiteConfig:
+    return SuiteConfig(voices_dir=tmp_path, **kwargs)  # type: ignore[arg-type]
 
 
-# ── Binding the configuration ──────────────────────────────────────
+# ── Binding ─────────────────────────────────────────────────────────
 
 
-def test_a_local_entry_uses_the_registry_engine_bound_to_the_voices(tmp_path: Path) -> None:
-    [bound] = bind_entries(_config(tmp_path, [EntryConfig("xtts")]))
-    assert bound.engine.key == "xtts" and bound.host is None and bound.enabled
-    assert bound.label == "xtts"
-    assert not bound.engine.is_remote and bound.engine.shared_voices_dir == tmp_path
+def test_a_local_engine_is_the_registry_engine_bound_to_the_voices(tmp_path: Path) -> None:
+    bound = bind_engine("xtts", None, tmp_path)
+    assert bound.key == "xtts" and not bound.is_remote and bound.shared_voices_dir == tmp_path
 
 
-def test_a_remote_entry_is_bound_to_its_host_and_keeps_the_registry_engine_local(tmp_path: Path) -> None:
-    [bound] = bind_entries(_config(tmp_path, [EntryConfig("qwen3local", host="Aragon")], hosts=(ARAGON,)))
-    assert bound.label == "qwen3local@Aragon"
-    assert bound.engine.service_url == "http://192.0.2.2:5052"
+def test_a_remote_engine_is_bound_to_its_host_and_keeps_the_registry_engine_local(tmp_path: Path) -> None:
+    bound = bind_engine("qwen3local", ARAGON, tmp_path)
+    assert bound.service_url == "http://192.0.2.2:5052"
     assert get_engine("qwen3local").service_url == "http://localhost:5052"  # type: ignore[union-attr]
 
 
-def test_the_order_and_disabled_entries_are_kept(tmp_path: Path) -> None:
-    entries = bind_entries(_config(tmp_path, [EntryConfig("piper"), EntryConfig("edge", enabled=False), EntryConfig("xtts")]))
-    assert [(e.engine.key, e.enabled) for e in entries] == [("piper", True), ("edge", False), ("xtts", True)]
-
-
-def test_an_entry_of_a_deactivated_engine_stays_in_the_list_as_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_engine_of_a_deactivated_folder_is_a_placeholder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(escalation, "is_deactivated", lambda key: key == "ghost")
-    [bound] = bind_entries(_config(tmp_path, [EntryConfig("ghost")]))
-    assert bound.engine.deactivated and not bound.enabled
+    assert bind_engine("ghost", None, tmp_path).deactivated
+
+
+def test_an_unknown_engine_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(UnknownEngine, match="unknown TTS engine"):
+        bind_engine("nope", None, tmp_path)
+
+
+def test_an_engine_without_rest_api_cannot_be_bound_to_a_host(tmp_path: Path) -> None:
+    with pytest.raises(InvalidRequest, match="no REST API"):
+        bind_engine("piper", ARAGON, tmp_path)
+
+
+def test_the_entry_label_names_the_host() -> None:
+    assert entry_label("xtts", None) == "xtts" and entry_label("xtts", ARAGON) == "xtts@Aragon"
+
+
+# ── Checking the configuration ─────────────────────────────────────
+
+
+def test_the_hosts_of_a_valid_configuration_are_indexed_by_name(tmp_path: Path) -> None:
+    assert check_config(_config(tmp_path, hosts=(ARAGON,))) == {"Aragon": ARAGON}
 
 
 @pytest.mark.parametrize(
-    ("entries", "hosts", "message"),
+    ("hosts", "message"),
     [
-        ([EntryConfig("nope")], (), "unknown TTS engine"),
-        ([EntryConfig("xtts", host="Ghost")], (), "unknown host"),
-        ([EntryConfig("piper", host="Aragon")], (ARAGON,), "no REST API"),
-        ([], (ARAGON, Host("Aragon", "10.0.0.3")), "duplicate host"),
-        ([EntryConfig("xtts"), EntryConfig("xtts")], (), "twice"),
-        ([], (Host("Evil", "-oProxyCommand=x"),), "not a host name"),
-        ([], (Host("Evil", "192.0.2.9 -x"),), "not a host name"),
-        ([], (Host("Evil", "192.0.2.9", ssh_user="-oX"),), "not a user name"),
+        ((ARAGON, Host("Aragon", "10.0.0.3")), "duplicate host"),
+        ((Host("Evil", "-oProxyCommand=x"),), "not a host name"),
+        ((Host("Evil", "192.0.2.9 -x"),), "not a host name"),
+        ((Host("Evil", "192.0.2.9", ssh_user="-oX"),), "not a user name"),
     ],
 )
-def test_a_broken_list_is_refused(tmp_path: Path, entries: list[EntryConfig], hosts: tuple[Host, ...], message: str) -> None:
+def test_a_bad_host_is_refused(tmp_path: Path, hosts: tuple[Host, ...], message: str) -> None:
     with pytest.raises(ConfigInvalid, match=message):
-        bind_entries(_config(tmp_path, entries, hosts=hosts))
+        check_config(_config(tmp_path, hosts=hosts))
 
 
 def test_an_empty_pronunciation_word_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigInvalid, match="pronunciations"):
-        bind_entries(_config(tmp_path, [], pronunciations={" ": "x"}))
+        check_config(_config(tmp_path, pronunciations={" ": "x"}))
 
 
 def test_a_missing_voices_dir_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigInvalid, match="voices_dir"):
-        bind_entries(SuiteConfig(voices_dir=tmp_path / "missing"))
+        check_config(SuiteConfig(voices_dir=tmp_path / "missing"))
 
 
 @pytest.mark.parametrize(
     ("engines", "message"),
     [
         ({"nope": EngineDefaults()}, "unknown TTS engine"),
-        ({"xtts": EngineDefaults(unit="word")}, "unit"),  # type: ignore[arg-type]
         ({"xtts": EngineDefaults(max_parallel=0)}, "max_parallel"),
         ({"xtts": EngineDefaults(max_queue=-1)}, "max_queue"),
     ],
 )
 def test_bad_engine_defaults_are_refused(tmp_path: Path, engines: dict[str, EngineDefaults], message: str) -> None:
     with pytest.raises(ConfigInvalid, match=message):
-        bind_entries(_config(tmp_path, [], engines=engines))
+        check_config(_config(tmp_path, engines=engines))
 
 
 # ── Voice ───────────────────────────────────────────────────────────
 
 
-def _voice(engine: FakeEngine, request: SpeakRequest, defaults: dict[str, EngineDefaults]) -> tuple[str, float, float]:
-    return resolve_voice(engine, request, defaults)
+def _voice(engine: FakeEngine, head: SpeakRequest, defaults: dict[str, EngineDefaults]) -> tuple[str, float, float]:
+    return resolve_voice(engine, head, defaults)
 
 
 def test_the_voice_comes_from_the_engine_setting_then_the_request_then_the_defaults_then_the_engine() -> None:
     engine = FakeEngine("x")
     engine.runs_in_container = True
     defaults = {"x": EngineDefaults(voice=VoiceSettings("Config", 1.1, 1.2))}
-    request = SpeakRequest(language="de", voice="Request", speed=1.5, voices={"x": VoiceSettings(voice="Own")})
-    assert _voice(engine, request, defaults) == ("Own", 1.5, 1.2)       # voice: own; speed: request; pitch: config
-    assert _voice(engine, SpeakRequest(language="de", voice="Request"), defaults) == ("Request", 1.1, 1.2)
+    head = request("x", voice="Request", speed=1.5, voices={"x": VoiceSettings(voice="Own")})
+    assert _voice(engine, head, defaults) == ("Own", 1.5, 1.2)       # voice: own; speed: request; pitch: config
+    assert _voice(engine, request("x", voice="Request"), defaults) == ("Request", 1.1, 1.2)
     assert _voice(engine, REQUEST, defaults) == ("Config", 1.1, 1.2)
     assert _voice(engine, REQUEST, {}) == ("V", 1.0, 1.0)               # the engine's own voice, neutral speed/pitch
 
 
 def test_the_request_voice_is_not_offered_to_engines_that_are_not_containers() -> None:
-    assert _voice(FakeEngine("edge"), SpeakRequest(language="de", voice="Container"), {})[0] == "V"
+    assert _voice(FakeEngine("edge"), request("edge", voice="Container"), {})[0] == "V"
 
 
 def test_no_voice_fails_the_entry_not_silently() -> None:
@@ -159,14 +170,13 @@ def test_the_first_entry_that_can_speak_speaks_and_the_skips_are_traced() -> Non
     deactivated.deactivated = True
     launcher = FakeLauncher({"c": Skip("stopped"), "d": Skip("no_vram", "needs 7000 MiB, most free 900 MiB on GPU 1")})
     run = make_run([
-        entry(deactivated, enabled=False), entry(engines[0], enabled=False), entry(browser),
+        entry(deactivated), entry(browser),
         entry(engines[2]), entry(engines[3]), entry(engines[4]),
     ], launcher)
     spoken = run_async(run.speak("Hallo Welt hier.", REQUEST))
     assert spoken.entry.engine.key == "e" and spoken.audio
     assert run.trace == (
         TraceStep("gone", "skipped", "deactivated"),
-        TraceStep("a", "skipped", "disabled"),
         TraceStep("browser", "skipped", "disabled", "speaks only in the client's own browser"),
         TraceStep("c", "skipped", "stopped"),
         TraceStep("d", "skipped", "no_vram", "needs 7000 MiB, most free 900 MiB on GPU 1"),
@@ -185,14 +195,19 @@ def test_a_stopped_entry_is_started_by_the_launcher_and_then_speaks() -> None:
 def test_without_waiting_a_cold_start_is_reported() -> None:
     run = make_run([entry(FakeEngine("a"))], FakeLauncher({"a": None}))
     with pytest.raises(EngineStarting):
-        run_async(run.speak("Hallo Welt hier.", SpeakRequest(language="de", wait=False)))
+        run_async(run.speak("Hallo Welt hier.", request("a", wait=False)))
 
 
 def test_when_nobody_can_speak_the_trace_says_why() -> None:
-    run = make_run([entry(FakeEngine("a")), entry(FakeEngine("b"), enabled=False)], FakeLauncher({"a": Skip("stopped")}))
+    browser = FakeEngine("b")
+    browser.renders_in_browser = True
+    run = make_run([entry(FakeEngine("a")), entry(browser)], FakeLauncher({"a": Skip("stopped")}))
     with pytest.raises(NoEngineAvailable) as error:
         run_async(run.speak("Hallo Welt hier.", REQUEST))
-    assert error.value.trace == (TraceStep("a", "skipped", "stopped"), TraceStep("b", "skipped", "disabled"))
+    assert error.value.trace == (
+        TraceStep("a", "skipped", "stopped"),
+        TraceStep("b", "skipped", "disabled", "speaks only in the client's own browser"),
+    )
 
 
 def test_parallel_sentences_start_a_container_once() -> None:
