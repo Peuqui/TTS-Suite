@@ -43,7 +43,7 @@ def run_host_command(host: Host, *command: str) -> str:
     ssh = [
         "ssh", "-i", str(ssh_key_path()), "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
         "-o", f"ConnectTimeout={TTS_HOST_SSH_CONNECT_TIMEOUT_S}", "-p", str(host.ssh_port),
-        ssh_target(host), *command,
+        "--", ssh_target(host), *command,
     ]
     spoken = " ".join(command)
     try:

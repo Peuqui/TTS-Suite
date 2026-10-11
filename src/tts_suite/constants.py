@@ -196,3 +196,8 @@ TTS_HOST_SSH_COMMAND_TIMEOUT_S = 60
 NVIDIA_SMI_QUERY_TIMEOUT_S = 5
 NVIDIA_SMI_APPS_TIMEOUT_S = 10
 DOCKER_PIDS_TIMEOUT_S = 10
+
+#: Shape of a host address and an SSH user in the configuration. Both end up as the target of an ``ssh``
+#: command; a value starting with ``-`` would be read as an ssh option, so neither may.
+HOST_ADDRESS_PATTERN = r"[A-Za-z0-9][A-Za-z0-9.:_-]*"
+HOST_SSH_USER_PATTERN = r"[A-Za-z0-9_][A-Za-z0-9_.-]*"

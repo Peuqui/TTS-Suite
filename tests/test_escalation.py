@@ -83,6 +83,9 @@ def test_an_entry_of_a_deactivated_engine_stays_in_the_list_as_off(tmp_path: Pat
         ([EntryConfig("piper", host="Aragon")], (ARAGON,), "no REST API"),
         ([], (ARAGON, Host("Aragon", "10.0.0.3")), "duplicate host"),
         ([EntryConfig("xtts"), EntryConfig("xtts")], (), "twice"),
+        ([], (Host("Evil", "-oProxyCommand=x"),), "not a host name"),
+        ([], (Host("Evil", "192.0.2.9 -x"),), "not a host name"),
+        ([], (Host("Evil", "192.0.2.9", ssh_user="-oX"),), "not a user name"),
     ],
 )
 def test_a_broken_list_is_refused(tmp_path: Path, entries: list[EntryConfig], hosts: tuple[Host, ...], message: str) -> None:

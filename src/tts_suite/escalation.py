@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from concurrent.futures import Executor
 from contextlib import asynccontextmanager
@@ -41,7 +42,7 @@ from .api import (
     VoiceSettings,
 )
 from .cleaning import TextCleaner
-from .constants import PITCH_DEFAULT, RUN_TTL_S, SPEED_DEFAULT
+from .constants import HOST_ADDRESS_PATTERN, HOST_SSH_USER_PATTERN, PITCH_DEFAULT, RUN_TTL_S, SPEED_DEFAULT
 from .engines.base import SPEECH_UNITS, DeactivatedEngine, TTSEngine, TTSFailure
 from .engines.registry import engine_unit, get_engine, is_deactivated
 from .i18n import translate
@@ -103,6 +104,10 @@ def _index_hosts(config: SuiteConfig) -> dict[str, Host]:
     for host in config.hosts:
         if host.name in hosts:
             raise ConfigInvalid(f"hosts: duplicate host name {host.name!r}")
+        if not re.fullmatch(HOST_ADDRESS_PATTERN, host.address):
+            raise ConfigInvalid(f"hosts[{host.name}]: address {host.address!r} is not a host name or address")
+        if host.ssh_user and not re.fullmatch(HOST_SSH_USER_PATTERN, host.ssh_user):
+            raise ConfigInvalid(f"hosts[{host.name}]: ssh_user {host.ssh_user!r} is not a user name")
         hosts[host.name] = host
     return hosts
 

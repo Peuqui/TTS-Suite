@@ -141,7 +141,7 @@ def test_the_ssh_command_pins_key_port_and_target(monkeypatch: pytest.MonkeyPatc
     assert host_ctl.run_host_command(host, "start", "xtts") == "up\n"
     command = run.calls[0]["command"]
     assert command[:3] == ["ssh", "-i", "/keys/suite"]
-    assert command[command.index("-p") + 1] == "2222" and command[-3:] == ["tts@192.0.2.2", "start", "xtts"]
+    assert command[command.index("-p") + 1] == "2222" and command[-4:] == ["--", "tts@192.0.2.2", "start", "xtts"]
     assert "BatchMode=yes" in command and "IdentitiesOnly=yes" in command
 
 
@@ -151,7 +151,7 @@ def test_without_a_user_the_target_is_the_address_and_without_the_variable_the_d
     monkeypatch.delenv("TTS_SUITE_SSH_KEY", raising=False)
     host_ctl.run_host_command(ARAGON, "status")
     command = run.calls[0]["command"]
-    assert command[2] == str(TTS_HOST_SSH_KEY_DEFAULT) and command[-2:] == ["192.0.2.2", "status"]
+    assert command[2] == str(TTS_HOST_SSH_KEY_DEFAULT) and command[-3:] == ["--", "192.0.2.2", "status"]
 
 
 @pytest.mark.parametrize(
