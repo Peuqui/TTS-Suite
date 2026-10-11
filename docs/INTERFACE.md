@@ -60,7 +60,11 @@ client decides whether and how it speaks (text, language, voice, speed and pitch
 - `engine` (optional) names one entry and skips the escalation: that engine speaks or the request fails.
 - Without it the first entry of the list that can speak does. If it fails, the next one takes over.
 - **`run`** (optional, an ID the client makes up for one reading, for example one answer): the service keeps
-  per run which entries failed and whether something was spoken already, for about ten minutes. Entries that
+  per run which entries failed and whether something was spoken already, for about ten minutes. Sentences of
+  one run may arrive in parallel: the choice and the state of a run sit behind a lock, so two sentences never
+  both start the successor and never both speak the announcement; **only the first sentence the successor
+  serves gets it**. If the service restarts in the middle of a run, the state is lost and the escalation
+  starts at the top of the list again (the client sees it in `X-TTS-Engine`). Entries that
   failed stay out for the rest of the run. If an entry fails after the first sound, the successor first
   speaks an announcement (for example "Voice change to X because of Y", German or English by `language`;
   the texts live in the suite) and then the unfinished sentence. Without `run` the service holds no state.
@@ -73,8 +77,10 @@ client decides whether and how it speaks (text, language, voice, speed and pitch
     the whole course of the escalation (replaces a header of failures only; the client builds its notes from
     it, for example "XTTS · Aragon → DashScope (outage)").
   - `X-TTS-Switch`: only if an announcement of a voice change was put in front; carries its reason.
-- Reasons are the same codes everywhere: `disabled`, `deactivated`, `stopped`, `no_vram`, `timeout`,
-  `software`, `server`, `cloud_quota`.
+- Reasons are the same codes everywhere. Failures (after the attempt): `engine`, `software`, `unreachable`,
+  `timeout`, `cloud_quota`. Skips (before the attempt): `disabled`, `deactivated`, `stopped`, `no_vram`.
+- `X-TTS-Trace` is compact ASCII-only JSON (no umlauts, no line breaks) and kept short, since servers cut
+  headers at about 8 KB.
 - No entry can speak: `503` with `{"error": "no_engine", "detail": ..., "trace": [...]}`. Bad input: `400`.
   Too many requests for an engine: `429` (see below).
 
@@ -96,8 +102,11 @@ A client that needs a sentence at a time cuts the text itself by the `unit` that
 ## Rules shared with STT-Suite
 
 - Errors are JSON: `{"error": "<code>", "detail": "<text>"}`.
-- **Access:** while the service listens only on `127.0.0.1` it asks for nothing. Listening on any other
-  address, it requires a token (`Authorization: Bearer <token>`) and refuses to start without one. The
+- **Access:** while the service listens only on `127.0.0.1`, `POST /speak` and the `GET` endpoints ask for
+  nothing. Commands that change something (`POST /config`, `/engines/*/start|stop|reload`, `/voices/sync`:
+  hosts and SSH targets, GPU containers, cloud keys) always need the token, also locally, since every
+  program on the machine reaches localhost. Listening on any other address, everything requires a token
+  (`Authorization: Bearer <token>`) and the service refuses to start without one. The
   service holds the keys of the cloud engines and the GPU: an open service on a network lets anyone speak
   on your account.
 - **Health:** `GET /health` on every service.
@@ -112,7 +121,12 @@ A client that needs a sentence at a time cuts the text itself by the `unit` that
 Goes with the suite: the engine folders and their containers, the escalation, engine manager and hosts
 (including `scripts/tts-host-ctl.sh` and the compose call that sets `TTS_GPU_UUID`), the post-processing, the
 announcement texts and engine labels (German and English), the configuration (replaces the parts of
-`aifred.lib.config` it used), and the tests of escalation, reload, completeness and the DashScope engine.
+`aifred.lib.config` it used), and the tests of escalation, reload, completeness and the DashScope engine. The container and project names
+(and the volume `xtts_voices`) are pinned in the compose files (`name:`), so Docker does not recreate running
+containers. The voices folder holds the user's own data: it is not in the public repository, its path is a
+setting, and both the suite and AIfred (agent bundles) use that one place. The list and hosts, today in
+AIfred's `settings.json`, move to `/config` as the one place; AIfred reads and writes them over HTTP through
+a thin client, with a one-time migration and no parallel operation.
 Stays with AIfred: `resolve_voice` and the agents' voices, the sentence cutting and text cleaning, the file
 names and storage of the audio, its placement policy (supplied to the suite), and a client test.
 

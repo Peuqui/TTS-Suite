@@ -64,7 +64,11 @@ Tonhöhe hat er selbst).
   Anfrage scheitert.
 - Ohne sie spricht der erste Eintrag der Liste, der sprechen kann. Scheitert er, übernimmt der nächste.
 - **`run`** (optional, eine ID, die der Client für ein Vorlesen ausdenkt, etwa eine Antwort): der Dienst merkt
-  sich je Lauf etwa zehn Minuten, welche Einträge ausfielen und ob schon gesprochen wurde. Ausgefallene
+  sich je Lauf etwa zehn Minuten, welche Einträge ausfielen und ob schon gesprochen wurde. Sätze eines Laufs
+  dürfen parallel eintreffen: Auswahl und Zustand eines Laufs liegen hinter einer Sperre, sodass nie zwei
+  Sätze beide den Nachfolger starten oder beide die Ansage sprechen; **nur der erste Satz, den der Nachfolger
+  bedient, bekommt sie**. Startet der Dienst mitten im Lauf neu, ist der Zustand verloren, und die
+  Eskalation beginnt wieder oben in der Liste (der Client sieht es an `X-TTS-Engine`). Ausgefallene
   Einträge bleiben für den Rest des Laufs draußen. Fällt ein Eintrag nach dem ersten Ton aus, spricht der
   Nachfolger zuerst eine Ansage (zum Beispiel „Stimmwechsel zu X wegen Y“, deutsch oder englisch nach
   `language`; die Texte liegen in der Suite) und dann den unfertigen Satz. Ohne `run` hält der Dienst keinen
@@ -78,8 +82,10 @@ Tonhöhe hat er selbst).
     ganze Verlauf der Eskalation (ersetzt eine Kopfzeile nur der Ausfälle; der Client baut daraus seine
     Hinweise, etwa „XTTS · Aragon → DashScope (Serverausfall)“).
   - `X-TTS-Switch`: nur, wenn eine Ansage des Stimmwechsels vorangestellt wurde; trägt ihren Grund.
-- Die Gründe sind überall dieselben Codes: `disabled`, `deactivated`, `stopped`, `no_vram`, `timeout`,
-  `software`, `server`, `cloud_quota`.
+- Die Gründe sind überall dieselben Codes. Ausfälle (nach dem Anlauf): `engine`, `software`, `unreachable`,
+  `timeout`, `cloud_quota`. Überspringen (vor dem Anlauf): `disabled`, `deactivated`, `stopped`, `no_vram`.
+- `X-TTS-Trace` ist kompaktes JSON nur aus ASCII (keine Umlaute, keine Zeilenumbrüche) und kurz gehalten,
+  da Server Kopfzeilen ab etwa 8 KB kappen.
 - Kein Eintrag kann sprechen: `503` mit `{"error": "no_engine", "detail": ..., "trace": [...]}`. Falsche
   Eingabe: `400`. Zu viele Anfragen für eine Engine: `429` (siehe unten).
 
@@ -102,8 +108,11 @@ Ein Client, der Satz für Satz braucht, schneidet den Text selbst nach der `unit
 ## Regeln gemeinsam mit STT-Suite
 
 - Fehler sind JSON: `{"error": "<code>", "detail": "<text>"}`.
-- **Zugang:** Solange der Dienst nur auf `127.0.0.1` lauscht, verlangt er nichts. Lauscht er auf einer anderen
-  Adresse, verlangt er ein Token (`Authorization: Bearer <token>`) und startet ohne eines nicht. Der Dienst
+- **Zugang:** Solange der Dienst nur auf `127.0.0.1` lauscht, verlangen `POST /speak` und die `GET`-Endpunkte
+  nichts. Befehle, die etwas ändern (`POST /config`, `/engines/*/start|stop|reload`, `/voices/sync`: Rechner
+  und SSH-Ziele, GPU-Container, Cloud-Schlüssel), brauchen immer das Token, auch lokal, da jedes Programm auf
+  dem Rechner localhost erreicht. Lauscht der Dienst auf einer anderen Adresse, verlangt alles ein Token
+  (`Authorization: Bearer <token>`), und er startet ohne eines nicht. Der Dienst
   hält die Schlüssel der Cloud-Engines und die GPU: Ein offener Dienst im Netz lässt jeden auf Ihre Rechnung
   sprechen.
 - **Gesundheit:** `GET /health` bei jedem Dienst.
@@ -119,7 +128,12 @@ Zieht mit in die Suite: die Engine-Ordner und ihre Container, Eskalation, Engine
 (samt `scripts/tts-host-ctl.sh` und dem Compose-Aufruf, der `TTS_GPU_UUID` setzt), die Nachbearbeitung, die
 Ansagetexte und Engine-Namen (deutsch und englisch), die Konfiguration (ersetzt die Teile von
 `aifred.lib.config`, die sie nutzte) und die Tests von Eskalation, Reload, Vollständigkeit und der
-DashScope-Engine. Bei AIfred bleibt: `resolve_voice` und die Stimmen der Agenten, Satzschnitt und
+DashScope-Engine. Container- und Projektnamen (und das Volume `xtts_voices`) werden in den Compose-Dateien
+gepinnt (`name:`), damit Docker laufende Container nicht neu anlegt. Der Stimmenordner enthält Nutzerdaten:
+Er liegt nicht im öffentlichen Repository, sein Pfad ist eine Einstellung, und Suite wie AIfred
+(Agent-Bündel) nutzen diesen einen Ort. Die Liste und die Rechner, heute in AIfreds `settings.json`, ziehen
+nach `/config` als den einen Ort; AIfred liest und schreibt sie über HTTP mit einem dünnen Client, mit
+einmaliger Migration und ohne Parallelbetrieb. Bei AIfred bleibt: `resolve_voice` und die Stimmen der Agenten, Satzschnitt und
 Textbereinigung, Dateinamen und Ablage des Audios, seine Platzierungs-Richtlinie (der Suite geliefert) und ein
 Client-Test.
 
