@@ -74,6 +74,16 @@ def test_read_timeout_is_a_timeout(container: FakeContainer) -> None:
     assert failure.value.reason == "timeout"
 
 
+@pytest.mark.parametrize("error", [requests.exceptions.ChunkedEncodingError("cut off"), requests.exceptions.ContentDecodingError("garbled")])
+def test_an_answer_cut_off_by_a_dying_container_is_an_engine_failure_not_software(
+    container: FakeContainer, error: Exception,
+) -> None:
+    container.reply = error
+    with pytest.raises(TTSFailure) as failure:
+        XTTSEngine()._synthesize_via_http("/tts", {"text": "Hallo"})
+    assert failure.value.reason == "engine"
+
+
 def test_http_error_is_an_engine_failure(container: FakeContainer) -> None:
     container.reply = _answer(status=500, text="CUDA out of memory")
     with pytest.raises(TTSFailure) as failure:

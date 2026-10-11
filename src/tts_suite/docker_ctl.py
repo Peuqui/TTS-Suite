@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
+from .constants import DOCKER_COMPOSE_TIMEOUT_S
+
 logger = logging.getLogger(__name__)
 
 ComposeAction = Literal["up", "down"]
@@ -45,9 +47,13 @@ def docker_compose_action(
         environment[GPU_UUID_ENV] = gpu_uuid
     if action == "up" and vram_budget_mib is not None:
         environment[VRAM_BUDGET_ENV] = str(vram_budget_mib)
-    result = subprocess.run(
-        command, capture_output=True, text=True, cwd=str(compose_file.parent), env=environment,
-    )
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, cwd=str(compose_file.parent), env=environment,
+            timeout=DOCKER_COMPOSE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"docker compose {action} timed out"
     if result.returncode != 0:
         return False, f"docker compose {action} failed: {result.stderr}"
     verb = "started" if action == "up" else "stopped"

@@ -16,7 +16,6 @@ from .constants import (
     ATEMPO_MAX,
     ATEMPO_MIN,
     AUDIO_EXTENSIONS,
-    DEFAULT_SAMPLE_RATE_HZ,
     FFPROBE_TIMEOUT_S,
     POSTPROCESS_TOLERANCE,
 )
@@ -69,14 +68,16 @@ async def _run(command: list[str], timeout: float | None = None) -> tuple[int, b
 
 
 async def _sample_rate(audio_file: Path) -> int:
-    """Sample rate of the file; the XTTS/Qwen3 rate when ``ffprobe`` cannot tell."""
-    code, stdout, _ = await _run(
+    """Sample rate of the file. ``ffprobe`` not telling is a failure: a guessed rate would give the wrong pitch and duration."""
+    code, stdout, stderr = await _run(
         ["ffprobe", "-v", "error", "-show_entries", "stream=sample_rate",
          "-of", "default=noprint_wrappers=1:nokey=1", str(audio_file)],
         timeout=FFPROBE_TIMEOUT_S,
     )
     text = stdout.decode().strip()
-    return int(text) if code == 0 and text.isdigit() else DEFAULT_SAMPLE_RATE_HZ
+    if code != 0 or not text.isdigit():
+        raise TTSFailure("software", f"ffprobe could not read the sample rate (exit {code}): {stderr.decode()[:200]}")
+    return int(text)
 
 
 async def adjust_audio(audio: bytes, media_type: str, speed: float = 1.0, pitch: float = 1.0) -> bytes:

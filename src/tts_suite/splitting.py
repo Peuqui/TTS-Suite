@@ -88,9 +88,12 @@ def _period_ends_sentence(text: str, i: int) -> bool:
 def _scan_sentences(text: str, start: int) -> tuple[list[_Extraction], int]:
     """Find the sentences of ``text`` from ``start`` on (``text`` has ``\\n`` line ends only).
     Returns them and the position where the unfinished rest begins. The text before ``start``
-    is only looked at, never cut again (the end detection looks back up to 20 characters)."""
+    is only looked at, never cut again (the end detection looks back up to 20 characters).
+    A code block that is still open (an odd number of fences) is not scanned; the sentences in
+    front of it are found as if the text ended at its opening fence — so ``start`` never lies
+    inside a code block."""
     if text.count(CODE_FENCE) % 2 == 1:
-        return [], start  # inside a code block: nothing is a sentence yet
+        text = text[:text.rfind(CODE_FENCE)]
     found: list[_Extraction] = []
     sentence_start = start
     i = start

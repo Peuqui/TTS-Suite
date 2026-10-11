@@ -187,7 +187,7 @@ class SpeakSummary:
     """What happened in one reading; complete when the segment stream has ended."""
 
     trace: tuple[TraceStep, ...] = ()
-    switch: FailureReason | None = None  # set if an announcement of a voice change was put in front
+    switch: FailureReason | None = None  # set if an announcement of a voice change was delivered
 
 
 class SpeechStream(Protocol):
@@ -204,7 +204,11 @@ class SpeechStream(Protocol):
     def segments(self) -> AsyncIterator[AudioSegment]:
         """Audio in speaking order. A failure after the first segment ends the iteration
         with the :class:`SuiteError` that caused it (before the first segment the same
-        error comes from the first step of the iteration), never silently."""
+        error comes from the first step of the iteration), never silently. Exception: a request
+        that names an engine unknown to the suite or missing from the list fails at once in
+        ``speak`` / ``open_stream`` (:class:`UnknownEngine`, :class:`NoEngineAvailable`).
+        A voice change after a failure is announced in a segment of its own, in front of the
+        first segment of the successor."""
         ...
 
     async def aclose(self) -> None:
@@ -287,12 +291,18 @@ class TTSSuite(Protocol):
 
     def open_stream(self, request: SpeakRequest) -> SpeechStream: ...
 
-    async def start(self, engine: str, host: str | None = None) -> None: ...
+    async def start(self, engine: str, host: str | None = None) -> None:
+        """Start the container and wait until it serves. Forgets why an earlier start of this entry
+        (or the VRAM ceiling) took it out of the list."""
+        ...
 
     async def stop(self, engine: str, host: str | None = None) -> None: ...
 
     async def reload(self) -> tuple[list[str], list[str]]:
-        """Read the engine folders again; returns (removed, added) engine keys."""
+        """Read the engine folders again; returns (removed, added) engine keys. Forgets the
+        remembered start failures of all entries. Raises :class:`ConfigInvalid` when an engine
+        folder was deleted (not moved to ``disabled/``) that the list still names: the engine is
+        gone from the registry, the list stays as it was until a corrected configuration is set."""
         ...
 
     async def sync_voices(self, engine: str) -> list[VoiceInfo]:

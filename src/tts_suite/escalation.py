@@ -4,8 +4,9 @@ Ported from AIfred Intelligence (``tts_escalation.py``). The list is ordered; th
 entry that can speak speaks.
 
 * Before the first sound an entry that fails drops out silently, the next one takes over.
-* An entry that fails AFTER it has spoken is replaced the same way, but its successor first
-  announces the voice change (with the reason) and then speaks the sentence that was not done.
+* An entry that fails AFTER it has spoken is replaced the same way. The announcement of the voice
+  change (with the reason) is the stream's business: it decides in speaking order, when the
+  successor's first segment is next in line (see :mod:`tts_suite.stream`).
 * An entry that failed stays out for the rest of the run, so the voice does not jump back and forth.
 * The selection is serialised per run, so sentences generated in parallel do not start a
   container twice.
@@ -38,6 +39,7 @@ from .api import (
     Unit,
     VoiceSettings,
 )
+from .cleaning import TextCleaner
 from .constants import PITCH_DEFAULT, RUN_TTL_S, SPEED_DEFAULT
 from .engines.base import SPEECH_UNITS, DeactivatedEngine, TTSEngine, TTSFailure
 from .engines.registry import engine_unit, get_engine, is_deactivated
@@ -209,6 +211,18 @@ class EngineSlotTable:
         self._defaults = defaults
         self._slots: dict[tuple[str, str], EngineSlots] = {}
 
+    def reconfigure(self, defaults: Mapping[str, EngineDefaults]) -> None:
+        """Take new defaults. The slots of an engine whose limits changed are replaced (syntheses
+        under way keep the old ones); all others stay the same objects, so running and new readings
+        keep sharing one capacity — a new table per configuration would double it."""
+        def limits(configured: Mapping[str, EngineDefaults], engine_key: str) -> tuple[int | None, int | None]:
+            entry = configured.get(engine_key, EngineDefaults())
+            return entry.max_parallel, entry.max_queue
+
+        for key in [key for key in self._slots if limits(self._defaults, key[0]) != limits(defaults, key[0])]:
+            del self._slots[key]
+        self._defaults = defaults
+
     def for_engine(self, engine: TTSEngine) -> EngineSlots:
         key = (engine.key, engine.address)
         if key not in self._slots:
@@ -252,12 +266,10 @@ def resolve_voice(
 
 @dataclass(frozen=True)
 class Spoken:
-    """The result of one unit: its audio, who spoke it, and the reason of the voice change that
-    was announced in front of it (``None`` = no announcement)."""
+    """The result of one unit: its audio and who spoke it."""
 
     audio: bytes
     entry: EscalationEntry
-    announced: FailureReason | None
 
 
 class SpeechRun:
@@ -276,17 +288,21 @@ class SpeechRun:
         self._defaults = defaults
         self._lock = asyncio.Lock()
         self._current: EscalationEntry | None = None
-        self._failed: set[str] = set()
+        self._failed: dict[str, FailureReason] = {}  # entry label -> why it dropped out of this run
         self._spoken: set[str] = set()
         self._trace: list[TraceStep] = []
-        # Reason of a failure after the first sound whose announcement is still to be spoken,
-        # and whether a sentence is speaking it right now (only one sentence announces).
-        self._pending_switch: FailureReason | None = None
-        self._switch_claimed = False
         self._switch: FailureReason | None = None
+        # Syntheses running on an entry: a failed entry keeps its hold until the last of them is over.
+        self._busy: dict[str, int] = {}
+        self._cleaner: TextCleaner | None = None
         # The entries this run holds (their containers are in use) while streams are attached to it.
         self._attached = 0
         self._held: dict[str, EscalationEntry] = {}
+
+    @property
+    def attached(self) -> bool:
+        """Whether a stream uses this run right now."""
+        return self._attached > 0
 
     def attach(self) -> None:
         """A stream starts to use this run (several streams may share one under a run ID)."""
@@ -305,9 +321,12 @@ class SpeechRun:
             self._held[entry.label] = entry
             self._launcher.hold(entry)
 
-    def _unhold(self, entry: EscalationEntry) -> None:
-        if self._held.pop(entry.label, None) is not None:
-            self._launcher.release(entry)
+    def _unhold_if_idle(self, entry: EscalationEntry) -> None:
+        """A failed entry lets go of its container once no sentence of this run runs on it any more
+        (a stop in the middle of their requests would tear them down)."""
+        if entry.label in self._failed and not self._busy.get(entry.label):
+            if self._held.pop(entry.label, None) is not None:
+                self._launcher.release(entry)
 
     @property
     def trace(self) -> tuple[TraceStep, ...]:
@@ -317,6 +336,21 @@ class SpeechRun:
     def switch(self) -> FailureReason | None:
         """The reason of the first voice change announced in this run."""
         return self._switch
+
+    def cleaner(self, language: str, pronunciations: Mapping[str, str]) -> TextCleaner:
+        """The text cleaner of this reading, made by its first stream: its state (an open code block,
+        the hints already spoken) outlives a single call."""
+        if self._cleaner is None:
+            self._cleaner = TextCleaner(language, pronunciations)
+        return self._cleaner
+
+    def failure_of(self, label: str) -> FailureReason | None:
+        """Why the entry dropped out of this run; ``None`` = it did not."""
+        return self._failed.get(label)
+
+    def note_switch(self, reason: FailureReason) -> None:
+        """The stream announced a voice change."""
+        self._switch = self._switch or reason
 
     def unit(self, entry: EscalationEntry) -> Unit:
         return engine_unit(entry.engine, self._defaults)
@@ -329,6 +363,7 @@ class SpeechRun:
         when none can."""
         async with self._lock:
             if self._current is not None and self._current.label not in self._failed:
+                self._hold(self._current)  # a later stream of this run holds it again (idempotent)
                 return self._current
             for entry in self._entries:
                 if entry.label in self._failed:
@@ -366,12 +401,8 @@ class SpeechRun:
         :class:`Overloaded` and the other errors of the suite are not an entry's failure and go on up."""
         while True:
             entry = await self.select(wait=request.wait)
-            announced = self._claim_switch()
-            succeeded = False
             try:
-                spoken_text = self._announcement(entry, announced, request.language) + text
-                audio = await self._synthesize(entry, spoken_text, request)
-                succeeded = True
+                audio = await self._synthesize(entry, text, request)
             except TTSFailure as failure:
                 self._fail(entry, failure.reason, failure.detail)
                 continue
@@ -380,57 +411,41 @@ class SpeechRun:
             except Exception as exc:  # noqa: BLE001 — any other error is a software error of this entry: next entry
                 self._fail(entry, "software", f"{type(exc).__name__}: {exc}")
                 continue
-            finally:
-                self._settle_switch(announced, succeeded)
             self._record_spoken(entry)
-            return Spoken(audio, entry, announced)
+            return Spoken(audio, entry)
 
     async def _synthesize(self, entry: EscalationEntry, text: str, request: SpeakRequest) -> bytes:
-        voice, speed, pitch = resolve_voice(entry.engine, request, self._defaults)
-        async with self._slots.for_engine(entry.engine).slot():
-            audio = await synthesize(entry.engine, text, voice, request.language, speed, pitch)
-        await self._launcher.check_vram(entry)
-        return audio
+        self._busy[entry.label] = self._busy.get(entry.label, 0) + 1
+        try:
+            voice, speed, pitch = resolve_voice(entry.engine, request, self._defaults)
+            async with self._slots.for_engine(entry.engine).slot():
+                audio = await synthesize(entry.engine, text, voice, request.language, speed, pitch)
+            await self._launcher.check_vram(entry)
+            return audio
+        finally:
+            self._busy[entry.label] -= 1
+            self._unhold_if_idle(entry)
 
     def _fail(self, entry: EscalationEntry, reason: FailureReason, detail: str) -> None:
+        if entry.label in self._failed:
+            return  # parallel sentences report one outage: one trace step, one reason
         logger.warning("TTS escalation: %s failed (%s): %s", entry.label, reason, detail)
-        self._failed.add(entry.label)
-        self._unhold(entry)
+        self._failed[entry.label] = reason
+        self._unhold_if_idle(entry)
         self._trace.append(TraceStep(entry.label, "failed", reason, detail))
-        if entry.label in self._spoken and self._pending_switch is None:
-            self._pending_switch = reason
 
     def _record_spoken(self, entry: EscalationEntry) -> None:
         if entry.label not in self._spoken:
             self._spoken.add(entry.label)
             self._trace.append(TraceStep(entry.label, "spoke"))
 
-    def _claim_switch(self) -> FailureReason | None:
-        """The announcement is spoken in front of ONE sentence — the first that asks for it."""
-        if self._pending_switch is None or self._switch_claimed:
-            return None
-        self._switch_claimed = True
-        return self._pending_switch
-
-    def _settle_switch(self, claimed: FailureReason | None, succeeded: bool) -> None:
-        """The sentence that carried the announcement is done (announcement spoken) or failed
-        (the next sentence takes it over)."""
-        if claimed is None:
-            return
-        self._switch_claimed = False
-        if succeeded:
-            self._pending_switch = None
-            self._switch = self._switch or claimed
-
     @staticmethod
-    def _announcement(entry: EscalationEntry, reason: FailureReason | None, language: str) -> str:
-        """The sentence in front of the successor's first text after a failure in mid-text."""
-        if reason is None:
-            return ""
-        target = entry.engine.label_short
-        if entry.host is not None:
-            target = translate("tts_switch_target_remote", language, engine=target, host=entry.host.name)
-        return translate(f"tts_switch_{reason}", language, target=target) + " "
+    def announcement(successor: EscalationEntry, reason: FailureReason, language: str) -> str:
+        """The sentence that announces a voice change to ``successor`` and names the reason."""
+        target = successor.engine.label_short
+        if successor.host is not None:
+            target = translate("tts_switch_target_remote", language, engine=target, host=successor.host.name)
+        return translate(f"tts_switch_{reason}", language, target=target)
 
 
 # ── The table of runs ───────────────────────────────────────────────
@@ -438,7 +453,8 @@ class SpeechRun:
 
 class RunTable:
     """The runs that clients named with a run ID. A run is forgotten ``ttl_s`` seconds after its
-    last use; expired runs are dropped when the table is used (no background task)."""
+    last use — a run a stream is attached to is in use, however long it speaks; expired runs are
+    dropped when the table is used (no background task)."""
 
     def __init__(self, ttl_s: float = RUN_TTL_S, clock: Callable[[], float] = time.monotonic) -> None:
         self._ttl_s = ttl_s
@@ -447,10 +463,15 @@ class RunTable:
 
     def get_or_create(self, key: tuple[str, str | None], create: Callable[[], SpeechRun]) -> SpeechRun:
         now = self._clock()
-        self._runs = {k: (run, expires) for k, (run, expires) in self._runs.items() if expires > now}
+        self._runs = {k: (run, expires) for k, (run, expires) in self._runs.items() if run.attached or expires > now}
         run = self._runs[key][0] if key in self._runs else create()
         self._runs[key] = (run, now + self._ttl_s)
         return run
+
+    def touch(self, key: tuple[str, str | None]) -> None:
+        """The last stream of a run ended: its time to live starts now."""
+        if key in self._runs:
+            self._runs[key] = (self._runs[key][0], self._clock() + self._ttl_s)
 
     def clear(self) -> None:
         self._runs.clear()

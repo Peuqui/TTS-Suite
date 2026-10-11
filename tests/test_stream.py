@@ -6,13 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from speech_fakes import FakeEngine, FakeLauncher, entry, frames_for, make_run, run_async, wav_info
+from speech_fakes import FakeEngine, FakeLauncher, GatedFailEngine, entry, frames_for, make_run, run_async, wav_info
 
 from tts_suite.api import (
     AudioSegment,
     EngineDefaults,
     EngineStarting,
     EntryConfig,
+    Host,
     NoEngineAvailable,
     Overloaded,
     SpeakRequest,
@@ -156,6 +157,36 @@ def test_no_text_after_finish() -> None:
     run_async(scenario())
 
 
+def test_a_slow_consumer_does_not_have_the_whole_text_generated_ahead_of_it() -> None:
+    engine = FakeEngine("a")  # two slots
+    stream = Stream(REQUEST, make_run([entry(engine)]))
+    sentences = [f"Dies ist der Satz mit der Nummer {n} im Text." for n in range(60)]
+
+    async def scenario() -> None:
+        await stream.feed(" ".join(sentences))
+        await stream.finish()
+        segments = stream.segments()
+        await anext(segments)               # one segment taken ...
+        await asyncio.sleep(0.2)            # ... and the consumer sleeps
+        assert len(engine.texts) <= 2 * engine.max_parallel_requests
+        await stream.aclose()
+
+    run_async(scenario())
+
+
+def test_the_segments_of_a_long_text_still_all_come_when_the_consumer_reads_on() -> None:
+    engine = FakeEngine("a")
+    stream = Stream(REQUEST, make_run([entry(engine)]))
+    sentences = [f"Dies ist der Satz mit der Nummer {n} im Text." for n in range(30)]
+
+    async def scenario() -> list[AudioSegment]:
+        await stream.feed(" ".join(sentences))
+        await stream.finish()
+        return await collect(stream)
+
+    assert lengths(run_async(scenario())) == [frames_for(s) for s in sentences]
+
+
 # ── Keep-alive ──────────────────────────────────────────────────────
 
 
@@ -252,7 +283,11 @@ def test_an_error_after_the_first_segment_ends_the_stream_with_that_error() -> N
     run_async(scenario())
 
 
-def test_a_failure_in_mid_text_is_taken_over_with_an_announcement() -> None:
+ANNOUNCEMENT = "Stimmwechsel wegen Serverausfall, weiter mit B."
+FIVE = ["Satz eins kommt hier.", "Satz zwei kommt hier.", "Satz drei kommt hier.", "Satz vier kommt hier.", "Satz fünf kommt hier."]
+
+
+def test_a_failure_in_mid_text_is_announced_in_a_segment_of_its_own_in_front_of_the_successor() -> None:
     first, second = FakeEngine("a", fail="unreachable", fail_after=1), FakeEngine("b")
     stream = Stream(REQUEST, make_run([entry(first), entry(second)]))
 
@@ -262,11 +297,106 @@ def test_a_failure_in_mid_text_is_taken_over_with_an_announcement() -> None:
         return await collect(stream)
 
     segments = run_async(scenario())
-    assert [s.engine for s in segments] == ["a", "b", "b"]
-    announced = "Stimmwechsel wegen Serverausfall, weiter mit B. " + SENTENCES[1]
-    assert lengths(segments) == [frames_for(SENTENCES[0]), frames_for(announced), frames_for(SENTENCES[2])]
+    assert [s.engine for s in segments] == ["a", "b", "b", "b"]
+    assert lengths(segments) == [
+        frames_for(SENTENCES[0]), frames_for(ANNOUNCEMENT), frames_for(SENTENCES[1]), frames_for(SENTENCES[2]),
+    ]
     assert stream.summary.switch == "unreachable"
     assert [(s.entry, s.outcome) for s in stream.summary.trace] == [("a", "spoke"), ("a", "failed"), ("b", "spoke")]
+
+
+def test_the_announcement_names_a_remote_successor_and_speaks_the_language_of_the_request() -> None:
+    first, second = FakeEngine("a", fail="engine", fail_after=1), FakeEngine("b", remote=True)
+    stream = Stream(SpeakRequest(language="en"), make_run([entry(first), entry(second, Host("Aragon", "192.0.2.2"))]))
+
+    async def scenario() -> None:
+        await stream.feed("One sentence here. Another sentence here.")
+        await stream.finish()
+        await collect(stream)
+
+    run_async(scenario())
+    assert second.texts == [
+        "Another sentence here.", "Voice change due to an engine failure, continuing with B on Aragon.",
+    ]
+
+
+def test_without_a_segment_delivered_before_the_failure_nothing_is_announced() -> None:
+    first, second = FakeEngine("a", fail="unreachable"), FakeEngine("b")
+    stream = Stream(REQUEST, make_run([entry(first), entry(second)]))
+
+    async def scenario() -> list[AudioSegment]:
+        await stream.feed(TEXT)
+        await stream.finish()
+        return await collect(stream)
+
+    segments = run_async(scenario())
+    assert lengths(segments) == [frames_for(s) for s in SENTENCES] and stream.summary.switch is None
+
+
+def test_sentences_failing_one_after_the_other_are_announced_once() -> None:
+    first, second = GatedFailEngine("a"), FakeEngine("b")
+    first.max_parallel_requests = 4
+    first.fail_gates = {marker: asyncio.Event() for marker in ("zwei", "drei", "vier", "fünf")}
+    stream = Stream(REQUEST, make_run([entry(first), entry(second)]))
+
+    async def scenario() -> list[AudioSegment]:
+        await stream.feed(" ".join(FIVE))
+        await stream.finish()
+        reader = asyncio.create_task(collect(stream))
+        await asyncio.sleep(0.02)
+        for gate in first.fail_gates.values():  # the timeouts run out one after the other
+            gate.set()
+            await asyncio.sleep(0.02)
+        return await reader
+
+    segments = run_async(scenario())
+    assert [s.engine for s in segments] == ["a", "b", "b", "b", "b", "b"]
+    assert lengths(segments) == [frames_for(FIVE[0]), frames_for(ANNOUNCEMENT)] + [frames_for(t) for t in FIVE[1:]]
+    assert [step.outcome for step in stream.summary.trace] == ["spoke", "failed", "spoke"]
+
+
+def test_a_failure_before_the_first_sentence_is_over_still_announces_in_front_of_the_successor() -> None:
+    first, second = GatedFailEngine("a"), FakeEngine("b")
+    first.max_parallel_requests = 3
+    first.gates = {"eins": asyncio.Event()}          # the first sentence is slow ...
+    first.fail_gates = {"zwei": asyncio.Event()}     # ... the second one breaks before it is done
+    stream = Stream(REQUEST, make_run([entry(first), entry(second)]))
+
+    async def scenario() -> list[AudioSegment]:
+        await stream.feed(" ".join(FIVE[:2]))
+        await stream.finish()
+        reader = asyncio.create_task(collect(stream))
+        await asyncio.sleep(0.02)
+        first.fail_gates["zwei"].set()
+        await asyncio.sleep(0.02)
+        first.gates["eins"].set()
+        return await reader
+
+    segments = run_async(scenario())
+    assert [s.engine for s in segments] == ["a", "b", "b"]
+    assert lengths(segments)[1] == frames_for(ANNOUNCEMENT) and stream.summary.switch == "unreachable"
+
+
+def test_the_announcement_comes_in_front_of_the_first_segment_of_the_successor_not_one_later() -> None:
+    first, second = GatedFailEngine("a"), FakeEngine("b")
+    first.max_parallel_requests = 3
+    first.fail_gates = {"zwei": asyncio.Event(), "drei": asyncio.Event()}
+    stream = Stream(REQUEST, make_run([entry(first), entry(second)]))
+
+    async def scenario() -> list[AudioSegment]:
+        await stream.feed(" ".join(FIVE[:3]))
+        await stream.finish()
+        reader = asyncio.create_task(collect(stream))
+        await asyncio.sleep(0.02)
+        first.fail_gates["drei"].set()   # sentence 3 breaks first ...
+        await asyncio.sleep(0.02)
+        first.fail_gates["zwei"].set()   # ... sentence 2 after it
+        return await reader
+
+    segments = run_async(scenario())
+    assert lengths(segments) == [
+        frames_for(FIVE[0]), frames_for(ANNOUNCEMENT), frames_for(FIVE[1]), frames_for(FIVE[2]),
+    ]
 
 
 # ── Abort ───────────────────────────────────────────────────────────
@@ -357,6 +487,44 @@ def test_the_state_of_a_run_is_kept_for_the_next_call_with_the_same_id(tmp_path:
 
     run_async(scenario())
     assert len(broken.texts) == 3 and len(healthy.texts) == 2  # tries: first call, reading-2, after the expiry
+
+
+def test_a_new_configuration_does_not_double_the_capacity_of_an_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = FakeEngine("slowfake")
+    engine.max_parallel_requests = 1
+    engine.gates = {"Satz": asyncio.Event()}
+    _install(monkeypatch, engine)
+    config = _config(tmp_path, ["slowfake"])
+    speaker = Speaker(config, FakeLauncher())
+
+    async def scenario() -> None:
+        first = asyncio.create_task(collect(speaker.speak("Der erste Satz hier.", REQUEST)))
+        await asyncio.sleep(0.02)
+        speaker.set_config(config)                       # a reload, a changed voice ...
+        second = asyncio.create_task(collect(speaker.speak("Der zweite Satz hier.", REQUEST)))
+        await asyncio.sleep(0.02)
+        engine.gates["Satz"].set()
+        await asyncio.gather(first, second)
+
+    run_async(scenario())
+    assert engine.peak == 1
+
+
+def test_a_code_block_that_opens_in_one_call_and_closes_in_the_next_of_the_same_run_does_not_swallow_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = FakeEngine("fake")
+    _install(monkeypatch, engine)
+    speaker = Speaker(_config(tmp_path, ["fake"]), FakeLauncher())
+    named = SpeakRequest(language="de", run="reading-1")
+
+    async def scenario() -> None:
+        await collect(speaker.speak("Hier kommt ein Beispiel für dich:\n\n```python\nprint(x)\n", named))
+        await collect(speaker.speak("```\n\nDanach geht es wirklich weiter. Und noch ein ganz normaler Satz.", named))
+
+    run_async(scenario())
+    # (the second call starts with a lone fence, so its cutter sees an unclosed block and keeps the rest as one unit)
+    assert engine.texts[-1] == "Danach geht es wirklich weiter. Und noch ein ganz normaler Satz."
 
 
 def test_a_named_engine_speaks_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

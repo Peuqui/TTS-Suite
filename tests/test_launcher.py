@@ -3,6 +3,7 @@ container, background start, VRAM ceiling, holds and heartbeat — with fakes fo
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 import pytest
@@ -34,7 +35,7 @@ from tts_suite.escalation import Skip
 from tts_suite.holds import EngineHolds
 from tts_suite.launcher import SuiteLauncher
 from tts_suite.speaker import Speaker
-from tts_suite.vram import VramGuard
+from tts_suite.vram import VramGuard, VramMeasurementFailed
 
 
 def _launcher(
@@ -198,7 +199,7 @@ def test_without_waiting_the_start_runs_in_the_background_and_the_status_follows
     assert engine.ready_calls == 1
 
 
-def test_the_failure_of_a_background_start_is_remembered_and_reported_once(tmp_path: Path) -> None:
+def test_the_failure_of_a_start_is_remembered_until_an_explicit_start_or_a_new_configuration(tmp_path: Path) -> None:
     engine = ContainerEngine("a", ready_ok=False, ready_delay_s=0.02)
 
     async def scenario() -> None:
@@ -210,8 +211,33 @@ def test_the_failure_of_a_background_start_is_remembered_and_reported_once(tmp_p
         failure = Skip("stopped", "start failed: model did not load")
         assert await launcher.status(entry) == "stopped" and launcher.start_failure(entry) == failure
         assert await launcher.ensure_serving(entry, wait=False) == failure
-        with pytest.raises(EngineStarting):  # told once; the next request tries again
+        assert await launcher.ensure_serving(entry, wait=True) == failure  # no second wait for a start that did not work
+        assert engine.ready_calls == 1
+        launcher.clear_failures(entry)  # an explicit start
+        with pytest.raises(EngineStarting):
             await launcher.ensure_serving(entry, wait=False)
+        await _until_settled(launcher, engine)
+        assert launcher.start_failure(entry) == failure and engine.ready_calls == 2
+        launcher.set_config(SuiteConfig(voices_dir=tmp_path))  # a new configuration: forgotten
+        assert launcher.start_failure(entry) is None
+
+    run_async(scenario())
+
+
+def test_a_reader_does_not_wait_longer_than_the_startup_time_plus_the_reserve(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tts_suite import launcher as launcher_module
+
+    monkeypatch.setattr(launcher_module, "START_WAIT_RESERVE_S", 0.05)
+    engine = ContainerEngine("a", ready_delay_s=0.4)
+    engine.startup_timeout_s = 0
+
+    async def scenario() -> None:
+        launcher = _launcher(tmp_path)
+        started = time.monotonic()
+        skip = await launcher.ensure_serving(local_entry(engine), wait=True)
+        assert skip == Skip("stopped", "start did not finish within 0.05 s")
+        assert time.monotonic() - started < 0.3
+        await launcher.aclose()
 
     run_async(scenario())
 
@@ -236,6 +262,23 @@ def test_stop_is_refused_while_a_reading_holds_the_container(tmp_path: Path) -> 
         await launcher.aclose()
 
     run_async(scenario())
+
+
+def test_stop_is_refused_while_the_container_is_starting(tmp_path: Path) -> None:
+    engine = ContainerEngine("a", ready_delay_s=0.1)
+
+    async def scenario() -> None:
+        launcher = _launcher(tmp_path)
+        entry = local_entry(engine)
+        with pytest.raises(EngineStarting):
+            await launcher.ensure_serving(entry, wait=False)
+        with pytest.raises(EngineInUse, match="a is starting"):
+            await launcher.stop(entry)
+        await _until_settled(launcher, engine)
+        await launcher.stop(entry)
+
+    run_async(scenario())
+    assert engine.stops == 1
 
 
 def test_a_remote_container_is_stopped_over_ssh(tmp_path: Path) -> None:
@@ -276,6 +319,55 @@ def test_use_over_the_budget_stops_the_container_and_fails_the_entry(tmp_path: P
 
     run_async(scenario())
     assert len(measured) == 2 and engine.stops == 1 and not engine.up
+
+
+def test_an_entry_stopped_for_its_vram_use_is_not_started_again_until_an_explicit_start(tmp_path: Path) -> None:
+    engine = ContainerEngine("a")  # budget 4000
+    engine.up = True
+    guard = VramGuard(lambda measured: {"GPU-0": 9000}, clock=Clock())  # type: ignore[arg-type]
+
+    async def scenario() -> None:
+        launcher = _launcher(tmp_path, guard=guard)
+        entry = local_entry(engine)
+        with pytest.raises(TTSFailure):
+            await launcher.check_vram(entry)
+        assert not await launcher.is_serving(entry)
+        for wait in (True, False):  # the next reading does not start it again, it is skipped at once
+            skip = await launcher.ensure_serving(entry, wait=wait)
+            assert skip is not None and skip.reason == "no_vram" and skip.detail.startswith("exceeded budget: a uses 9000 MiB")
+        assert engine.ready_calls == 0
+        launcher.clear_failures(entry)  # an explicit start (or set_config, or reload)
+        assert await launcher.ensure_serving(entry, wait=True) is None
+        assert engine.ready_calls == 1
+
+    run_async(scenario())
+
+
+def test_a_failed_measurement_is_logged_as_an_error_and_lets_the_sentence_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    heavy = ContainerEngine("heavy")
+    heavy.up = True
+    install(monkeypatch, heavy)
+    config = make_config(tmp_path, ["heavy"])
+
+    def blind(measured: object) -> dict[str, int]:
+        raise VramMeasurementFailed("docker compose ps failed: daemon gone")
+
+    launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh(), guard=VramGuard(blind, clock=Clock()))  # type: ignore[arg-type]
+    speaker = Speaker(config, launcher)
+
+    async def scenario() -> list[TraceStep]:
+        stream = speaker.speak("Hallo Welt hier.", REQUEST)
+        segments = await _collect(stream)
+        assert len(segments) == 1       # the finished audio is delivered, not thrown away
+        return list(stream.summary.trace)
+
+    with caplog.at_level("ERROR"):
+        trace = run_async(scenario())
+    assert trace == [TraceStep("heavy", "spoke")] and heavy.stops == 0
+    assert "could not be measured" in caplog.text and "daemon gone" in caplog.text
+    assert launcher.start_failure(local_entry(heavy)) is None
 
 
 def test_the_configured_budget_is_the_ceiling_and_the_total_over_all_cards_counts(tmp_path: Path) -> None:
@@ -354,6 +446,31 @@ def test_a_reading_holds_its_container_until_the_stream_has_ended(tmp_path: Path
         gate.set()
         assert len(await reading) == 1
         await launcher.stop(speaker.entries[0])  # the stream ended: the container is free again
+        await launcher.aclose()
+
+    run_async(scenario())
+    assert engine.stops == 1
+
+
+def test_a_second_stream_of_the_same_run_holds_the_container_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = ContainerEngine("a")
+    engine.up = True
+    install(monkeypatch, engine)
+    config = make_config(tmp_path, ["a"])
+    launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh())
+    speaker = Speaker(config, launcher)
+    named = SpeakRequest(language="de", run="r-1")
+
+    async def scenario() -> None:
+        await _collect(speaker.speak("Der erste Satz kommt hier.", named))  # its end lets go of the run's holds
+        gate = engine.gates["zwei"] = asyncio.Event()
+        reading = asyncio.ensure_future(_collect(speaker.speak("Der Satz mit zwei Wörtern kommt hier.", named)))
+        await asyncio.sleep(0.05)
+        with pytest.raises(EngineInUse):
+            await launcher.stop(speaker.entries[0])
+        gate.set()
+        await reading
+        await launcher.stop(speaker.entries[0])
         await launcher.aclose()
 
     run_async(scenario())

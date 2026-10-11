@@ -95,6 +95,27 @@ class FakeEngine(TTSEngine):
             self.running -= 1
 
 
+class GatedFailEngine(FakeEngine):
+    """Like ``FakeEngine``, but a text containing a key of ``fail_gates`` WAITS for that event and
+    only then fails (``unreachable``) — a failure that arrives later, while other sentences run, as
+    timeouts and broken connections do. ``FakeEngine.fail`` raises before the first ``await``, so
+    no sentence is ever in flight at the same time there."""
+
+    def __init__(self, key: str, **kwargs: Any) -> None:
+        super().__init__(key, **kwargs)
+        self.fail_gates: dict[str, asyncio.Event] = {}
+
+    async def generate_speech_async(
+        self, text: str, voice: str, language: str, speed: float = 1.0, pitch: float = 1.0,
+    ) -> bytes:
+        for marker, gate in self.fail_gates.items():
+            if marker in text:
+                self.texts.append(text)
+                await gate.wait()
+                raise TTSFailure("unreachable", f"{self.key} broke on {marker}")
+        return await super().generate_speech_async(text, voice, language, speed, pitch)
+
+
 class FakeLauncher:
     """``down``: label -> what ``ensure_serving`` answers while the entry is not serving
     (``None`` = it starts and serves from then on). Everything else serves."""

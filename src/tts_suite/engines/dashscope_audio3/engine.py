@@ -15,12 +15,14 @@ import os
 import socket
 import struct
 import wave
+from http import HTTPStatus
 from typing import Iterator
 
 import requests
 
+from ...api import FailureReason
 from ...constants import CLONED_VOICE_PREFIX, DASHSCOPE_API_KEY_ENV
-from ..base import TTSEngine, TTSFailure, validate_audio
+from ..base import TTSEngine, TTSFailure, request_failure, validate_audio
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +48,8 @@ _VOICES: dict[str, str] = {
 # The two flagship voices only work with the plus model.
 _PLUS_VOICE_IDS = {"longanlingxin", "longanlufeng"}
 
-#: Exception types that signal a network/internet outage — as opposed to
-#: an API error where DashScope actually responded (auth, quota, bad voice).
-#: ConnectionError, TimeoutError and socket.gaierror are OSError subclasses;
-#: requests wraps low-level socket failures in its own ConnectionError/Timeout.
-_NETWORK_ERROR_TYPES = (
-    ConnectionError, TimeoutError, socket.gaierror,
-    requests.exceptions.ConnectionError, requests.exceptions.Timeout,
-)
+#: Network errors that are no ``requests`` exceptions (``requests`` wraps most socket failures in its own).
+_SOCKET_ERROR_TYPES = (ConnectionError, TimeoutError, socket.gaierror)
 
 
 def _api_key() -> str:
@@ -167,7 +163,8 @@ class DashScopeAudio3Engine(TTSEngine):
                 timeout=self.request_timeout_s,
             )
             if not reply.ok:
-                raise TTSFailure("engine", f"{self.label_short}: HTTP {reply.status_code}: {reply.text[:200]}")
+                reason: FailureReason = "cloud_quota" if reply.status_code == HTTPStatus.TOO_MANY_REQUESTS else "engine"
+                raise TTSFailure(reason, f"{self.label_short}: HTTP {reply.status_code}: {reply.text[:200]}")
             audio_url = reply.json()["output"]["audio"]["url"]
             # The result URL is signed and handed out as http://; the same file is served over https.
             audio = requests.get(audio_url.replace("http://", "https://", 1), timeout=self.request_timeout_s)
@@ -199,11 +196,15 @@ class DashScopeAudio3Engine(TTSEngine):
         return audio
 
     def _failure(self, error: Exception) -> TTSFailure:
-        """A TTSFailure from whatever went wrong: a network/internet outage is
-        "unreachable"; DashScope answering with an error (auth, quota, bad
+        """A TTSFailure from whatever went wrong: a network/internet outage is "unreachable", a
+        request that takes too long is a "timeout"; DashScope answering with an error (auth, bad
         voice) is an engine failure."""
         if isinstance(error, TTSFailure):
             return error
-        if isinstance(error, _NETWORK_ERROR_TYPES):
+        if isinstance(error, requests.RequestException):
+            return request_failure(self.label_short, error)
+        if isinstance(error, TimeoutError):
+            return TTSFailure("timeout", f"{self.label_short}: {type(error).__name__}: {error}")
+        if isinstance(error, _SOCKET_ERROR_TYPES):
             return TTSFailure("unreachable", f"{self.label_short}: {type(error).__name__}: {error}")
         return TTSFailure("engine", f"{self.label_short}: {type(error).__name__}: {error}")

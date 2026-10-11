@@ -111,6 +111,31 @@ def test_http_error_is_an_engine_failure(cloud: FakeCloud, engine: Any) -> None:
     assert "400" in failure.value.detail
 
 
+def test_too_many_requests_is_cloud_quota(cloud: FakeCloud, engine: Any) -> None:
+    cloud.post_reply = SimpleNamespace(ok=False, status_code=429, text="Throttling.RateQuota")
+    with pytest.raises(TTSFailure) as failure:
+        engine.generate_speech("Hallo", "Mary", "de")
+    assert failure.value.reason == "cloud_quota" and "429" in failure.value.detail
+
+
+def test_a_cloud_that_takes_too_long_is_a_timeout_and_a_connect_timeout_is_unreachable(cloud: FakeCloud, engine: Any) -> None:
+    for error, reason in ((requests.ReadTimeout("slow"), "timeout"), (requests.ConnectTimeout("no route"), "unreachable")):
+        cloud.post_reply = error
+        with pytest.raises(TTSFailure) as failure:
+            engine.generate_speech("Hallo", "Mary", "de")
+        assert failure.value.reason == reason
+
+
+def test_a_download_cut_off_midway_is_an_engine_failure(cloud: FakeCloud, engine: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(url: str, **kwargs: Any) -> SimpleNamespace:
+        raise requests.exceptions.ChunkedEncodingError("cut off")
+
+    monkeypatch.setattr(requests, "get", broken)
+    with pytest.raises(TTSFailure) as failure:
+        engine.generate_speech("Hallo", "Mary", "de")
+    assert failure.value.reason == "engine"
+
+
 def test_network_outage_is_unreachable(cloud: FakeCloud, engine: Any) -> None:
     cloud.post_reply = requests.ConnectionError("no route")
     with pytest.raises(TTSFailure) as failure:

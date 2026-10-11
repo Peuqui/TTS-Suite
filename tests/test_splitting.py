@@ -203,3 +203,23 @@ def test_pieces_anywhere_give_the_same_units_with_any_look_ahead(text: str, imme
         cutter = UnitCutter("sentence", immediate_sentences=immediate)
         units = [u for start in range(0, len(text), size) for u in cutter.feed(text[start:start + size])]
         assert units + cutter.flush() == expected, f"piece size {size}"
+
+
+def test_sentences_in_front_of_a_code_block_that_is_still_open_are_released() -> None:
+    cutter = UnitCutter("sentence")
+    released = cutter.feed(
+        "Erster Satz hier mit Worten. Zweiter Satz hier auch noch. Hier kommt Code:\n\n```python\nx = 1\n",
+    )
+    assert released == ["Erster Satz hier mit Worten.", "Zweiter Satz hier auch noch."]
+    assert cutter.feed("```\n\nDanach geht es mit Worten weiter. Und noch ein Satz.") == [
+        "Hier kommt Code:", "```python. x = 1.",
+    ]
+
+
+def test_a_code_block_that_closes_later_gives_the_same_units_as_the_finished_text() -> None:
+    text = "Erster Satz hier mit Worten. Zweiter Satz hier auch noch. Hier kommt Code:\n\n```python\nx = 1\n```\n\nDanach geht es mit Worten weiter."
+    expected = split_text(text, "sentence")
+    for size in range(1, 20):
+        cutter = UnitCutter("sentence")
+        units = [u for start in range(0, len(text), size) for u in cutter.feed(text[start:start + size])]
+        assert units + cutter.flush() == expected, f"piece size {size}"

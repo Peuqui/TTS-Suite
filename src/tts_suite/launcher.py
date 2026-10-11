@@ -24,13 +24,13 @@ from .api import (
     Host,
     SuiteConfig,
 )
-from .constants import TTS_READY_POLL_INTERVAL_S
+from .constants import START_WAIT_RESERVE_S, TTS_READY_POLL_INTERVAL_S
 from .engines.base import TTSEngine, TTSFailure
 from .escalation import EngineLauncher, EscalationEntry, Skip
 from .holds import EngineHolds
 from .host_ctl import HostCommand, HostControlError, run_host_command
 from .placement import GpuInfo, PlacementRefused, choose_gpu, query_gpus, vram_budget_mib
-from .vram import VramGuard
+from .vram import VramGuard, VramMeasurementFailed
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,14 @@ logger = logging.getLogger(__name__)
 class ManagedLauncher(EngineLauncher, Protocol):
     """What :class:`~tts_suite.suite.Suite` needs of a launcher beyond the escalation's questions."""
 
-    def set_config(self, config: SuiteConfig) -> None: ...
+    def set_config(self, config: SuiteConfig) -> None:
+        """Take a new configuration; the remembered failures of all entries are forgotten."""
+        ...
+
+    def clear_failures(self, entry: EscalationEntry | None) -> None:
+        """Forget why the entry (``None`` = every entry) did not start or was stopped for its VRAM use:
+        the next request tries again."""
+        ...
 
     async def stop(self, entry: EscalationEntry) -> None:
         """Take the entry's container down. :class:`EngineInUse` while a reading holds it,
@@ -70,7 +77,10 @@ class SuiteLauncher:
         self._guard = guard or VramGuard()
         self._clock = clock
         self._starts: dict[str, asyncio.Task[Skip | None]] = {}
-        self._failures: dict[str, Skip] = {}  # the last start of an entry that did not work
+        # Why an entry is out: its last start did not work, or it was stopped for exceeding its VRAM
+        # budget. Kept until an explicit start, a new configuration or a reload — a container that
+        # would simply be started again would be stopped again at the next measurement.
+        self._failures: dict[str, Skip] = {}
         # One local GPU start at a time: a container takes its VRAM only while the model loads, so a
         # second start chosen before that would see the first one's card as still free. The service
         # has exactly one event loop, so an asyncio lock is enough.
@@ -78,6 +88,13 @@ class SuiteLauncher:
 
     def set_config(self, config: SuiteConfig) -> None:
         self._config = config
+        self.clear_failures(None)
+
+    def clear_failures(self, entry: EscalationEntry | None) -> None:
+        if entry is None:
+            self._failures.clear()
+        else:
+            self._failures.pop(entry.label, None)
 
     async def aclose(self) -> None:
         starts = list(self._starts.values())
@@ -89,19 +106,27 @@ class SuiteLauncher:
     # ── Questions of the escalation ─────────────────────────────────
 
     async def is_serving(self, entry: EscalationEntry) -> bool:
-        return await asyncio.to_thread(entry.engine.is_running)
+        serving = await asyncio.to_thread(entry.engine.is_running)
+        if serving:
+            self._failures.pop(entry.label, None)  # it runs (someone started it): nothing is wrong with it now
+        return serving
 
     async def ensure_serving(self, entry: EscalationEntry, *, wait: bool) -> Skip | None:
         if not self._in_flight(entry.label):
-            if not wait and (failure := self._failures.pop(entry.label, None)) is not None:
-                return failure  # the start the caller began last time did not work; say so once
+            if (failure := self._failures.get(entry.label)) is not None:
+                return failure  # no new wait for a start that did not work; ``start`` tries again
             unstartable = await self._unstartable(entry)
             if unstartable is not None:
                 return unstartable
         task = self._in_flight(entry.label) or self._begin_start(entry)
         if not wait:
             raise EngineStarting(f"{entry.label} is starting")
-        return await asyncio.shield(task)  # a waiter that goes away does not cancel the start
+        limit_s = entry.engine.startup_timeout_s + START_WAIT_RESERVE_S
+        try:
+            # shield: a waiter that goes away or runs out of patience does not cancel the start
+            return await asyncio.wait_for(asyncio.shield(task), limit_s)
+        except asyncio.TimeoutError:
+            return Skip("stopped", f"start did not finish within {limit_s} s")
 
     def hold(self, entry: EscalationEntry) -> None:
         if entry.engine.runs_in_container:
@@ -117,7 +142,12 @@ class SuiteLauncher:
         budget = vram_budget_mib(engine, self._config)
         if budget is None:
             return
-        used = await asyncio.to_thread(self._guard.used_mib, engine)
+        try:
+            used = await asyncio.to_thread(self._guard.used_mib, engine)
+        except VramMeasurementFailed as failed:
+            # Not measured is not "within the budget" and not "over it": the sentence is fine, the ceiling is blind
+            logger.error("TTS: VRAM of %s could not be measured, the ceiling is not enforced: %s", entry.label, failed)
+            return
         if used is None or used <= budget:
             return
         detail = f"{entry.label} uses {used} MiB, budget is {budget} MiB"
@@ -125,6 +155,7 @@ class SuiteLauncher:
         if not stopped:
             detail += f" (stopping it failed: {message})"
         logger.warning("TTS: %s", detail)
+        self._failures[entry.label] = Skip("no_vram", f"exceeded budget: {detail}")
         raise TTSFailure("vram_exceeded", detail)
 
     # ── Starting ────────────────────────────────────────────────────
@@ -213,6 +244,8 @@ class SuiteLauncher:
             raise EngineControlFailed(f"{entry.label} has no container the suite controls")
         if self._holds.in_use(entry.label):
             raise EngineInUse(f"{entry.label} is in use by a reading")
+        if self._in_flight(entry.label):
+            raise EngineInUse(f"{entry.label} is starting")
         if entry.host is not None:
             try:
                 await asyncio.to_thread(self._host_command, entry.host, "stop", engine.service_dir)

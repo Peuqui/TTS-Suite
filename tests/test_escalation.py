@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from speech_fakes import FakeEngine, FakeLauncher, entry, frames_for, make_run, run_async, wav_info
+from speech_fakes import FakeEngine, FakeLauncher, GatedFailEngine, entry, frames_for, make_run, run_async, wav_info
 
 from tts_suite import escalation
 from tts_suite.api import (
@@ -196,36 +196,9 @@ def test_a_failure_before_the_first_sound_is_silent() -> None:
     broken, healthy = FakeEngine("a", fail="unreachable"), FakeEngine("b")
     run = make_run([entry(broken), entry(healthy)])
     spoken = run_async(run.speak("Erster Satz hier.", REQUEST))
-    assert spoken.entry.engine.key == "b" and spoken.announced is None
+    assert spoken.entry.engine.key == "b"
     assert healthy.texts == ["Erster Satz hier."] and run.switch is None
     assert run.trace == (TraceStep("a", "failed", "unreachable", "a broke"), TraceStep("b", "spoke"))
-
-
-def test_a_failure_after_the_first_sound_announces_the_voice_change_and_repeats_the_sentence() -> None:
-    first, second = FakeEngine("a", remote=True, fail="unreachable", fail_after=1), FakeEngine("b")
-    run = make_run([entry(first, ARAGON), entry(second)])
-
-    async def scenario() -> None:
-        await run.speak("Erster Satz hier.", REQUEST)
-        await run.speak("Zweiter Satz hier.", REQUEST)
-        await run.speak("Dritter Satz hier.", REQUEST)
-
-    run_async(scenario())
-    assert second.texts == ["Stimmwechsel wegen Serverausfall, weiter mit B. Zweiter Satz hier.", "Dritter Satz hier."]
-    assert run.switch == "unreachable"
-
-
-def test_the_announcement_names_a_remote_successor_and_speaks_the_language_of_the_request() -> None:
-    first, second = FakeEngine("a", fail="engine", fail_after=1), FakeEngine("b", remote=True)
-    run = make_run([entry(first), entry(second, ARAGON)])
-    english = SpeakRequest(language="en")
-
-    async def scenario() -> None:
-        await run.speak("One sentence here.", english)
-        await run.speak("Another sentence here.", english)
-
-    run_async(scenario())
-    assert second.texts == ["Voice change due to an engine failure, continuing with B on Aragon. Another sentence here."]
 
 
 def test_a_failed_entry_stays_out_for_the_rest_of_the_run() -> None:
@@ -242,17 +215,47 @@ def test_a_failed_entry_stays_out_for_the_rest_of_the_run() -> None:
     assert len(flaky.texts) == 2 and len(healthy.texts) == 2
 
 
-def test_parallel_sentences_failing_together_announce_once() -> None:
-    first, second = FakeEngine("a", fail="engine", fail_after=1), FakeEngine("b")
+def test_parallel_sentences_failing_one_after_the_other_report_one_failure() -> None:
+    first, second = GatedFailEngine("a"), FakeEngine("b")
+    first.max_parallel_requests = 4
     run = make_run([entry(first), entry(second)])
 
     async def scenario() -> None:
         await run.speak("Erster Satz hier.", REQUEST)
-        await asyncio.gather(*(run.speak(f"Satz Nummer {n} hier.", REQUEST) for n in range(4)))
+        first.fail_gates = {f"Nummer {n}": asyncio.Event() for n in range(4)}
+        tasks = [asyncio.create_task(run.speak(f"Satz Nummer {n} hier.", REQUEST)) for n in range(4)]
+        await asyncio.sleep(0.01)
+        for gate in first.fail_gates.values():  # staggered, as timeouts are
+            gate.set()
+            await asyncio.sleep(0.01)
+        await asyncio.gather(*tasks)
 
     run_async(scenario())
-    announced = [text for text in second.texts if text.startswith("Stimmwechsel")]
-    assert len(second.texts) == 4 and len(announced) == 1
+    assert [step.outcome for step in run.trace].count("failed") == 1
+    assert len(second.texts) == 4
+
+
+def test_a_failed_entry_keeps_its_hold_until_the_sentences_still_running_on_it_are_over() -> None:
+    first, second = GatedFailEngine("a"), FakeEngine("b")
+    first.max_parallel_requests = 3
+    launcher = FakeLauncher()
+    run = make_run([entry(first), entry(second)], launcher)
+
+    async def scenario() -> None:
+        await run.speak("Erster Satz hier.", REQUEST)
+        first.gates = {"langsam": asyncio.Event()}
+        first.fail_gates = {"kaputt": asyncio.Event()}
+        slow = asyncio.create_task(run.speak("Ein langsamer Satz hier.", REQUEST))
+        broken = asyncio.create_task(run.speak("Ein kaputter Satz hier.", REQUEST))
+        await asyncio.sleep(0.01)
+        first.fail_gates["kaputt"].set()
+        await broken
+        assert launcher.held == ["a", "b"]      # a sentence still runs on a: its container stays held
+        first.gates["langsam"].set()
+        await slow
+        assert launcher.held == ["b"]
+
+    run_async(scenario())
 
 
 def test_an_unexpected_error_of_an_engine_is_a_software_failure_of_that_entry() -> None:
@@ -349,6 +352,30 @@ def test_a_run_lives_for_ttl_seconds_after_its_last_use() -> None:
     now[0] = 1601
     assert table.get_or_create(("r1", None), create) is not run  # expired
     assert len(table) == 1
+
+
+def test_a_run_that_speaks_longer_than_the_ttl_stays_in_the_table() -> None:
+    now = [0.0]
+    table = RunTable(ttl_s=600, clock=lambda: now[0])
+    create = lambda: make_run([entry(FakeEngine("a"))])  # noqa: E731
+    run = table.get_or_create(("r1", None), create)
+    run.attach()                                                 # a stream is speaking it
+    now[0] = 1500
+    assert table.get_or_create(("r1", None), create) is run     # a second call joins the same run
+    run.detach()
+    table.touch(("r1", None))                                    # the last stream ended: the time starts now
+    now[0] = 2000
+    assert table.get_or_create(("r1", None), create) is run
+    now[0] = 2601
+    assert table.get_or_create(("r1", None), create) is not run
+
+
+def test_the_slot_table_keeps_the_slots_of_engines_whose_limits_did_not_change() -> None:
+    table = escalation.EngineSlotTable({"a": EngineDefaults(max_parallel=1), "b": EngineDefaults(max_parallel=2)})
+    slots_a, slots_b = table.for_engine(FakeEngine("a")), table.for_engine(FakeEngine("b"))
+    table.reconfigure({"a": EngineDefaults(max_parallel=1), "b": EngineDefaults(max_parallel=3)})
+    assert table.for_engine(FakeEngine("a")) is slots_a                    # same capacity for running and new readings
+    assert table.for_engine(FakeEngine("b")) is not slots_b and table.for_engine(FakeEngine("b")).max_parallel == 3
 
 
 def test_runs_are_told_apart_by_their_id_and_the_named_engine() -> None:

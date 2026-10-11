@@ -137,12 +137,16 @@ class FakeManagedLauncher(FakeLauncher):
         super().__init__(down)
         self.statuses = statuses or {}
         self.configs: list[SuiteConfig] = []
+        self.cleared: list[str | None] = []  # labels whose failures were forgotten (None = all)
         self.stopped: list[str] = []
         self.stop_error: Exception | None = None
         self.closed = False
 
     def set_config(self, config: SuiteConfig) -> None:
         self.configs.append(config)
+
+    def clear_failures(self, entry: EscalationEntry | None) -> None:
+        self.cleared.append(entry.label if entry is not None else None)
 
     async def stop(self, entry: EscalationEntry) -> None:
         if self.stop_error is not None:

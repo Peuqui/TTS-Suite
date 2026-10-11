@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from tts_suite import postprocess
 from tts_suite.engines import TTSEngine, TTSFailure, get_engine
 from tts_suite.postprocess import adjust_audio, build_filter_chain, needs_postprocess
 from tts_suite.synthesis import synthesize
@@ -70,6 +71,17 @@ def test_pitch_is_a_post_step_for_every_engine() -> None:
 def test_unchanged_audio_is_passed_through_untouched() -> None:
     audio = _wav()
     assert asyncio.run(adjust_audio(audio, "audio/wav", speed=1.0, pitch=1.0)) is audio
+
+
+def test_an_ffprobe_that_cannot_tell_the_sample_rate_is_a_software_failure_not_a_guessed_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def failing(command: list[str], timeout: float | None = None) -> tuple[int, bytes, bytes]:
+        assert command[0] == "ffprobe"  # ffmpeg must not even be called with a guessed rate
+        return 1, b"", b"Invalid data found"
+
+    monkeypatch.setattr(postprocess, "_run", failing)
+    with pytest.raises(TTSFailure) as failure:
+        asyncio.run(adjust_audio(_wav(), "audio/wav", speed=1.25))
+    assert failure.value.reason == "software" and "sample rate" in failure.value.detail
 
 
 def test_missing_ffmpeg_is_a_software_failure_not_silence(monkeypatch: pytest.MonkeyPatch) -> None:

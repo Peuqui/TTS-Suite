@@ -8,8 +8,17 @@ interval, a piece of silence is delivered so that the connection of the client s
 Which unit the text is cut by depends on the engine that speaks. That engine is chosen when
 the first text arrives (the choice may start a container), so the stream collects text until
 the choice is made and cuts afterwards (:class:`~tts_suite.splitting.UnitCutter`). Each cut unit is
-cleaned (:class:`~tts_suite.cleaning.TextCleaner`, one per reading) before it goes to the engine; a unit
-with nothing left to speak is dropped.
+cleaned (:class:`~tts_suite.cleaning.TextCleaner`, one per RUN, so a code block that opens in one call
+and closes in the next is still one block) before it goes to the engine; a unit with nothing left to
+speak is dropped. Streams that share a run must not run at the same time: they would clean into one state.
+
+Production is coupled to delivery: a unit is started only while fewer than ``max_parallel`` units of
+the engine are running or finished-but-not-delivered, so a slow consumer does not have the whole text
+generated ahead of it.
+
+A voice change is announced here, in speaking order: when the next segment to deliver comes from
+another entry than the last one delivered, and that one dropped out of the run, the announcement
+is delivered first, as a segment of its own.
 """
 
 from __future__ import annotations
@@ -21,9 +30,8 @@ from types import MappingProxyType
 from typing import Any, AsyncIterator, Mapping
 
 from .api import AudioSegment, SpeakRequest, SpeakSummary
-from .cleaning import TextCleaner
 from .constants import KEEPALIVE_SEC, KEEPALIVE_SILENCE_MS, MEDIA_TYPE_WAV
-from .escalation import SpeechRun
+from .escalation import EscalationEntry, Spoken, SpeechRun
 from .splitting import UnitCutter
 
 #: Sample value of silence in 8-bit WAV (unsigned); all wider samples are signed, silence is 0.
@@ -56,10 +64,10 @@ class Stream:
         self._run = run
         self._keepalive_s = keepalive_s
         self._cutter = UnitCutter()
-        self._cleaner = TextCleaner(request.language, pronunciations)
+        self._cleaner = run.cleaner(request.language, pronunciations)  # the reading's, not this stream's
         self._units: asyncio.Queue[str | None] = asyncio.Queue()  # cut units; None = text ended
-        self._results: asyncio.Queue[asyncio.Task[AudioSegment] | None] = asyncio.Queue()  # in speaking order
-        self._tasks: list[asyncio.Task[AudioSegment]] = []
+        self._results: asyncio.Queue[asyncio.Task[Spoken] | None] = asyncio.Queue()  # in speaking order
+        self._tasks: list[asyncio.Task[Spoken]] = []
         self._pipeline: asyncio.Task[None] | None = None
         self._has_text = False
         self._finished = False
@@ -67,6 +75,8 @@ class Stream:
         self._closed = False
         self._error: Exception | None = None
         self._keepalive: AudioSegment | None = None
+        self._window: asyncio.Semaphore = asyncio.Semaphore(0)  # replaced when the entry is chosen
+        self._last_entry: EscalationEntry | None = None  # who spoke the segment delivered last
 
     # ── Input ───────────────────────────────────────────────────────
 
@@ -114,7 +124,8 @@ class Stream:
         """Choose the speaking entry, cut the text by its unit, start one synthesis per unit."""
         try:
             entry = await self._run.select(wait=self._request.wait)
-            window = asyncio.Semaphore(self._run.max_parallel(entry))  # one reading never fills the queue
+            # One reading never fills the queue; a place is given back when its segment is delivered
+            self._window = asyncio.Semaphore(self._run.max_parallel(entry))
             self._release(self._cutter.set_unit(self._run.unit(entry)))
             if self._finished:
                 self._end_input()
@@ -122,21 +133,14 @@ class Stream:
                 unit = self._cleaner.clean(raw_unit)  # here, in speaking order: the cleaner keeps the reading's state
                 if not unit:
                     continue
-                await window.acquire()
-                task = asyncio.get_running_loop().create_task(self._synthesize(unit, window))
+                await self._window.acquire()
+                task = asyncio.get_running_loop().create_task(self._run.speak(unit, self._request))
                 self._tasks.append(task)
                 self._results.put_nowait(task)
         except Exception as error:  # noqa: BLE001 — reported to the consumer at the end of the results
             self._error = error
         finally:
             self._results.put_nowait(None)
-
-    async def _synthesize(self, unit: str, window: asyncio.Semaphore) -> AudioSegment:
-        try:
-            spoken = await self._run.speak(unit, self._request)
-        finally:
-            window.release()
-        return AudioSegment(spoken.audio, spoken.entry.engine.audio_media_type, spoken.entry.label)
 
     # ── Output ──────────────────────────────────────────────────────
 
@@ -160,9 +164,14 @@ class Stream:
                     yield keepalive
                 if self._closed:
                     return
-                segment = task.result()
-                self._remember_silence(segment)
-                yield segment
+                spoken = task.result()
+                async for announcement in self._announce_voice_change(spoken.entry):
+                    yield announcement
+                if self._closed:
+                    return
+                self._last_entry = spoken.entry
+                self._window.release()  # delivered: the next unit may start
+                yield self._segment(spoken)
             if self._error is not None:
                 raise self._error
         finally:
@@ -174,6 +183,30 @@ class Stream:
             await asyncio.wait({future}, timeout=self._keepalive_s)
             if not future.done() and self._keepalive is not None:
                 yield self._keepalive
+
+    async def _announce_voice_change(self, successor: EscalationEntry) -> AsyncIterator[AudioSegment]:
+        """Nothing when ``successor`` speaks on after the entry of the last delivered segment (or no
+        segment was delivered yet); else the keep-alives while the announcement is made, and the
+        announcement, spoken by the run's current entry."""
+        if self._last_entry is None or self._last_entry.label == successor.label:
+            return
+        reason = self._run.failure_of(self._last_entry.label)
+        if reason is None:
+            return
+        text = self._run.announcement(successor, reason, self._request.language)
+        task = asyncio.ensure_future(self._run.speak(text, self._request))
+        self._tasks.append(task)
+        async for keepalive in self._keep_alive_until_done(task):
+            yield keepalive
+        if self._closed:
+            return
+        self._run.note_switch(reason)
+        yield self._segment(task.result())
+
+    def _segment(self, spoken: Spoken) -> AudioSegment:
+        segment = AudioSegment(spoken.audio, spoken.entry.engine.audio_media_type, spoken.entry.label)
+        self._remember_silence(segment)
+        return segment
 
     def _remember_silence(self, segment: AudioSegment) -> None:
         """The keep-alive silence has the format of the stream, known from its first segment.

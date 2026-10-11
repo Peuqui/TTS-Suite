@@ -11,7 +11,7 @@ from container_fakes import ARAGON, Clock, ContainerEngine
 
 from tts_suite import docker_ctl, host_ctl, placement, vram
 from tts_suite.api import Host
-from tts_suite.constants import TTS_HOST_SSH_KEY_DEFAULT
+from tts_suite.constants import DOCKER_COMPOSE_TIMEOUT_S, TTS_HOST_SSH_KEY_DEFAULT
 from tts_suite.engines import get_engine
 from tts_suite.engines import base as engines_base
 from tts_suite.vram import ComputeApp, VramGuard, engine_vram_mib, parse_compute_apps
@@ -98,9 +98,41 @@ def test_the_host_pids_of_a_container_come_from_docker_top(monkeypatch: pytest.M
     assert calls[1] == ["docker", "top", "abc123", "-eo", "pid"]
 
 
-def test_compute_apps_without_nvidia_smi_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(subprocess, "run", _Run(raises=FileNotFoundError("nvidia-smi")))
-    assert vram.compute_apps() == []
+@pytest.mark.parametrize(
+    "run",
+    [
+        _Run(raises=FileNotFoundError("nvidia-smi")),
+        _Run(raises=subprocess.TimeoutExpired("nvidia-smi", 10)),
+        _Run(returncode=9, stderr="driver not loaded"),
+        _Run(stdout="100, 3000\n"),
+        _Run(stdout="100, lots, GPU-a\n"),
+    ],
+)
+def test_a_failing_nvidia_smi_is_a_failed_measurement_not_an_empty_list(run: _Run, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(vram.VramMeasurementFailed):
+        vram.compute_apps()
+
+
+def test_memory_the_driver_does_not_report_is_none_and_a_failed_measurement_when_it_is_ours(monkeypatch: pytest.MonkeyPatch) -> None:
+    apps = parse_compute_apps("100, [N/A], GPU-a\n200, [Not Supported], GPU-a\n300, 700, GPU-a\n")
+    assert [app.used_mib for app in apps] == [None, None, 700]
+    monkeypatch.setattr(vram, "compute_apps", lambda: apps)
+    monkeypatch.setattr(vram, "container_host_pids", lambda compose_file: {"300"})
+    assert engine_vram_mib(get_engine("xtts")) == {"GPU-a": 700}  # type: ignore[arg-type]
+    monkeypatch.setattr(vram, "container_host_pids", lambda compose_file: {"100", "300"})
+    with pytest.raises(vram.VramMeasurementFailed, match="process 100"):
+        engine_vram_mib(get_engine("xtts"))  # type: ignore[arg-type]
+
+
+def test_docker_not_answering_is_a_failed_measurement_not_no_pids(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", _Run(returncode=1, stderr="Cannot connect to the Docker daemon"))
+    with pytest.raises(vram.VramMeasurementFailed, match="Docker daemon"):
+        vram.container_host_pids("/x/docker-compose.yml")
+    answers = iter([subprocess.CompletedProcess([], 0, "abc123\n", ""), subprocess.CompletedProcess([], 1, "", "no such container")])
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: next(answers))
+    with pytest.raises(vram.VramMeasurementFailed, match="no such container"):
+        vram.container_host_pids("/x/docker-compose.yml")
 
 
 def test_the_guard_measures_each_engine_at_most_once_per_interval() -> None:
@@ -169,6 +201,16 @@ def test_the_budget_is_handed_to_compose_up_and_only_to_up(tmp_path: Path, monke
     docker_ctl.docker_compose_action(compose_file, "down", "XTTS", vram_budget_mib=3680)
     assert run.calls[0]["env"]["TTS_VRAM_BUDGET_MIB"] == "3680"
     assert "TTS_VRAM_BUDGET_MIB" not in run.calls[1]["env"] and "TTS_VRAM_BUDGET_MIB" not in run.calls[2]["env"]
+
+
+def test_a_hanging_docker_compose_times_out_with_a_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    compose_file = tmp_path / "docker-compose.yml"
+    compose_file.write_text("services: {}\n")
+    run = _Run(raises=subprocess.TimeoutExpired("docker", 60))
+    monkeypatch.setattr(subprocess, "run", run)
+    assert docker_ctl.docker_compose_action(compose_file, "up", "XTTS") == (False, "docker compose up timed out")
+    assert docker_ctl.docker_compose_action(compose_file, "down", "XTTS") == (False, "docker compose down timed out")
+    assert run.calls[0]["timeout"] == DOCKER_COMPOSE_TIMEOUT_S
 
 
 def test_an_engine_placed_on_a_card_starts_with_card_and_budget(monkeypatch: pytest.MonkeyPatch) -> None:

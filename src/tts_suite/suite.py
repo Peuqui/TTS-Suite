@@ -106,6 +106,7 @@ class Suite:
 
     async def start(self, engine: str, host: str | None = None) -> None:
         entry = self._entry(engine, host)
+        self._launcher.clear_failures(entry)  # an explicit start tries again, whatever happened before
         if await self._launcher.is_serving(entry):
             return
         skip = await self._launcher.ensure_serving(entry, wait=True)
@@ -117,6 +118,7 @@ class Suite:
 
     async def reload(self) -> tuple[list[str], list[str]]:
         removed, added = await asyncio.to_thread(reload_engines)
+        self._launcher.clear_failures(None)
         self._speaker.set_config(self._speaker.config)  # bind the list to the engines as they are now
         return removed, added
 

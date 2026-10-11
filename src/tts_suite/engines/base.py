@@ -62,6 +62,20 @@ def validate_audio(audio: bytes) -> bool:
     return len(audio) >= AUDIO_MIN_BYTES
 
 
+def request_failure(source: str, error: Exception) -> TTSFailure:
+    """The :class:`TTSFailure` for an error of a ``requests`` call to ``source``: no connection
+    (also a connect timeout) is ``unreachable``, a read timeout is ``timeout``, anything else of
+    ``requests`` (the answer cut off or undecodable, a container that died while answering) is
+    an ``engine`` failure. These are no software errors of the suite."""
+    import requests
+
+    if isinstance(error, requests.ConnectionError):  # ConnectTimeout is one as well
+        return TTSFailure("unreachable", f"{source}: {error}")
+    if isinstance(error, requests.Timeout):
+        return TTSFailure("timeout", f"{source} did not answer in time: {error}")
+    return TTSFailure("engine", f"{source}: {type(error).__name__}: {error}")
+
+
 class TTSEngine(ABC):
     """One TTS backend, all in one place.
 
@@ -501,10 +515,8 @@ class TTSEngine(ABC):
                 f"{self.service_url}{path}", json=payload,
                 timeout=(TTS_CONNECT_TIMEOUT_S, TTS_READ_TIMEOUT_S),
             )
-        except (requests.ConnectionError, requests.ConnectTimeout) as exc:
-            raise TTSFailure("unreachable", f"{self.label_short} at {self.service_url}: {exc}") from exc
-        except requests.Timeout as exc:
-            raise TTSFailure("timeout", f"{self.label_short} did not answer within {TTS_READ_TIMEOUT_S} s") from exc
+        except requests.RequestException as exc:
+            raise request_failure(f"{self.label_short} at {self.service_url}", exc) from exc
         if response.status_code != 200:
             raise TTSFailure("engine", f"{self.label_short} HTTP {response.status_code}: {response.text[:200]}")
         if not validate_audio(response.content):

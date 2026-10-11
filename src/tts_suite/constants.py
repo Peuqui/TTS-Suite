@@ -47,6 +47,12 @@ TTS_READY_POLL_TIMEOUT_S = 2
 TTS_READY_POLL_INTERVAL_S = 1
 TTS_READY_LOG_INTERVAL_S = 30
 
+#: ``docker compose up -d`` / ``down``: a hanging Docker daemon must not block the start lock for good.
+DOCKER_COMPOSE_TIMEOUT_S = 60
+#: A reader that waits for a start gives up this long after the engine's own startup time (the
+#: compose call and the queue for the one-start-at-a-time lock come on top of it).
+START_WAIT_RESERVE_S = 90
+
 #: ``docker image inspect`` (is the engine's image built?) and the eSpeak voice listing.
 DOCKER_INSPECT_TIMEOUT_S = 5
 ESPEAK_VOICE_LIST_TIMEOUT_S = 5
@@ -71,8 +77,6 @@ POSTPROCESS_TOLERANCE = 0.01
 #: ``atempo`` takes factors from 0.5 to 2.0 per filter; more extreme speeds chain several.
 ATEMPO_MIN = 0.5
 ATEMPO_MAX = 2.0
-#: Sample rate assumed when ``ffprobe`` cannot tell (XTTS and Qwen3 deliver 24 kHz).
-DEFAULT_SAMPLE_RATE_HZ = 24000
 FFPROBE_TIMEOUT_S = 5
 
 # ── Voices ──────────────────────────────────────────────────────────

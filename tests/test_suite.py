@@ -9,6 +9,7 @@ from container_fakes import ARAGON, ContainerEngine, FakeManagedLauncher, instal
 from speech_fakes import FakeEngine, run_async
 
 from tts_suite import escalation, suite as suite_module
+from tts_suite.engines import registry
 from tts_suite.api import (
     ConfigInvalid,
     EngineControlFailed,
@@ -155,6 +156,7 @@ def test_start_does_nothing_for_a_serving_entry_and_starts_a_stopped_one(tmp_pat
 
     run_async(scenario())
     assert launcher.starts == ["stoppedfake"]
+    assert launcher.cleared == ["servingfake", "stoppedfake"]  # an explicit start forgets earlier failures
 
 
 def test_a_start_that_does_not_work_says_why(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -204,10 +206,27 @@ def test_reload_rereads_the_engine_folders_and_binds_the_list_again(tmp_path: Pa
         return ["gone"], ["new"]
 
     monkeypatch.setattr(suite_module, "reload_engines", reload_engines)
-    suite, _ = _suite(make_config(tmp_path, ["xtts"]))
+    suite, launcher = _suite(make_config(tmp_path, ["xtts"]))
     bound_before = suite._speaker.entries
     assert run_async(suite.reload()) == (["gone"], ["new"]) and calls == ["reload"]
+    assert launcher.cleared == [None]
     assert suite._speaker.entries is not bound_before and [e.engine.key for e in suite._speaker.entries] == ["xtts"]
+
+
+def test_reload_with_an_engine_folder_that_was_deleted_is_a_config_error_and_keeps_the_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = FakeEngine("vanishing")
+    install(monkeypatch, engine)
+    suite, _ = _suite(make_config(tmp_path, ["vanishing"]))
+    entries_before = suite._speaker.entries
+
+    def reload_engines() -> tuple[list[str], list[str]]:
+        del registry.TTS_ENGINES["vanishing"]
+        return ["vanishing"], []
+
+    monkeypatch.setattr(suite_module, "reload_engines", reload_engines)
+    with pytest.raises(ConfigInvalid, match="unknown TTS engine 'vanishing'"):
+        run_async(suite.reload())
+    assert suite._speaker.entries is entries_before
 
 
 # ── Speaking and closing ────────────────────────────────────────────

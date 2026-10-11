@@ -7,6 +7,7 @@ opens the streams. ``TTSSuite`` (api) wraps it together with the engine manageme
 from __future__ import annotations
 
 import time
+from functools import partial
 from typing import Any, Callable
 
 from .api import NoEngineAvailable, SpeakRequest, SuiteConfig, UnknownEngine
@@ -21,10 +22,11 @@ class AttachedStream(Stream):
     speaks with (no stop, heartbeat) until the last attached stream has ended. A stream that is
     neither read to its end nor closed keeps them held."""
 
-    def __init__(self, request: SpeakRequest, run: SpeechRun, **options: Any) -> None:
+    def __init__(self, request: SpeakRequest, run: SpeechRun, on_detached: Callable[[], None], **options: Any) -> None:
         super().__init__(request, run, **options)
         self._attached_run = run
         self._attached_run.attach()
+        self._on_detached = on_detached
         self._detached = False
 
     async def aclose(self) -> None:
@@ -32,6 +34,7 @@ class AttachedStream(Stream):
         if not self._detached:
             self._detached = True
             self._attached_run.detach()
+            self._on_detached()
 
 
 class Speaker:
@@ -47,14 +50,15 @@ class Speaker:
         self._launcher = launcher
         self._keepalive_s = keepalive_s
         self._runs = RunTable(run_ttl_s, clock)
+        self._slots = EngineSlotTable(config.engines)
         self.set_config(config)
 
     def set_config(self, config: SuiteConfig) -> None:
         """Replace the configuration; :class:`ConfigInvalid` leaves the old one in place. Runs
-        and readings under way keep the list and the limits they started with."""
+        under way keep the list they started with; the engine slots are shared by all readings."""
         self._entries = bind_entries(config)
         self._config = config
-        self._slots = EngineSlotTable(config.engines)
+        self._slots.reconfigure(config.engines)
 
     @property
     def config(self) -> SuiteConfig:
@@ -68,7 +72,10 @@ class Speaker:
     def open_stream(self, request: SpeakRequest) -> Stream:
         entries = self._entries_for(request)
         run = self._run_for(request, entries)
-        return AttachedStream(request, run, keepalive_s=self._keepalive_s, pronunciations=self._config.pronunciations)
+        return AttachedStream(
+            request, run, partial(self._run_ended, request),
+            keepalive_s=self._keepalive_s, pronunciations=self._config.pronunciations,
+        )
 
     def speak(self, text: str, request: SpeakRequest) -> Stream:
         """The whole text at once: the stream of :meth:`open_stream` with all text handed over."""
@@ -90,6 +97,10 @@ class Speaker:
         if not pinned:
             raise NoEngineAvailable(f"engine {request.engine!r} is not in the escalation list", ())
         return pinned
+
+    def _run_ended(self, request: SpeakRequest) -> None:
+        if request.run is not None:
+            self._runs.touch((request.run, request.engine))
 
     def _run_for(self, request: SpeakRequest, entries: tuple[EscalationEntry, ...]) -> SpeechRun:
         def create() -> SpeechRun:
