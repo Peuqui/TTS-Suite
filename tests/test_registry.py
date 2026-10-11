@@ -29,12 +29,12 @@ from tts_suite.engines import registry
 
 LANGUAGES = ("de", "en")
 EXPECTED_ORDER = [
-    "qwen3local", "xtts", "fishspeech", "moss", "dashscope_audio3", "piper", "espeak", "edge", "browser",
+    "qwen3local", "xtts", "dashscope_audio3", "piper", "espeak", "edge", "browser",
 ]
 CONTAINER_ENGINES = [e for e in TTS_ENGINES.values() if e.runs_in_container]
 
 
-def test_all_nine_engines_are_discovered_in_display_order() -> None:
+def test_all_seven_engines_are_discovered_in_display_order() -> None:
     assert list(TTS_ENGINES) == EXPECTED_ORDER
     orders = [e.display_order for e in TTS_ENGINES.values()]
     assert orders == sorted(orders)
@@ -61,7 +61,6 @@ def test_container_engine_matches_its_compose_file(engine: TTSEngine) -> None:
     assert re.search(rf"^\s*image:\s*{re.escape(engine.image_name or '')}\s*$", compose, re.M)
     assert re.search(rf'-\s*"{engine.default_port}:\d+"', compose), "host port"
     assert engine.startup_timeout_s > 0
-    assert engine.health_path.startswith("/")
 
 
 @pytest.mark.parametrize("engine", [e for e in TTS_ENGINES.values() if not e.runs_in_container], ids=lambda e: e.key)
@@ -84,7 +83,7 @@ def test_default_escalation_comes_from_the_engines_and_the_browser_speaks_last()
 
 
 def test_gpu_engines_are_the_container_engines() -> None:
-    assert gpu_engine_keys() == {"qwen3local", "xtts", "fishspeech", "moss"}
+    assert gpu_engine_keys() == {"qwen3local", "xtts"}
 
 
 def test_installed_gpu_engines_asks_each_engine(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -107,8 +106,8 @@ def test_unknown_engine_key() -> None:
 # ── Units ──────────────────────────────────────────────────────────
 
 def test_slow_local_engines_default_to_the_whole_text_fast_ones_to_sentences() -> None:
-    assert {key: speech_unit(key, {}) for key in ("piper", "moss", "espeak")} == {
-        "piper": "whole", "moss": "whole", "espeak": "whole",
+    assert {key: speech_unit(key, {}) for key in ("piper", "espeak")} == {
+        "piper": "whole", "espeak": "whole",
     }
     assert speech_unit("edge", {}) == "sentence" and speech_unit("dashscope_audio3", {}) == "sentence"
 

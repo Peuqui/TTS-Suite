@@ -41,16 +41,14 @@ RUN pip install --no-cache-dir --force-reinstall \
 # If the TTS GPU is later migrated to Ampere/Ada/Hopper, drop the
 # matching prebuilt wheel back in here and flip QWEN3_ATTN.
 
-# Flask + Gunicorn for the HTTP API (matches XTTS / MOSS-TTS pattern)
+# Flask + Gunicorn for the HTTP API (matches XTTS pattern)
 RUN pip install --no-cache-dir flask==3.1.3 gunicorn==26.2.0
 
 # server.py is not baked in: docker-compose.yml mounts it, so a code change
 # needs a container restart, not a rebuild.
 WORKDIR /app
 
-# Port 5052 (XTTS=5051, Qwen3=5052, MOSS=5055).
-# Die TTS-Container liegen direkt aufeinander; 5053/5054 als Reserve fuer
-# weitere TTS-Backends (F5, Higgs, …) zwischen Qwen3 und MOSS.
+# Port 5052 (XTTS=5051, Qwen3=5052).
 EXPOSE 5052
 
 # 1 worker, 2 threads: single model in VRAM, health checks remain responsive

@@ -77,7 +77,7 @@ class TTSEngine(ABC):
 
     # ── Identity ───────────────────────────────────────────────────
     #: Stable engine key, used in the configuration and in engine lists
-    #: (e.g. "qwen3local", "xtts", "moss", "edge"). Equals the folder name.
+    #: (e.g. "qwen3local", "xtts", "edge"). Equals the folder name.
     key: str
 
     #: Short label for compact UI surfaces (channel dropdowns, status messages).
@@ -86,7 +86,7 @@ class TTSEngine(ABC):
 
     # ── Capabilities (defaults = lightweight engine) ───────────────
     #: True for engines that run as a Docker container we own
-    #: (qwen3local / xtts / moss). False for cloud/CLI engines.
+    #: (qwen3local / xtts). False for cloud/CLI engines.
     runs_in_container: bool = False
 
     #: True if the engine occupies GPU VRAM. Lightweight engines
@@ -104,7 +104,7 @@ class TTSEngine(ABC):
 
     #: True if the engine actually honours the ``language`` argument of
     #: :meth:`generate_speech`. Engines that auto-detect the language
-    #: from the text (Fish-Speech) or encode it in the voice id itself
+    #: from the text or encode it in the voice id itself
     #: (Edge / Piper / eSpeak) leave this False — a user interface can then
     #: grey out the language choice. Speed and pitch always apply (ffmpeg
     #: post-processing), so no equivalent flag exists for those.
@@ -129,7 +129,7 @@ class TTSEngine(ABC):
 
     #: Subdirectory under ``docker/tts/`` containing the build recipe.
     #: Default = engine key; override only when the dir name differs
-    #: (MOSS key="moss" but dir="moss-tts").
+    #: (Qwen3 key="qwen3local" but dir="qwen3-tts").
     compose_subdir: Optional[str] = None
 
     #: How many syntheses this engine (per host) may run at once. Measured on
@@ -144,13 +144,6 @@ class TTSEngine(ABC):
     #: Seconds a container engine gets to come up and load its model —
     #: locally and on a TTS host alike. 0 for engines without a container.
     startup_timeout_s: int = 0
-
-    #: Health endpoint of a container engine (relative to ``service_url``).
-    health_path: str = "/health"
-
-    #: Container engines that can land on the CPU although a GPU is free restart once
-    #: in that case (MOSS). Whether a GPU is free is told to :meth:`ensure_ready`.
-    restart_when_on_cpu: bool = False
 
     #: True if the engine is part of the escalation list a fresh install starts
     #: with (:func:`registry.default_escalation`), in ``display_order``.
@@ -361,7 +354,7 @@ class TTSEngine(ABC):
         import requests
         try:
             response = requests.get(
-                f"{self.service_url}{self.health_path}", timeout=timeout or TTS_HEALTH_TIMEOUT_S,
+                f"{self.service_url}/health", timeout=timeout or TTS_HEALTH_TIMEOUT_S,
             )
             if not response.ok:
                 return None
@@ -391,19 +384,16 @@ class TTSEngine(ABC):
         self._require_local("stop")
         return self._stop_local()
 
-    def ensure_ready(self, timeout: int | None = None, gpu_available: bool = False) -> tuple[bool, str, str]:
+    def ensure_ready(self, timeout: int | None = None) -> tuple[bool, str, str]:
         """Ensure the engine is up and serving. Returns
         ``(success, status_message, device)``. ``device`` is the engine's
         compute target ("cuda:0", "cpu", "") — empty for engines that
-        don't expose one. A remote engine is not started, only checked.
-
-        ``gpu_available``: a free card exists for this engine (the caller knows the cards);
-        engines with ``restart_when_on_cpu`` restart once when they came up on the CPU."""
+        don't expose one. A remote engine is not started, only checked."""
         if self.is_remote:
             if self.is_running():
                 return True, f"{self.label_short} ready on {self.address}", ""
             return False, f"{self.label_short} not serving on {self.address}", ""
-        return self._ensure_ready_local(timeout, gpu_available)
+        return self._ensure_ready_local(timeout)
 
     def _require_local(self, action: str) -> None:
         if self.is_remote:
@@ -425,7 +415,7 @@ class TTSEngine(ABC):
             return True, "no-op"
         return docker_compose_action(self.docker_compose_path, "down", self.label_short)
 
-    def _ensure_ready_local(self, timeout: int | None, gpu_available: bool) -> tuple[bool, str, str]:
+    def _ensure_ready_local(self, timeout: int | None) -> tuple[bool, str, str]:
         """Start the container if needed and wait until its model is loaded."""
         if not self.runs_in_container:
             return True, "ready", ""
@@ -433,11 +423,7 @@ class TTSEngine(ABC):
         health = self._health(timeout=TTS_READY_POLL_TIMEOUT_S)
         if health is not None and self._model_ready(health):
             device = self._device(health)
-            if self.restart_when_on_cpu and device == "cpu" and gpu_available:
-                logger.info("%s is on CPU but a GPU is available — restarting on GPU", self.label_short)
-                self._stop_local()
-            else:
-                return True, f"{self.label_short} already ready ({device})", device
+            return True, f"{self.label_short} already ready ({device})", device
 
         success, message = self._start_local()
         if not success:

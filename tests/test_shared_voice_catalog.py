@@ -26,9 +26,8 @@ def test_a_missing_tree_has_no_voices(tmp_path: Path) -> None:
     assert shared_voice_names(tmp_path / "nowhere") == []
 
 
-@pytest.mark.parametrize("engine_key", ["qwen3local", "moss", "fishspeech"])
-def test_container_engines_list_the_tree_while_down(voice_tree: Path, engine_key: str) -> None:
-    engine = get_engine(engine_key)
+def test_qwen3_lists_the_tree_while_down(voice_tree: Path) -> None:
+    engine = get_engine("qwen3local")
     assert engine is not None
     assert list(engine.with_voices_dir(voice_tree).voices_fallback) == ["Codine", "Salomo"]
 

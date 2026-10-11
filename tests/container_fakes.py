@@ -53,7 +53,7 @@ class ContainerEngine(FakeEngine):
         self.placements.append((gpu_uuid, vram_budget_mib))
         return self
 
-    def ensure_ready(self, timeout: int | None = None, gpu_available: bool = False) -> tuple[bool, str, str]:
+    def ensure_ready(self, timeout: int | None = None) -> tuple[bool, str, str]:
         self.ready_calls += 1
         self.started_at = time.monotonic()
         time.sleep(self.ready_delay_s)

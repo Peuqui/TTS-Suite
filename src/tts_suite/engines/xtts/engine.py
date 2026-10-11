@@ -55,7 +55,7 @@ class XTTSEngine(TTSEngine):
 
     def _model_ready(self, health: dict[str, Any]) -> bool:
         # The "custom_voices" field only XTTS' /health returns tells it apart
-        # from MOSS / Qwen3.
+        # from Qwen3.
         return super()._model_ready(health) and "custom_voices" in health
 
     def generate_speech(

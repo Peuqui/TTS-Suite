@@ -47,7 +47,7 @@ services:
       - QWEN3_DEFAULT_SPEAKER=${QWEN3_DEFAULT_SPEAKER:-AIfred}
       - QWEN3_DEFAULT_LANGUAGE=${QWEN3_DEFAULT_LANGUAGE:-German}
 
-      # ── Auto-shutdown (matches XTTS / MOSS keep-alive pattern) ───
+      # ── Auto-shutdown (matches XTTS keep-alive pattern) ───
       # After X minutes of inactivity, container exits to free VRAM.
       # 0 disables auto-shutdown. Override per-host via env if needed.
       - QWEN3_KEEP_ALIVE=${QWEN3_KEEP_ALIVE:-45}

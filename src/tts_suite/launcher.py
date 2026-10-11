@@ -187,7 +187,7 @@ class SuiteLauncher:
                     engine.key, placement.gpu.index, placement.budget_mib, placement.gpu.free_mib,
                 )
                 engine = engine.on_gpu(placement.gpu.uuid, placement.budget_mib)
-            ready, message, _device = await asyncio.to_thread(engine.ensure_ready, gpu_available=engine.needs_gpu)
+            ready, message, _device = await asyncio.to_thread(engine.ensure_ready)
         return None if ready else Skip("stopped", f"start failed: {message}")
 
     async def _start_remote(self, engine: TTSEngine, host: Host) -> Skip | None:

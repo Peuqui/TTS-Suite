@@ -9,8 +9,6 @@ import pytest
 
 from tts_suite import docker_ctl
 from tts_suite.engines import TTS_ENGINES, get_engine
-from tts_suite.engines.fishspeech.engine import FishSpeechEngine
-from tts_suite.engines.moss.engine import MOSSEngine
 from tts_suite.engines.qwen3local.engine import Qwen3LocalEngine
 from tts_suite.engines.xtts.engine import XTTSEngine
 
@@ -22,7 +20,6 @@ def test_container_engine_declares_what_the_scaffold_needs(engine: Any) -> None:
     assert engine.default_port
     assert engine.startup_timeout_s > 0
     assert engine.docker_compose_path.exists()
-    assert engine.health_path.startswith("/")
 
 
 def test_model_ready_signatures() -> None:
@@ -30,14 +27,6 @@ def test_model_ready_signatures() -> None:
     assert not Qwen3LocalEngine()._model_ready({"model_loaded": False})
     assert XTTSEngine()._model_ready({"model_loaded": True, "custom_voices": []})
     assert not XTTSEngine()._model_ready({"model_loaded": True})
-    assert MOSSEngine()._model_ready({"model_loaded": True, "voices": [], "sample_rate": 24000})
-    assert not MOSSEngine()._model_ready({"model_loaded": True, "voices": []})
-    assert FishSpeechEngine()._model_ready({})
-
-
-def test_fish_speech_reports_the_card_it_was_started_on() -> None:
-    assert FishSpeechEngine()._device({}) == "cpu"
-    assert FishSpeechEngine(gpu_uuid="GPU-1")._device({}) == "cuda:0"
 
 
 def test_ensure_ready_returns_without_starting_when_model_is_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -78,39 +67,6 @@ def test_ensure_ready_reports_a_failed_start(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(engine, "_health", lambda timeout=None: None)
     monkeypatch.setattr(engine, "_start_local", lambda: (False, "no docker"))
     assert engine.ensure_ready() == (False, "no docker", "")
-
-
-def _moss_on_cpu_then_gpu(monkeypatch: pytest.MonkeyPatch) -> tuple[MOSSEngine, list[str]]:
-    engine = MOSSEngine()
-    on_cpu = {"model_loaded": True, "voices": [], "sample_rate": 24000, "device": "cpu"}
-    answers = iter([on_cpu, on_cpu | {"device": "cuda:0"}])
-    calls: list[str] = []
-    monkeypatch.setattr(engine, "_health", lambda timeout=None: next(answers))
-
-    def stop() -> tuple[bool, str]:
-        calls.append("stop")
-        return True, "down"
-
-    def start() -> tuple[bool, str]:
-        calls.append("start")
-        return True, "up"
-
-    monkeypatch.setattr(engine, "_stop_local", stop)
-    monkeypatch.setattr(engine, "_start_local", start)
-    monkeypatch.setattr("time.sleep", lambda _s: None)
-    return engine, calls
-
-
-def test_moss_on_cpu_restarts_when_the_caller_says_a_gpu_is_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    engine, calls = _moss_on_cpu_then_gpu(monkeypatch)
-    assert engine.ensure_ready(gpu_available=True)[2] == "cuda:0"
-    assert calls == ["stop", "start"]
-
-
-def test_moss_on_cpu_stays_when_no_gpu_is_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    engine, calls = _moss_on_cpu_then_gpu(monkeypatch)
-    assert engine.ensure_ready(gpu_available=False) == (True, "MOSS-TTS already ready (cpu)", "cpu")
-    assert calls == []
 
 
 def test_remote_engine_is_never_started_or_stopped() -> None:

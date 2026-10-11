@@ -9,8 +9,6 @@ import requests
 
 from tts_suite.constants import TTS_CONNECT_TIMEOUT_S, TTS_READ_TIMEOUT_S
 from tts_suite.engines import TTSFailure
-from tts_suite.engines.fishspeech.engine import FishSpeechEngine
-from tts_suite.engines.moss.engine import MOSSEngine
 from tts_suite.engines.qwen3local.engine import Qwen3LocalEngine
 from tts_suite.engines.xtts.engine import XTTSEngine
 
@@ -105,19 +103,11 @@ def test_qwen3_sends_the_full_language_name(container: FakeContainer) -> None:
     assert Qwen3LocalEngine().audio_media_type == "audio/wav"
 
 
-def test_moss_and_xtts_deliver_ogg(container: FakeContainer) -> None:
-    for engine in (MOSSEngine(), XTTSEngine()):
-        assert engine.generate_speech("Hallo", "Alice", "de") == AUDIO
-        assert engine.audio_media_type == "audio/ogg" and engine.audio_extension == "ogg"
+def test_xtts_delivers_ogg(container: FakeContainer) -> None:
+    engine = XTTSEngine()
+    assert engine.generate_speech("Hallo", "Alice", "de") == AUDIO
+    assert engine.audio_media_type == "audio/ogg" and engine.audio_extension == "ogg"
     assert container.posts[-1]["json"] == {"text": "Hallo", "speaker": "Alice", "language": "de"}
-
-
-def test_fish_speech_sends_the_reference_id_and_asks_for_wav(container: FakeContainer) -> None:
-    FishSpeechEngine().generate_speech("Hallo", "Alice", "de")
-    assert container.posts[0]["url"] == "http://localhost:5053/v1/tts"
-    assert container.posts[0]["json"] == {
-        "text": "Hallo", "format": "wav", "reference_id": "Alice", "normalize": True, "streaming": False,
-    }
 
 
 def test_async_generation_runs_the_sync_call_off_the_event_loop(container: FakeContainer) -> None:

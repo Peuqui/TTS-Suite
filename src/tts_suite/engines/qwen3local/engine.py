@@ -40,7 +40,7 @@ class Qwen3LocalEngine(TTSEngine):
     def get_voices(self) -> dict[str, str]:
         """One entry per <name>.wav in /app/voices/ inside the container —
         the Qwen3 container exposes them via /voices, identical shape to
-        MOSS. Returns {} on any failure (caller falls back)."""
+        XTTS. Returns {} on any failure (caller falls back)."""
         data = self._fetch_voices_json()
         return {name: name for name in data.get("voices", [])} if data else {}
 
@@ -52,7 +52,7 @@ class Qwen3LocalEngine(TTSEngine):
         speed: float = 1.0,
         pitch: float = 1.0,
     ) -> bytes:
-        """Qwen3-TTS — same /tts shape as XTTS/MOSS but with the full
+        """Qwen3-TTS — same /tts shape as XTTS but with the full
         language name instead of the ISO code. Reference voices are
         warmed at container startup from /app/voices/*.wav. Speed/pitch
         are post-processed via ffmpeg. WAV end-to-end (cleaner
