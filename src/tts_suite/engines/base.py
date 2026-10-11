@@ -423,13 +423,16 @@ class TTSEngine(ABC):
         if self.docker_compose_path is None:
             return True, "no-op"
         return docker_compose_action(
-            self.docker_compose_path, "up", self.label_short, self.gpu_uuid, self.vram_budget_mib,
+            self.docker_compose_path, "up", self.label_short,
+            voices_dir=self.shared_voices_dir, gpu_uuid=self.gpu_uuid, vram_budget_mib=self.vram_budget_mib,
         )
 
     def _stop_local(self) -> tuple[bool, str]:
         if self.docker_compose_path is None:
             return True, "no-op"
-        return docker_compose_action(self.docker_compose_path, "down", self.label_short)
+        return docker_compose_action(
+            self.docker_compose_path, "down", self.label_short, voices_dir=self.shared_voices_dir,
+        )
 
     def _ensure_ready_local(self, timeout: int | None) -> tuple[bool, str, str]:
         """Start the container if needed and wait until its model is loaded."""

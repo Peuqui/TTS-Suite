@@ -122,10 +122,11 @@ def compose_file(tmp_path: Path) -> Path:
 def test_compose_up_pins_the_card(compose_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = _Run()
     monkeypatch.setattr(subprocess, "run", run)
-    assert docker_ctl.docker_compose_action(compose_file, "up", "XTTS", "GPU-1") == (True, "XTTS container started")
+    assert docker_ctl.docker_compose_action(compose_file, "up", "XTTS", voices_dir=compose_file.parent, gpu_uuid="GPU-1") == (True, "XTTS container started")
     call = run.calls[0]
     assert call["command"] == ["docker", "compose", "-f", str(compose_file), "up", "-d"]
     assert call["env"]["TTS_GPU_UUID"] == "GPU-1"
+    assert call["env"]["TTS_VOICES_DIR"] == str(compose_file.parent)
     assert call["cwd"] == str(compose_file.parent)
 
 
@@ -133,21 +134,21 @@ def test_compose_up_without_a_card_leaves_the_env_file_value(compose_file: Path,
     run = _Run()
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.delenv("TTS_GPU_UUID", raising=False)
-    docker_ctl.docker_compose_action(compose_file, "up", "XTTS")
+    docker_ctl.docker_compose_action(compose_file, "up", "XTTS", voices_dir=compose_file.parent)
     assert "TTS_GPU_UUID" not in run.calls[0]["env"]
 
 
 def test_compose_down_and_failures(compose_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = _Run()
     monkeypatch.setattr(subprocess, "run", run)
-    assert docker_ctl.docker_compose_action(compose_file, "down", "XTTS", "GPU-1") == (True, "XTTS container stopped")
+    assert docker_ctl.docker_compose_action(compose_file, "down", "XTTS", voices_dir=compose_file.parent) == (True, "XTTS container stopped")
     assert run.calls[0]["command"][-1] == "down" and "TTS_GPU_UUID" not in run.calls[0]["env"]
 
     run.returncode, run.stderr = 1, "boom"
-    ok, message = docker_ctl.docker_compose_action(compose_file, "up", "XTTS")
+    ok, message = docker_ctl.docker_compose_action(compose_file, "up", "XTTS", voices_dir=compose_file.parent)
     assert not ok and "boom" in message
 
-    ok, message = docker_ctl.docker_compose_action(compose_file.with_name("missing.yml"), "up", "XTTS")
+    ok, message = docker_ctl.docker_compose_action(compose_file.with_name("missing.yml"), "up", "XTTS", voices_dir=compose_file.parent)
     assert not ok and "not found" in message
 
 

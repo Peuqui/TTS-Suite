@@ -58,9 +58,9 @@ services:
       - ./server.py:/app/server.py:ro
       # HuggingFace cache: persists the model + tokenizer between container restarts
       - qwen3_models:/root/.cache/huggingface
-      # Shared SSOT voices: docker/tts/voices/<Name>/<Name>.wav (+ optional
+      # Shared SSOT voices (voices_dir of the suite, passed as TTS_VOICES_DIR): <Name>/<Name>.wav (+ optional
       # <Name>.txt transcript) becomes a /voices/<Name> entry the API addresses.
-      - ../voices:/app/voices:ro
+      - ${TTS_VOICES_DIR:?set by the suite (voices_dir)}:/app/voices:ro
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5052/health"]

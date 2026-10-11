@@ -178,9 +178,9 @@ def test_the_budget_is_handed_to_compose_up_and_only_to_up(tmp_path: Path, monke
     run = _Run()
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.delenv("TTS_VRAM_BUDGET_MIB", raising=False)
-    docker_ctl.docker_compose_action(compose_file, "up", "XTTS", "GPU-1", 3680)
-    docker_ctl.docker_compose_action(compose_file, "up", "XTTS", "GPU-1")
-    docker_ctl.docker_compose_action(compose_file, "down", "XTTS", vram_budget_mib=3680)
+    docker_ctl.docker_compose_action(compose_file, "up", "XTTS", voices_dir=tmp_path, gpu_uuid="GPU-1", vram_budget_mib=3680)
+    docker_ctl.docker_compose_action(compose_file, "up", "XTTS", voices_dir=tmp_path, gpu_uuid="GPU-1")
+    docker_ctl.docker_compose_action(compose_file, "down", "XTTS", voices_dir=tmp_path, vram_budget_mib=3680)
     assert run.calls[0]["env"]["TTS_VRAM_BUDGET_MIB"] == "3680"
     assert "TTS_VRAM_BUDGET_MIB" not in run.calls[1]["env"] and "TTS_VRAM_BUDGET_MIB" not in run.calls[2]["env"]
 
@@ -190,16 +190,17 @@ def test_a_hanging_docker_compose_times_out_with_a_message(tmp_path: Path, monke
     compose_file.write_text("services: {}\n")
     run = _Run(raises=subprocess.TimeoutExpired("docker", 60))
     monkeypatch.setattr(subprocess, "run", run)
-    assert docker_ctl.docker_compose_action(compose_file, "up", "XTTS") == (False, "docker compose up timed out")
-    assert docker_ctl.docker_compose_action(compose_file, "down", "XTTS") == (False, "docker compose down timed out")
+    assert docker_ctl.docker_compose_action(compose_file, "up", "XTTS", voices_dir=tmp_path) == (False, "docker compose up timed out")
+    assert docker_ctl.docker_compose_action(compose_file, "down", "XTTS", voices_dir=tmp_path) == (False, "docker compose down timed out")
     assert run.calls[0]["timeout"] == DOCKER_COMPOSE_TIMEOUT_S
 
 
-def test_an_engine_placed_on_a_card_starts_with_card_and_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_engine_placed_on_a_card_starts_with_card_budget_and_voices(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(engines_base, "docker_compose_action", lambda *args: calls.append(args) or (True, "up"))
-    placed = get_engine("xtts").on_gpu("GPU-9", 3680)  # type: ignore[union-attr]
+    monkeypatch.setattr(engines_base, "docker_compose_action", lambda *args, **kwargs: calls.append((args, kwargs)) or (True, "up"))
+    placed = get_engine("xtts").with_voices_dir(tmp_path).on_gpu("GPU-9", 3680)  # type: ignore[union-attr]
     assert (placed.gpu_uuid, placed.vram_budget_mib) == ("GPU-9", 3680)
     assert placed.start() == (True, "up")
-    assert calls[0][2:] == ("XTTS", "GPU-9", 3680)
+    assert calls[0][0][2:] == ("XTTS",) and calls[0][1]["gpu_uuid"] == "GPU-9" and calls[0][1]["vram_budget_mib"] == 3680
+    assert calls[0][1]["voices_dir"] == tmp_path
     assert get_engine("xtts").vram_budget_mib is None  # type: ignore[union-attr]  # the registry engine is unchanged

@@ -19,18 +19,23 @@ GPU_UUID_ENV = "TTS_GPU_UUID"
 #: Environment variable the compose files pass on to ``sitecustomize.py`` (``docker/tts/_vram_limit``),
 #: which caps the PyTorch memory of the container at this many MiB.
 VRAM_BUDGET_ENV = "TTS_VRAM_BUDGET_MIB"
+#: Environment variable the compose files read for the shared voices tree (user data, one place by setting).
+VOICES_DIR_ENV = "TTS_VOICES_DIR"
 
 
 def docker_compose_action(
     compose_file: Path,
     action: ComposeAction,
     service_label: str,
+    *,
+    voices_dir: Path,
     gpu_uuid: str = "",
     vram_budget_mib: int | None = None,
 ) -> tuple[bool, str]:
     """Run ``docker compose up -d`` / ``down`` on a compose file.
 
-    ``gpu_uuid``: card a container starts on (``CUDA_VISIBLE_DEVICES=GPU-…`` in the compose
+    ``voices_dir``: the shared voices tree the compose files mount (needed by ``down`` as well, which
+    reads the file). ``gpu_uuid``: card a container starts on (``CUDA_VISIBLE_DEVICES=GPU-…`` in the compose
     files uses the UUID form, which survives PCI re-enumeration). Empty = the value from
     the ``.env`` next to the compose file stays valid. ``vram_budget_mib``: the limit the container
     gets for its PyTorch memory; ``None`` = no limit. Returns ``(success, message)``.
@@ -43,6 +48,7 @@ def docker_compose_action(
 
     # An empty variable would override the .env value, so it is only set for a known card.
     environment = os.environ.copy()
+    environment[VOICES_DIR_ENV] = str(voices_dir)
     if action == "up" and gpu_uuid:
         environment[GPU_UUID_ENV] = gpu_uuid
     if action == "up" and vram_budget_mib is not None:
