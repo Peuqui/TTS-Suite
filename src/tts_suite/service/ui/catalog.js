@@ -35,7 +35,7 @@ export function catalogView({ show, fail }) {
             row.needs_gpu ? h('span', { class: 'tag' }, t('needsGpu')) : null,
             h('div', { class: 'muted' }, h('code', {}, row.engine))),
           h('td', {}, row.host ?? t('thisMachine')),
-          h('td', {}, h('span', { class: `status ${row.status}` }, row.status)),
+          h('td', {}, h('span', { class: `status ${row.status}`, title: t(`state${row.status[0].toUpperCase()}${row.status.slice(1)}`) }, row.status)),
           h('td', {}, row.installed ? t('yes') : t('no')),
           h('td', {}, memory(row.vram_mib)),
           h('td', {}, row.start_hint ? h('span', { class: 'hint' }, row.start_hint) : ''),
