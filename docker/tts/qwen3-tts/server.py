@@ -543,6 +543,10 @@ def _eager_init():
         _load_model()
     except Exception as e:
         logger.exception(f"Eager load failed: {e}")
+        # A container without its model can never speak. End it (SIGTERM to the gunicorn master,
+        # the parent of this worker) so the caller sees the container gone instead of waiting for
+        # a model that will not come.
+        os.kill(os.getppid(), signal.SIGTERM)
         return
     if WARMUP:
         _warmup_inference()
