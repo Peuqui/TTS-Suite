@@ -361,9 +361,9 @@ class SpeechRun:
     def max_parallel(self, entry: EscalationEntry) -> int:
         return self._slots.for_engine(entry.engine).max_parallel
 
-    async def select(self, *, wait: bool) -> EscalationEntry:
-        """The entry that speaks now — chosen at the first call. :class:`NoEngineAvailable`
-        when none can."""
+    async def select(self, request: SpeakRequest) -> EscalationEntry:
+        """The entry that speaks now — chosen at the first call. An entry without a voice for this
+        request fails BEFORE anything is started for it. :class:`NoEngineAvailable` when none can."""
         async with self._lock:
             if self._current is not None and self._current.label not in self._failed:
                 self._hold(self._current)  # a later stream of this run holds it again (idempotent)
@@ -371,7 +371,12 @@ class SpeechRun:
             for entry in self._entries:
                 if entry.label in self._failed:
                     continue
-                skip = await self._skip(entry, wait)
+                try:
+                    resolve_voice(entry.engine, request, self._defaults)
+                except TTSFailure as failure:
+                    self._fail(entry, failure.reason, failure.detail)
+                    continue
+                skip = await self._skip(entry, request.wait)
                 if skip is None:
                     logger.info("TTS escalation: %s speaks", entry.label)
                     self._current = entry
@@ -403,7 +408,7 @@ class SpeechRun:
         drops out and the next one tries (:class:`NoEngineAvailable` when none is left).
         :class:`Overloaded` and the other errors of the suite are not an entry's failure and go on up."""
         while True:
-            entry = await self.select(wait=request.wait)
+            entry = await self.select(request)
             try:
                 audio = await self._synthesize(entry, text, request)
             except TTSFailure as failure:

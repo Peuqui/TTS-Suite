@@ -107,7 +107,7 @@ class Stream:
     async def _run_pipeline(self) -> None:
         """Choose the speaking entry, cut the text by its unit, start one synthesis per unit."""
         try:
-            entry = await self._run.select(wait=self._request.wait)
+            entry = await self._run.select(self._request)
             # One reading never fills the queue; a place is given back when its segment is delivered
             self._window = asyncio.Semaphore(self._run.max_parallel(entry))
             self._release(self._cutter.set_unit(self._run.unit(entry)))

@@ -408,3 +408,14 @@ def test_the_audio_of_an_entry_is_what_the_engine_made() -> None:
     run = make_run([entry(FakeEngine("a"))])
     spoken = run_async(run.speak("Hallo Welt hier.", REQUEST))
     assert wav_info(spoken.audio)[0] == frames_for("Hallo Welt hier.")
+
+
+def test_an_entry_without_a_voice_fails_before_anything_is_started_for_it() -> None:
+    mute = FakeEngine("mute")
+    mute.default_voice = None  # type: ignore[assignment]
+    launcher = FakeLauncher(down={"mute": None})
+    run = make_run([entry(mute)], launcher)
+    with pytest.raises(NoEngineAvailable):
+        run_async(run.speak("Ein Satz ohne Stimme hier.", REQUEST))
+    assert launcher.starts == [] and launcher.asked == []  # no container started, not even asked
+    assert [(s.entry, s.outcome, s.reason) for s in run.trace] == [("mute", "failed", "software")]
