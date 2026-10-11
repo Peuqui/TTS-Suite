@@ -96,11 +96,6 @@ class EngineLauncher(Protocol):
     def release(self, entry: EscalationEntry) -> None:
         ...
 
-    async def check_vram(self, entry: EscalationEntry) -> None:
-        """Called after each synthesis: raises ``TTSFailure("vram_exceeded")`` (and stops the container)
-        when the entry uses more VRAM than its budget."""
-        ...
-
 
 def _index_hosts(config: SuiteConfig) -> dict[str, Host]:
     hosts: dict[str, Host] = {}
@@ -420,7 +415,6 @@ class SpeechRun:
             voice, speed, pitch = resolve_voice(entry.engine, request, self._defaults)
             async with self._slots.for_engine(entry.engine).slot():
                 audio = await synthesize(entry.engine, text, voice, request.language, speed, pitch)
-            await self._launcher.check_vram(entry)
             return audio
         finally:
             self._busy[entry.label] -= 1

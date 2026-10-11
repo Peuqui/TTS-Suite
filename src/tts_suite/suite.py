@@ -7,6 +7,7 @@ the registry, containers are the launcher's. This class only joins them to the o
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from .api import (
     EngineControlFailed,
@@ -24,6 +25,9 @@ from .escalation import EscalationEntry
 from .launcher import ManagedLauncher, SuiteLauncher
 from .speaker import Speaker
 from .stream import Stream
+from .vram import VramMeasurementFailed, engine_vram_mib
+
+logger = logging.getLogger(__name__)
 
 
 class Suite:
@@ -50,6 +54,7 @@ class Suite:
     async def engines(self) -> list[EngineInfo]:
         config = self._speaker.config
         statuses = await asyncio.gather(*(self._status(entry) for entry in self._speaker.entries))
+        vram = await asyncio.gather(*(self._vram_mib(entry, status) for entry, status in zip(self._speaker.entries, statuses)))
         return [
             EngineInfo(
                 engine=entry.engine.key,
@@ -64,14 +69,28 @@ class Suite:
                 needs_gpu=entry.engine.needs_gpu,
                 cloud=entry.engine.cloud,
                 browser=entry.engine.renders_in_browser,
+                vram_mib=vram_mib,
             )
-            for entry, status in zip(self._speaker.entries, statuses)
+            for entry, status, vram_mib in zip(self._speaker.entries, statuses, vram)
         ]
 
     async def _status(self, entry: EscalationEntry) -> EntryStatus:
         if entry.engine.deactivated:
             return "stopped"
         return await self._launcher.status(entry)
+
+    @staticmethod
+    async def _vram_mib(entry: EscalationEntry, status: EntryStatus) -> dict[str, int] | None:
+        """What a running local GPU engine holds per card (display only); empty for all others,
+        ``None`` (logged) when the measurement failed."""
+        engine = entry.engine
+        if entry.host is not None or not engine.needs_gpu or status != "running":
+            return {}
+        try:
+            return await asyncio.to_thread(engine_vram_mib, engine)
+        except VramMeasurementFailed as failed:
+            logger.error("TTS: VRAM of %s could not be measured: %s", entry.label, failed)
+            return None
 
     @staticmethod
     def _label(entry: EscalationEntry, language: str) -> str:

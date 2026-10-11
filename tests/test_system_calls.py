@@ -7,14 +7,14 @@ from typing import Any
 
 import pytest
 
-from container_fakes import ARAGON, Clock, ContainerEngine
+from container_fakes import ARAGON
 
 from tts_suite import docker_ctl, host_ctl, placement, vram
 from tts_suite.api import Host
 from tts_suite.constants import DOCKER_COMPOSE_TIMEOUT_S, TTS_HOST_SSH_KEY_DEFAULT
 from tts_suite.engines import get_engine
 from tts_suite.engines import base as engines_base
-from tts_suite.vram import ComputeApp, VramGuard, engine_vram_mib, parse_compute_apps
+from tts_suite.vram import ComputeApp, engine_vram_mib, parse_compute_apps
 
 
 class _Run:
@@ -133,23 +133,6 @@ def test_docker_not_answering_is_a_failed_measurement_not_no_pids(monkeypatch: p
     monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: next(answers))
     with pytest.raises(vram.VramMeasurementFailed, match="no such container"):
         vram.container_host_pids("/x/docker-compose.yml")
-
-
-def test_the_guard_measures_each_engine_at_most_once_per_interval() -> None:
-    clock, measured = Clock(), []
-    guard = VramGuard(lambda engine: measured.append(engine.key) or {"GPU-a": 10, "GPU-b": 5}, clock=clock, min_interval_s=30)  # type: ignore[func-returns-value]
-    one, two = ContainerEngine("one"), ContainerEngine("two")
-    assert guard.used_mib(one) == 15
-    assert guard.used_mib(one) is None
-    assert guard.used_mib(two) == 15  # the interval is per engine
-    clock.now = 29.9
-    assert guard.used_mib(one) is None
-    clock.now = 30.0
-    assert guard.used_mib(one) == 15 and measured == ["one", "two", "one"]
-
-
-# ── SSH ─────────────────────────────────────────────────────────────
-
 
 def test_the_ssh_command_pins_key_port_and_target(monkeypatch: pytest.MonkeyPatch) -> None:
     run = _Run(stdout="up\n")

@@ -125,7 +125,6 @@ class FakeLauncher:
         self.starts: list[str] = []
         self.asked: list[str] = []
         self.held: list[str] = []  # labels held right now, one item per hold
-        self.vram_checks: list[str] = []
 
     async def is_serving(self, entry: EscalationEntry) -> bool:
         self.asked.append(entry.label)
@@ -146,9 +145,6 @@ class FakeLauncher:
 
     def release(self, entry: EscalationEntry) -> None:
         self.held.remove(entry.label)
-
-    async def check_vram(self, entry: EscalationEntry) -> None:
-        self.vram_checks.append(entry.label)
 
 
 def entry(engine: TTSEngine, host: Any = None, enabled: bool = True) -> EscalationEntry:

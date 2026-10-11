@@ -21,13 +21,14 @@ The card is chosen by rules in the configuration (`gpus`: order and reserve per 
 overrides it). A card qualifies when its free memory minus the reserve covers the budget
 plus the headroom (default 512 MiB, the same AIfred has used so far).
 
-The budget is also a ceiling. The container gets it as its limit, and the service watches
-the real use with `nvidia-smi` and stops an engine that exceeds it (`vram_exceeded`); the
-escalation then goes on to the next entry. Measured on 2026-10-11 on a V100 with a mounted
+The budget serves the card choice and is also the cap in the container
+(`TTS_VRAM_BUDGET_MIB`, passed on at `up`). The service does not watch the use and stops no
+engine; `EngineInfo.vram_mib` reports it for display only. A card without room gives
+`no_vram`, which is not remembered: the next run chooses again. Measured on 2026-10-11 on a V100 with a mounted
 file (`sitecustomize.py`, which calls `set_per_process_memory_fraction` on the first CUDA
 access): Qwen3-TTS and XTTS run unchanged under a limit slightly above their need, and loading
 fails with `OutOfMemoryError` under a limit below the model's need. The limit counts only
-PyTorch memory, not the CUDA context. The mechanism uses `torch.cuda._lazy_call`, a private
+PyTorch memory, not the CUDA context; it is an outlier guard, not an exact limit. The mechanism uses `torch.cuda._lazy_call`, a private
 PyTorch interface that may break with an update.
 
 ## The service cuts the text

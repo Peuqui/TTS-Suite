@@ -21,14 +21,15 @@ Karte, `headroom_mib`), nicht einem Rückruf an ein Programm. Jede Engine hat ei
 es). Eine Karte kommt in Frage, wenn ihr freier Speicher abzüglich Reserve das Budget plus
 Aufschlag deckt (Standard 512 MiB, derselbe wie bei AIfred bisher).
 
-Das Budget ist zugleich eine Obergrenze. Der Container bekommt es als Grenze mit, der
-Dienst beobachtet den tatsächlichen Verbrauch per `nvidia-smi` und stoppt eine Engine, die
-darüber liegt (`vram_exceeded`); die Eskalation geht dann zum nächsten Eintrag.
+Das Budget dient der Kartenwahl und ist zugleich die Kappe im Container
+(`TTS_VRAM_BUDGET_MIB`, beim `up` durchgereicht). Der Dienst beobachtet den Verbrauch nicht
+und stoppt keine Engine; `EngineInfo.vram_mib` meldet ihn nur zur Anzeige. Eine Karte ohne
+Platz ergibt `no_vram`, das nicht gemerkt wird: der nächste Lauf wählt neu.
 Gemessen am 11.10.2026 auf einer V100 mit einer Einhängedatei (`sitecustomize.py`, setzt
 beim ersten CUDA-Zugriff `set_per_process_memory_fraction`): Qwen3-TTS und XTTS laufen
 unter einer Grenze knapp über ihrem Bedarf unverändert, bei einer Grenze unter dem
 Modellbedarf scheitert das Laden mit `OutOfMemoryError`. Die Grenze zählt nur
-PyTorch-Speicher, nicht den CUDA-Kontext. Der Mechanismus nutzt `torch.cuda._lazy_call`,
+PyTorch-Speicher, nicht den CUDA-Kontext; sie ist ein Ausreißerschutz, keine exakte Grenze. Der Mechanismus nutzt `torch.cuda._lazy_call`,
 eine private PyTorch-Schnittstelle, die bei einem Update brechen kann.
 
 ## Der Dienst zerlegt den Text

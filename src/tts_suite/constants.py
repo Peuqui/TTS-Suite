@@ -189,7 +189,3 @@ TTS_HOST_SSH_COMMAND_TIMEOUT_S = 60
 NVIDIA_SMI_QUERY_TIMEOUT_S = 5
 NVIDIA_SMI_APPS_TIMEOUT_S = 10
 DOCKER_PIDS_TIMEOUT_S = 10
-
-#: A GPU engine's VRAM use is looked at after a synthesis at most this often (seconds) per engine —
-#: not after every sentence of a reading, which would put an ``nvidia-smi`` call behind each one.
-VRAM_CHECK_MIN_INTERVAL_S = 30.0

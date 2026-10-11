@@ -101,6 +101,28 @@ def test_a_remote_entry_names_its_host_and_a_deactivated_one_is_listed_as_off(tm
     assert (ghost.deactivated, ghost.enabled, ghost.status, ghost.label["de"]) == (True, False, "stopped", "ghost")
 
 
+def test_vram_is_reported_for_running_local_gpu_engines_only_and_a_failed_measurement_is_logged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = SuiteConfig(
+        voices_dir=tmp_path, hosts=(ARAGON,),
+        entries=(EntryConfig("xtts"), EntryConfig("qwen3local"), EntryConfig("qwen3local", host="Aragon"), EntryConfig("edge")),
+    )
+    launcher = FakeManagedLauncher(statuses={"xtts": "running", "qwen3local": "running", "qwen3local@Aragon": "running", "edge": "running"})
+    suite, _ = _suite(config, launcher)
+
+    def measure(engine: object) -> dict[str, int]:
+        if engine.key == "qwen3local":  # type: ignore[attr-defined]
+            raise suite_module.VramMeasurementFailed("nvidia-smi unavailable: gone")
+        return {"GPU-a": 3500}
+
+    monkeypatch.setattr(suite_module, "engine_vram_mib", measure)
+    with caplog.at_level("ERROR"):
+        infos = run_async(suite.engines())
+    assert [info.vram_mib for info in infos] == [{"GPU-a": 3500}, None, {}, {}]
+    assert "qwen3local could not be measured" in caplog.text and "gone" in caplog.text
+
+
 # ── Voices ──────────────────────────────────────────────────────────
 
 

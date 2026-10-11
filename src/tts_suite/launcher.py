@@ -25,12 +25,11 @@ from .api import (
     SuiteConfig,
 )
 from .constants import START_WAIT_RESERVE_S, TTS_READY_POLL_INTERVAL_S
-from .engines.base import TTSEngine, TTSFailure
+from .engines.base import TTSEngine
 from .escalation import EngineLauncher, EscalationEntry, Skip
 from .holds import EngineHolds
 from .host_ctl import HostCommand, HostControlError, run_host_command
-from .placement import GpuInfo, PlacementRefused, choose_gpu, query_gpus, vram_budget_mib
-from .vram import VramGuard, VramMeasurementFailed
+from .placement import GpuInfo, PlacementRefused, choose_gpu, query_gpus
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +42,7 @@ class ManagedLauncher(EngineLauncher, Protocol):
         ...
 
     def clear_failures(self, entry: EscalationEntry | None) -> None:
-        """Forget why the entry (``None`` = every entry) did not start or was stopped for its VRAM use:
-        the next request tries again."""
+        """Forget why the entry (``None`` = every entry) did not start: the next request tries again."""
         ...
 
     async def stop(self, entry: EscalationEntry) -> None:
@@ -67,19 +65,17 @@ class SuiteLauncher:
         gpus: Callable[[], list[GpuInfo]] = query_gpus,
         host_command: HostCommand = run_host_command,
         holds: EngineHolds | None = None,
-        guard: VramGuard | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._config = config
         self._gpus = gpus
         self._host_command = host_command
         self._holds = holds or EngineHolds()
-        self._guard = guard or VramGuard()
         self._clock = clock
         self._starts: dict[str, asyncio.Task[Skip | None]] = {}
-        # Why an entry is out: its last start did not work, or it was stopped for exceeding its VRAM
-        # budget. Kept until an explicit start, a new configuration or a reload — a container that
-        # would simply be started again would be stopped again at the next measurement.
+        # Why an entry is out: its last start did not work. Kept until an explicit start, a new
+        # configuration or a reload. Not remembered: ``no_vram`` of the card choice, which passes
+        # as soon as a card has room again.
         self._failures: dict[str, Skip] = {}
         # One local GPU start at a time: a container takes its VRAM only while the model loads, so a
         # second start chosen before that would see the first one's card as still free. The service
@@ -135,29 +131,6 @@ class SuiteLauncher:
     def release(self, entry: EscalationEntry) -> None:
         self._holds.release(entry.label)
 
-    async def check_vram(self, entry: EscalationEntry) -> None:
-        engine = entry.engine
-        if entry.host is not None or not engine.needs_gpu:
-            return  # a remote host watches its own cards
-        budget = vram_budget_mib(engine, self._config)
-        if budget is None:
-            return
-        try:
-            used = await asyncio.to_thread(self._guard.used_mib, engine)
-        except VramMeasurementFailed as failed:
-            # Not measured is not "within the budget" and not "over it": the sentence is fine, the ceiling is blind
-            logger.error("TTS: VRAM of %s could not be measured, the ceiling is not enforced: %s", entry.label, failed)
-            return
-        if used is None or used <= budget:
-            return
-        detail = f"{entry.label} uses {used} MiB, budget is {budget} MiB"
-        stopped, message = await asyncio.to_thread(engine.stop)
-        if not stopped:
-            detail += f" (stopping it failed: {message})"
-        logger.warning("TTS: %s", detail)
-        self._failures[entry.label] = Skip("no_vram", f"exceeded budget: {detail}")
-        raise TTSFailure("vram_exceeded", detail)
-
     # ── Starting ────────────────────────────────────────────────────
 
     def _in_flight(self, label: str) -> asyncio.Task[Skip | None] | None:
@@ -184,6 +157,8 @@ class SuiteLauncher:
         skip = task.result()
         if skip is None:
             self._failures.pop(label, None)
+        elif skip.reason == "no_vram":
+            self._failures.pop(label, None)  # the card choice is tried again at the next request
         else:
             self._failures[label] = skip
 
@@ -212,7 +187,7 @@ class SuiteLauncher:
                     cards = await asyncio.to_thread(self._gpus)
                     placement = choose_gpu(cards, engine, self._config)
                 except PlacementRefused as refused:
-                    return Skip("no_vram", str(refused))
+                    return Skip("no_vram", str(refused))  # transient: ``_start_finished`` does not remember it
                 logger.info(
                     "TTS: starting %s on GPU %d (budget %d MiB, %d MiB free)",
                     engine.key, placement.gpu.index, placement.budget_mib, placement.gpu.free_mib,

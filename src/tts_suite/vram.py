@@ -1,5 +1,4 @@
-"""Observing the VRAM use of a running GPU engine — the second half of the budget (the first half is
-the limit the container gets at its start).
+"""Reporting the VRAM use of a running GPU engine (display only — nothing is stopped for it).
 
 Ported from AIfred Intelligence (``local_tts_gpu_footprint``): ``nvidia-smi`` reports the host PIDs of
 the processes holding card memory, ``docker top`` lists the host PIDs of a container; their
@@ -10,11 +9,9 @@ from __future__ import annotations
 
 import logging
 import subprocess
-import time
 from dataclasses import dataclass
-from typing import Callable
 
-from .constants import DOCKER_PIDS_TIMEOUT_S, NVIDIA_SMI_APPS_TIMEOUT_S, VRAM_CHECK_MIN_INTERVAL_S
+from .constants import DOCKER_PIDS_TIMEOUT_S, NVIDIA_SMI_APPS_TIMEOUT_S
 from .engines.base import TTSEngine
 
 logger = logging.getLogger(__name__)
@@ -24,7 +21,7 @@ NVIDIA_SMI_APP_FIELDS = "pid,used_memory,gpu_uuid"
 
 class VramMeasurementFailed(Exception):
     """The VRAM use could not be measured (``nvidia-smi`` or Docker did not answer, or answered
-    something unreadable). Not the same as "0 MiB": the caller decides what a blind ceiling means."""
+    something unreadable). Not the same as "0 MiB": the caller decides what a blind report means."""
 
 
 @dataclass(frozen=True)
@@ -35,10 +32,6 @@ class ComputeApp:
     pid: str
     used_mib: int | None
     gpu_uuid: str
-
-
-#: ``engine -> {gpu_uuid: MiB}`` — the seam tests replace.
-VramMeasure = Callable[[TTSEngine], dict[str, int]]
 
 
 def _is_not_reported(field: str) -> bool:
@@ -111,30 +104,3 @@ def engine_vram_mib(engine: TTSEngine) -> dict[str, int]:
                 raise VramMeasurementFailed(f"nvidia-smi reports no memory for process {app.pid} of {engine.key}")
             per_card[app.gpu_uuid] = per_card.get(app.gpu_uuid, 0) + app.used_mib
     return per_card
-
-
-class VramGuard:
-    """Measures an engine's VRAM use, but not more often than ``min_interval_s`` per engine."""
-
-    def __init__(
-        self,
-        measure: VramMeasure = engine_vram_mib,
-        *,
-        clock: Callable[[], float] = time.monotonic,
-        min_interval_s: float = VRAM_CHECK_MIN_INTERVAL_S,
-    ) -> None:
-        self._measure = measure
-        self._clock = clock
-        self._min_interval_s = min_interval_s
-        self._last_checked: dict[str, float] = {}
-
-    def used_mib(self, engine: TTSEngine) -> int | None:
-        """The engine's use in MiB over all cards, or ``None`` when it was measured too recently;
-        :class:`VramMeasurementFailed` when the measurement did not work (that is a third state, not 0 MiB).
-        Blocking (``nvidia-smi``, ``docker``): run it in a thread."""
-        now = self._clock()
-        last = self._last_checked.get(engine.key)
-        if last is not None and now - last < self._min_interval_s:
-            return None
-        self._last_checked[engine.key] = now
-        return sum(self._measure(engine).values())

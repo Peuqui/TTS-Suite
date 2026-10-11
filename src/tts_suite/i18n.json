@@ -39,10 +39,6 @@
     "de": "Stimmwechsel wegen erschöpften Cloud-Kontingents, weiter mit {target}.",
     "en": "Voice change because the cloud quota is used up, continuing with {target}."
   },
-  "tts_switch_vram_exceeded": {
-    "de": "Stimmwechsel wegen Speichermangels der Grafikkarte, weiter mit {target}.",
-    "en": "Voice change due to a lack of graphics card memory, continuing with {target}."
-  },
   "tts_switch_target_remote": {
     "de": "{engine} auf {host}",
     "en": "{engine} on {host}"

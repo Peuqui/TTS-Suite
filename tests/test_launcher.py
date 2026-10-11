@@ -1,5 +1,5 @@
 """The launcher: local GPU start, one start at a time, remote start over SSH, entries without a
-container, background start, VRAM ceiling, holds and heartbeat — with fakes for every system call."""
+container, background start, holds and heartbeat — with fakes for every system call."""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +10,6 @@ import pytest
 
 from container_fakes import (
     CardList,
-    Clock,
     ContainerEngine,
     FakeSsh,
     install,
@@ -22,7 +21,6 @@ from speech_fakes import FakeEngine, run_async
 
 from tts_suite.api import (
     EngineControlFailed,
-    EngineDefaults,
     EngineInUse,
     EngineStarting,
     GpuRule,
@@ -30,12 +28,11 @@ from tts_suite.api import (
     SuiteConfig,
     TraceStep,
 )
-from tts_suite.engines.base import TTSFailure
 from tts_suite.escalation import Skip
 from tts_suite.holds import EngineHolds
 from tts_suite.launcher import SuiteLauncher
+from tts_suite.placement import GpuInfo
 from tts_suite.speaker import Speaker
-from tts_suite.vram import VramGuard, VramMeasurementFailed
 
 
 def _launcher(
@@ -76,6 +73,23 @@ def test_no_card_that_fits_is_no_vram_with_the_numbers(tmp_path: Path) -> None:
     engine = ContainerEngine("a")
     skip = run_async(_launcher(tmp_path, CardList(1000, 2000)).ensure_serving(local_entry(engine), wait=True))
     assert skip == Skip("no_vram", "needs 4512 MiB, most free 2000 MiB on GPU 1") and engine.ready_calls == 0
+
+
+def test_no_vram_is_not_remembered_so_the_next_request_chooses_the_card_again(tmp_path: Path) -> None:
+    engine = ContainerEngine("a")
+    cards = CardList(1000)
+    launcher = _launcher(tmp_path, cards)
+
+    async def scenario() -> None:
+        entry = local_entry(engine)
+        skip = await launcher.ensure_serving(entry, wait=True)
+        assert skip is not None and skip.reason == "no_vram" and engine.ready_calls == 0
+        assert launcher.start_failure(entry) is None
+        cards.cards[0] = GpuInfo(0, "GPU-0", 20000, 24000)  # room again, no explicit start
+        assert await launcher.ensure_serving(entry, wait=True) is None
+        assert engine.ready_calls == 1
+
+    run_async(scenario())
 
 
 def test_an_engine_without_a_budget_is_no_vram(tmp_path: Path) -> None:
@@ -289,107 +303,6 @@ def test_a_remote_container_is_stopped_over_ssh(tmp_path: Path) -> None:
         run_async(_launcher(tmp_path, ssh=FakeSsh(fail="no route")).stop(remote_entry(ContainerEngine("q", remote=True))))
 
 
-# ── The VRAM ceiling ────────────────────────────────────────────────
-
-
-def test_use_over_the_budget_stops_the_container_and_fails_the_entry(tmp_path: Path) -> None:
-    engine = ContainerEngine("a")  # budget 4000
-    engine.up = True
-    usage = {"GPU-0": 3900}
-    measured: list[str] = []
-    clock = Clock()
-
-    def measure(measured_engine: object) -> dict[str, int]:
-        measured.append("x")
-        return dict(usage)
-
-    guard = VramGuard(measure, clock=clock, min_interval_s=30)  # type: ignore[arg-type]
-
-    async def scenario() -> None:
-        launcher = _launcher(tmp_path, guard=guard)
-        entry = local_entry(engine)
-        await launcher.check_vram(entry)  # 3900 <= 4000
-        usage["GPU-0"] = 4100
-        await launcher.check_vram(entry)  # over, but measured a moment ago: not looked at again yet
-        assert len(measured) == 1 and engine.stops == 0
-        clock.now = 31
-        with pytest.raises(TTSFailure) as failure:
-            await launcher.check_vram(entry)
-        assert failure.value.reason == "vram_exceeded" and failure.value.detail == "a uses 4100 MiB, budget is 4000 MiB"
-
-    run_async(scenario())
-    assert len(measured) == 2 and engine.stops == 1 and not engine.up
-
-
-def test_an_entry_stopped_for_its_vram_use_is_not_started_again_until_an_explicit_start(tmp_path: Path) -> None:
-    engine = ContainerEngine("a")  # budget 4000
-    engine.up = True
-    guard = VramGuard(lambda measured: {"GPU-0": 9000}, clock=Clock())  # type: ignore[arg-type]
-
-    async def scenario() -> None:
-        launcher = _launcher(tmp_path, guard=guard)
-        entry = local_entry(engine)
-        with pytest.raises(TTSFailure):
-            await launcher.check_vram(entry)
-        assert not await launcher.is_serving(entry)
-        for wait in (True, False):  # the next reading does not start it again, it is skipped at once
-            skip = await launcher.ensure_serving(entry, wait=wait)
-            assert skip is not None and skip.reason == "no_vram" and skip.detail.startswith("exceeded budget: a uses 9000 MiB")
-        assert engine.ready_calls == 0
-        launcher.clear_failures(entry)  # an explicit start (or set_config, or reload)
-        assert await launcher.ensure_serving(entry, wait=True) is None
-        assert engine.ready_calls == 1
-
-    run_async(scenario())
-
-
-def test_a_failed_measurement_is_logged_as_an_error_and_lets_the_sentence_through(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
-) -> None:
-    heavy = ContainerEngine("heavy")
-    heavy.up = True
-    install(monkeypatch, heavy)
-    config = make_config(tmp_path, ["heavy"])
-
-    def blind(measured: object) -> dict[str, int]:
-        raise VramMeasurementFailed("docker compose ps failed: daemon gone")
-
-    launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh(), guard=VramGuard(blind, clock=Clock()))  # type: ignore[arg-type]
-    speaker = Speaker(config, launcher)
-
-    async def scenario() -> list[TraceStep]:
-        stream = speaker.speak("Hallo Welt hier.", REQUEST)
-        segments = await _collect(stream)
-        assert len(segments) == 1       # the finished audio is delivered, not thrown away
-        return list(stream.summary.trace)
-
-    with caplog.at_level("ERROR"):
-        trace = run_async(scenario())
-    assert trace == [TraceStep("heavy", "spoke")] and heavy.stops == 0
-    assert "could not be measured" in caplog.text and "daemon gone" in caplog.text
-    assert launcher.start_failure(local_entry(heavy)) is None
-
-
-def test_the_configured_budget_is_the_ceiling_and_the_total_over_all_cards_counts(tmp_path: Path) -> None:
-    engine = ContainerEngine("a")
-    config = SuiteConfig(voices_dir=tmp_path, engines={"a": EngineDefaults(vram_budget_mib=8000)})
-    guard = VramGuard(lambda measured: {"GPU-0": 5000, "GPU-1": 2900}, clock=Clock())  # type: ignore[arg-type]
-    launcher = _launcher(tmp_path, config=config, guard=guard)
-    run_async(launcher.check_vram(local_entry(engine)))  # 7900 <= 8000 (the engine's own 4000 would fail)
-    assert engine.stops == 0
-
-
-def test_remote_and_cpu_entries_are_not_measured(tmp_path: Path) -> None:
-    def never(measured: object) -> dict[str, int]:
-        raise AssertionError("must not measure")
-
-    launcher = _launcher(tmp_path, guard=VramGuard(never))  # type: ignore[arg-type]
-    cpu = ContainerEngine("c")
-    cpu.needs_gpu = False
-    run_async(launcher.check_vram(remote_entry(ContainerEngine("q", remote=True))))
-    run_async(launcher.check_vram(local_entry(cpu)))
-
-
 # ── Holds and heartbeat ─────────────────────────────────────────────
 
 
@@ -502,27 +415,6 @@ def test_an_aborted_stream_lets_go_of_the_container(tmp_path: Path, monkeypatch:
 
 async def _collect(stream: object) -> list[object]:
     return [segment async for segment in stream.segments()]  # type: ignore[attr-defined]
-
-
-def test_the_vram_ceiling_drops_the_entry_and_the_next_one_speaks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    heavy, healthy = ContainerEngine("heavy"), FakeEngine("healthy")
-    heavy.up = True
-    install(monkeypatch, heavy, healthy)
-    config = make_config(tmp_path, ["heavy", "healthy"])
-    guard = VramGuard(lambda measured: {"GPU-0": 9000}, clock=Clock())  # type: ignore[arg-type]
-    launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh(), guard=guard)
-    speaker = Speaker(config, launcher)
-
-    async def scenario() -> list[TraceStep]:
-        stream = speaker.speak("Hallo Welt hier.", REQUEST)
-        await _collect(stream)
-        return list(stream.summary.trace)
-
-    assert run_async(scenario()) == [
-        TraceStep("heavy", "failed", "vram_exceeded", "heavy uses 9000 MiB, budget is 4000 MiB"),
-        TraceStep("healthy", "spoke"),
-    ]
-    assert heavy.stops == 1
 
 
 def test_the_skip_detail_of_the_launcher_reaches_the_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

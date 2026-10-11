@@ -26,7 +26,7 @@ EntryStatus = Literal["running", "stopped", "starting", "unreachable"]
 SkipReason = Literal["disabled", "deactivated", "stopped", "no_vram"]
 """Why an entry is passed over BEFORE an attempt."""
 
-FailureReason = Literal["engine", "software", "unreachable", "timeout", "cloud_quota", "vram_exceeded"]
+FailureReason = Literal["engine", "software", "unreachable", "timeout", "cloud_quota"]
 """Why an entry failed AFTER an attempt (a failure after the first sound
 triggers the announcement of a voice change)."""
 
@@ -68,7 +68,7 @@ class EngineDefaults:
 
     unit: Unit | None = None  # None = the engine's own default
     voice: VoiceSettings = field(default_factory=VoiceSettings)
-    vram_budget_mib: int | None = None  # GPU engines: VRAM the engine may use, set by whoever ran the burn-in
+    vram_budget_mib: int | None = None  # GPU engines: VRAM the engine may use (card choice + cap in the container)
     max_parallel: int | None = None  # requests running at once; None = the engine's own default
     max_queue: int | None = None  # requests waiting beyond that, then ``Overloaded``; None = engine default
 
@@ -96,12 +96,12 @@ class SuiteConfig:
     GPU placement is a rule set, not a callback: the suite owns the cards' use for all
     programs that talk to it. An engine starts on the first card of ``gpus`` whose free
     VRAM (``nvidia-smi``) minus ``reserve_mib`` covers the engine's ``vram_budget_mib``
-    plus ``headroom_mib``. The container gets the budget itself as its limit; the headroom
-    only keeps a card from being filled to the last MiB.
-    The budget is also a ceiling: an engine that uses more than its budget fails with
-    ``vram_exceeded``, its container is stopped and the escalation goes on. An empty
-    ``gpus`` means every card, the one with the most free VRAM first. No card fits: the
-    entry is skipped with ``no_vram``.
+    plus ``headroom_mib``. The container gets the budget itself as its cap; the headroom
+    only keeps a card from being filled to the last MiB. The cap counts PyTorch memory only,
+    so it is an outlier guard, not an exact limit; the suite does not watch the use or stop an
+    engine for it (``EngineInfo.vram_mib`` only reports it). An empty ``gpus`` means every
+    card, the one with the most free VRAM first. No card fits: the entry is skipped with
+    ``no_vram`` (not remembered: the next request chooses again).
 
     ``pronunciations`` maps a word to the form that is spoken instead (whole words, case as
     written; for example "AIfred" -> "Alfred"). The text cleaning of every unit applies it; it is
@@ -136,6 +136,7 @@ class EngineInfo:
     needs_gpu: bool
     cloud: bool
     browser: bool  # stands for the client's own voice; the suite always skips it
+    vram_mib: Mapping[str, int] | None  # {gpu_uuid: MiB} per card it holds (display only); {} = none/not local; None = measurement failed
 
 
 @dataclass(frozen=True)
@@ -293,7 +294,7 @@ class TTSSuite(Protocol):
 
     async def start(self, engine: str, host: str | None = None) -> None:
         """Start the container and wait until it serves. Forgets why an earlier start of this entry
-        (or the VRAM ceiling) took it out of the list."""
+        took it out of the list."""
         ...
 
     async def stop(self, engine: str, host: str | None = None) -> None: ...
