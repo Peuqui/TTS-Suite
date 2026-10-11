@@ -1,0 +1,30 @@
+{
+  "tts_switch_unreachable": {
+    "de": "Stimmwechsel wegen Serverausfall, weiter mit {target}.",
+    "en": "Voice change due to a server outage, continuing with {target}."
+  },
+  "tts_switch_engine": {
+    "de": "Stimmwechsel wegen Engine-Ausfall, weiter mit {target}.",
+    "en": "Voice change due to an engine failure, continuing with {target}."
+  },
+  "tts_switch_software": {
+    "de": "Stimmwechsel wegen eines Softwarefehlers, weiter mit {target}.",
+    "en": "Voice change due to a software error, continuing with {target}."
+  },
+  "tts_switch_timeout": {
+    "de": "Stimmwechsel wegen einer Zeitüberschreitung, weiter mit {target}.",
+    "en": "Voice change due to a timeout, continuing with {target}."
+  },
+  "tts_switch_cloud_quota": {
+    "de": "Stimmwechsel wegen erschöpften Cloud-Kontingents, weiter mit {target}.",
+    "en": "Voice change because the cloud quota is used up, continuing with {target}."
+  },
+  "tts_switch_vram_exceeded": {
+    "de": "Stimmwechsel wegen Speichermangels der Grafikkarte, weiter mit {target}.",
+    "en": "Voice change due to a lack of graphics card memory, continuing with {target}."
+  },
+  "tts_switch_target_remote": {
+    "de": "{engine} auf {host}",
+    "en": "{engine} on {host}"
+  }
+}

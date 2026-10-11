@@ -16,6 +16,7 @@ from .base import SPEECH_UNITS, DeactivatedEngine, TTSEngine, TTSFailure, shared
 from .registry import (
     TTS_ENGINES,
     default_escalation,
+    engine_unit,
     get_engine,
     gpu_engine_keys,
     gpu_engines,
@@ -35,6 +36,7 @@ __all__ = [
     "TTSFailure",
     "TTS_ENGINES",
     "default_escalation",
+    "engine_unit",
     "get_engine",
     "gpu_engine_keys",
     "gpu_engines",

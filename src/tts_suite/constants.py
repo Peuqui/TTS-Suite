@@ -91,3 +91,53 @@ DASHSCOPE_API_KEY_ENV = "DASHSCOPE_API_KEY"
 DASHSCOPE_MAPPING_FILE_NAME = "dashscope_audio3_voices.json"
 #: Voice enrollment uploads a reference WAV; generous timeout.
 DASHSCOPE_ENROLL_TIMEOUT_S = 90
+
+# ── Speaking (escalation, text cutting, stream) ─────────────────────
+
+#: A segment that takes longer than this many seconds is followed by a keep-alive piece of silence
+#: until it is there (the client's connection may time out on a quiet stream). Source: ``FREEECHO2_KEEPALIVE_SEC``.
+KEEPALIVE_SEC = 10.0
+#: Length of one keep-alive piece. Source: ``KEEPALIVE_SILENCE_MS``.
+KEEPALIVE_SILENCE_MS = 20
+
+#: How long the state of a run (failed entries, voice-change announcement) is kept after its last use.
+RUN_TTL_S = 600
+
+#: Requests that may wait for a free slot of an engine, beyond ``max_parallel_requests``, before ``Overloaded``.
+ENGINE_QUEUE_DEFAULT = 8
+
+#: Speed and pitch when neither the request nor the configuration names one (1.0 = unchanged).
+SPEED_DEFAULT = 1.0
+PITCH_DEFAULT = 1.0
+
+#: Sentences with fewer words are joined with the next one (the engines hallucinate on very short sentences).
+#: Source: ``TTS_MIN_SENTENCE_WORDS``.
+TTS_MIN_SENTENCE_WORDS = 3
+
+#: A sentence end is only final when this many characters follow it: the end detection looks ahead
+#: (URL context 10 characters, closing quotes), so a cutter that sees a text in pieces must wait for them.
+SENTENCE_LOOKAHEAD_CHARS = 10
+
+#: Characters that close a quotation or parenthesis right after a sentence end and belong to that sentence.
+SENTENCE_CLOSERS = "\"')»"
+
+#: Words that end with a period but not a sentence (lowercase). Source: ``ABBREVIATIONS_DE`` / ``_EN``.
+ABBREVIATIONS_DE = frozenset({
+    "z.b.", "z. b.", "d.h.", "d. h.", "u.a.", "u. a.", "o.ä.", "o. ä.",
+    "bzw.", "ca.", "etc.", "evtl.", "ggf.", "inkl.", "max.", "min.",
+    "nr.", "s.", "str.", "tel.", "usw.", "vgl.", "vs.", "z.t.",
+    "dr.", "prof.", "hr.", "fr.", "ing.", "dipl.",  # titles
+    "jan.", "feb.", "mär.", "apr.", "jun.", "jul.", "aug.", "sep.", "okt.", "nov.", "dez.",  # months
+    "mo.", "di.", "mi.", "do.", "sa.", "so.",  # days ("fr." is among the titles)
+})
+ABBREVIATIONS_EN = frozenset({
+    "e.g.", "i.e.", "etc.", "vs.", "mr.", "mrs.", "ms.", "dr.", "prof.",
+    "inc.", "ltd.", "corp.", "co.", "jr.", "sr.",
+    "jan.", "feb.", "mar.", "apr.", "jun.", "jul.", "aug.", "sep.", "oct.", "nov.", "dec.",
+    "mon.", "tue.", "wed.", "thu.", "fri.", "sat.", "sun.",
+    "no.", "vol.", "ch.", "pg.", "pp.", "fig.", "approx.", "dept.",
+})
+ABBREVIATIONS = ABBREVIATIONS_DE | ABBREVIATIONS_EN
+
+#: Texts the suite speaks itself (voice-change announcements), German and English, next to the modules.
+I18N_FILE_NAME = "i18n.json"

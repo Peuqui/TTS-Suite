@@ -120,15 +120,19 @@ def installed_gpu_engines() -> list[TTSEngine]:
     return [e for e in gpu_engines() if e.is_installed()]
 
 
-def speech_unit(engine_key: str, defaults: Mapping[str, EngineDefaults]) -> Unit:
-    """Unit of speech for an engine: the configured choice (``EngineDefaults.unit``) or the
+def engine_unit(engine: TTSEngine, defaults: Mapping[str, EngineDefaults]) -> Unit:
+    """Unit of speech of an engine instance: the configured choice (``EngineDefaults.unit``) or the
     engine's default. Pure function of the configuration; applies to every client alike."""
-    engine = require_engine(engine_key)
-    configured = defaults[engine_key].unit if engine_key in defaults else None
+    configured = defaults[engine.key].unit if engine.key in defaults else None
     unit = configured or engine.default_speech_unit
     if unit not in SPEECH_UNITS:
-        raise ValueError(f"speech unit of {engine_key!r} must be one of {SPEECH_UNITS}, got {unit!r}")
+        raise ValueError(f"speech unit of {engine.key!r} must be one of {SPEECH_UNITS}, got {unit!r}")
     return unit
+
+
+def speech_unit(engine_key: str, defaults: Mapping[str, EngineDefaults]) -> Unit:
+    """:func:`engine_unit` for a registered engine named by its key."""
+    return engine_unit(require_engine(engine_key), defaults)
 
 
 class VoiceCatalog(Protocol):

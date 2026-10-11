@@ -18,6 +18,7 @@ from ..constants import (
     COMPOSE_FILE_NAME,
     DOCKER_INSPECT_TIMEOUT_S,
     DOCKER_TTS_DIR,
+    ENGINE_QUEUE_DEFAULT,
     MEDIA_TYPE_WAV,
     TTS_CONNECT_TIMEOUT_S,
     TTS_HEALTH_TIMEOUT_S,
@@ -135,6 +136,10 @@ class TTSEngine(ABC):
     #: a 3090 Ti: XTTS serves two in parallel without loss, Qwen3-TTS slows
     #: down about five-fold (2× ~14 s instead of 2× ~2.7 s) — it gets 1.
     max_parallel_requests: int = 2
+
+    #: How many requests may wait for a free slot beyond ``max_parallel_requests``
+    #: (per host); more are refused with ``Overloaded``. ``EngineDefaults.max_queue`` overrides.
+    max_queued_requests: int = ENGINE_QUEUE_DEFAULT
 
     #: Seconds a container engine gets to come up and load its model —
     #: locally and on a TTS host alike. 0 for engines without a container.
