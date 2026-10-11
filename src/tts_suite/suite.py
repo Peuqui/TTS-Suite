@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Literal
 
 from .api import (
     EngineControlFailed,
     EngineInfo,
+    EngineInUse,
+    EngineTarget,
     EntryStatus,
+    InvalidRequest,
+    ReleaseResult,
     SpeakRequest,
     SuiteConfig,
     VoiceInfo,
@@ -27,6 +32,8 @@ from .stream import Stream
 from .vram import VramMeasurementFailed, engine_vram_mib
 
 logger = logging.getLogger(__name__)
+
+NOTHING_TO_RELEASE = "nothing to release"
 
 
 class Suite:
@@ -133,6 +140,38 @@ class Suite:
 
     async def stop(self, engine: str, host: str | None = None) -> None:
         await self._launcher.stop(self._catalog_entry(engine, host))
+
+    async def release(self, targets: tuple[EngineTarget, ...] | Literal["all"]) -> tuple[ReleaseResult, ...]:
+        entries = self._release_entries(targets)
+        return tuple(await asyncio.gather(*(self._release_one(entry) for entry in entries)))
+
+    def _release_entries(self, targets: tuple[EngineTarget, ...] | Literal["all"]) -> list[EscalationEntry]:
+        """The rows to release; the whole request is checked here, before anything is stopped."""
+        if targets == "all":
+            return [entry for entry in self._speaker.catalog_entries() if entry.engine.runs_in_container]
+        if not targets:
+            raise InvalidRequest("release needs at least one target")
+        if len(set(targets)) != len(targets):
+            raise InvalidRequest("a target is named twice")
+        return [self._catalog_entry(target.engine, target.host) for target in targets]
+
+    async def _release_one(self, entry: EscalationEntry) -> ReleaseResult:
+        """The same stop as :meth:`stop`, with its refusals turned into an outcome."""
+        engine, host = entry.engine.key, entry.host.name if entry.host is not None else None
+        if not entry.engine.runs_in_container:
+            return ReleaseResult(engine, host, "not_running", NOTHING_TO_RELEASE)
+        status = await self._launcher.status(entry)
+        if status == "unreachable":
+            return ReleaseResult(engine, host, "unreachable", f"{entry.label} is unreachable")
+        if status == "stopped":
+            return ReleaseResult(engine, host, "not_running", NOTHING_TO_RELEASE)
+        try:
+            await self._launcher.stop(entry)
+        except EngineInUse as busy:
+            return ReleaseResult(engine, host, "in_use", str(busy))
+        except EngineControlFailed as failed:
+            return ReleaseResult(engine, host, "failed", str(failed))
+        return ReleaseResult(engine, host, "stopped", f"{entry.label} stopped")
 
     async def reload(self) -> tuple[list[str], list[str]]:
         removed, added = await asyncio.to_thread(reload_engines)

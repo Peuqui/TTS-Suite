@@ -3,7 +3,7 @@ through pydantic, so there is no second description of any of them."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import TypeAdapter
 
@@ -12,10 +12,12 @@ from ..api import (
     EngineControlFailed,
     EngineInfo,
     EngineInUse,
+    EngineTarget,
     EngineStarting,
     InvalidRequest,
     NoEngineAvailable,
     Overloaded,
+    ReleaseResult,
     SpeakRequest,
     SpeakSummary,
     SuiteConfig,
@@ -31,6 +33,8 @@ _ENGINES = TypeAdapter(list[EngineInfo])
 _VOICES = TypeAdapter(list[VoiceInfo])
 _REQUEST = TypeAdapter(SpeakRequest)
 _SUMMARY = TypeAdapter(SpeakSummary)
+_TARGETS: TypeAdapter[tuple[EngineTarget, ...] | Literal["all"]] = TypeAdapter(tuple[EngineTarget, ...] | Literal["all"])
+_RELEASES = TypeAdapter(tuple[ReleaseResult, ...])
 
 # Every error the suite raises on purpose: its HTTP status and its code in `{"error": ...}`.
 ERROR_ANSWERS: dict[type[SuiteError], tuple[int, str]] = {
@@ -65,6 +69,14 @@ def voices_to_json(voices: list[VoiceInfo]) -> Any:
 
 def request_from_json(head: Any) -> SpeakRequest:
     return _REQUEST.validate_python(head)
+
+
+def targets_from_json(data: Any) -> tuple[EngineTarget, ...] | Literal["all"]:
+    return _TARGETS.validate_python(data)
+
+
+def releases_to_json(results: tuple[ReleaseResult, ...]) -> Any:
+    return _RELEASES.dump_python(results, mode="json")
 
 
 def summary_to_json(summary: SpeakSummary) -> Any:

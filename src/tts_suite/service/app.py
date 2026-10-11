@@ -27,7 +27,9 @@ from .wire import (
     config_to_json,
     engines_to_json,
     error_answer,
+    releases_to_json,
     request_from_json,
+    targets_from_json,
     voices_to_json,
 )
 
@@ -158,6 +160,17 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
     async def stop(request: Request, engine: str, host: str | None = None) -> None:
         check(request, True)
         await suite.stop(engine, host)
+
+    @app.post("/release")
+    async def release(request: Request) -> Any:
+        # A client asks, like for a reading, so no token on this machine; the suite decides what happens.
+        check(request, False)
+        body = await _json_body(request)
+        try:
+            targets = targets_from_json(body.get("targets"))
+        except ValidationError as error:
+            raise bad_request(str(error)) from error
+        return releases_to_json(await suite.release(targets))
 
     @app.post("/speak")
     async def speak(request: Request) -> StreamingResponse:

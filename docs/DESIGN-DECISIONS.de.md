@@ -37,6 +37,20 @@ jede HTTP-Antwort heißt, er ist da. Jede Zeile fragt für sich, ein toter Host 
 `GET /engines` also um eine Health-Zeitgrenze, nicht um eine je Zeile. Ein Start auf einem
 unerreichbaren Host scheitert sofort (`stopped`, "host ... unreachable"), ohne auf den SSH-Verbindungsaufbau zu warten.
 
+## Freigabe auf Anfrage
+
+Ein Client, der Platz auf einer Karte braucht (etwa AIfred für ein Sprachmodell), bittet den Dienst
+per `POST /release`, Container von den Karten zu nehmen: `{"targets": "all"}` oder eine Liste von
+`{"engine", "host"}`. Der Container wird heruntergefahren (VRAM danach frei), nicht nur das Modell
+entladen. Der Dienst entscheidet je Ziel: `stopped`, `not_running` (läuft nicht oder hat keinen
+Container), `in_use` (eine Lesung hält ihn, die Lesung geht vor, er wird NICHT gestoppt),
+`unreachable` (Host antwortet nicht, ohne SSH-Versuch) oder `failed` (Stopp misslungen, mit Meldung).
+Die Ziele laufen parallel, ein toter Host verzögert die anderen nicht. Die ganze Anfrage wird vor dem
+ersten Stopp geprüft (leer, doppelt, unbekannte Engine oder unbekannter Host: nichts wird gestoppt).
+Es ist derselbe Launcher-Stopp wie bei `stop`, kein zweiter Weg. Der Endpunkt ist eine Anfrage wie
+`/speak`: auf Loopback ohne Token, sonst mit; die ändernden Verwaltungsbefehle (Start, Stopp,
+Konfiguration) bleiben immer tokenpflichtig.
+
 ## Kartenwahl und Speichergrenze
 
 Die Wahl der Karte folgt Regeln der Konfiguration (`gpus`: Reihenfolge und Reserve je

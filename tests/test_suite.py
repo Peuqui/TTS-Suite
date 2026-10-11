@@ -1,6 +1,8 @@
 """The Suite: configuration, the catalog of engines, voices, start/stop, reload, speaking."""
 from __future__ import annotations
 
+import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +24,10 @@ from tts_suite.api import (
     EngineDefaults,
     EngineInUse,
     EngineInfo,
+    EngineTarget,
     Host,
     InvalidRequest,
+    ReleaseResult,
     SuiteConfig,
     TTSSuite,
     UnknownEngine,
@@ -32,7 +36,7 @@ from tts_suite.api import (
 )
 from tts_suite.engines import registry
 from tts_suite.engines.base import Reachability, TTSEngine
-from tts_suite.escalation import Skip
+from tts_suite.escalation import EscalationEntry, Skip
 from tts_suite.launcher import SuiteLauncher
 from tts_suite.suite import Suite, create_suite
 
@@ -313,6 +317,122 @@ def test_a_container_in_use_cannot_be_stopped(tmp_path: Path, monkeypatch: pytes
     suite, _ = _suite(make_config(tmp_path), launcher)
     with pytest.raises(EngineInUse):
         run_async(suite.stop("busy"))
+
+
+# ── Release on request ──────────────────────────────────────────────
+
+
+class SlowStopLauncher(FakeManagedLauncher):
+    """Stops take ``stop_delay_s`` per label; a failing stop raises ``stop_errors[label]``."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.stop_delay_s: dict[str, float] = {}
+        self.stop_errors: dict[str, Exception] = {}
+
+    async def stop(self, entry: Any) -> None:
+        await asyncio.sleep(self.stop_delay_s.get(entry.label, 0.0))
+        if entry.label in self.stop_errors:
+            raise self.stop_errors[entry.label]
+        self.stopped.append(entry.label)
+
+
+def _release_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **launcher_args: Any) -> tuple[Suite, SlowStopLauncher]:
+    local, remote = ContainerEngine("lo"), ContainerEngine("re")
+    remote.default_port = 5000
+    install(monkeypatch, local, remote, FakeEngine("nocontainer"))
+    return _suite(make_config(tmp_path, hosts=(ARAGON,)), SlowStopLauncher(**launcher_args))  # type: ignore[return-value]
+
+
+def test_release_reports_every_outcome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _release_setup(
+        tmp_path, monkeypatch, statuses={"lo": "running", "re@Aragon": "unreachable", "held": "running", "broken": "running"}
+    )
+    for key in ("held", "broken", "idle"):
+        install(monkeypatch, ContainerEngine(key))
+    launcher.statuses["idle"] = "stopped"
+    launcher.stop_errors = {"held": EngineInUse("held is in use by a reading"), "broken": EngineControlFailed("broken: boom")}
+    targets = tuple(EngineTarget(key, host) for key, host in (
+        ("lo", None), ("re", "Aragon"), ("held", None), ("broken", None), ("idle", None), ("nocontainer", None)
+    ))
+    results = run_async(suite.release(targets))
+    assert [(r.engine, r.host, r.outcome) for r in results] == [
+        ("lo", None, "stopped"), ("re", "Aragon", "unreachable"), ("held", None, "in_use"),
+        ("broken", None, "failed"), ("idle", None, "not_running"), ("nocontainer", None, "not_running"),
+    ]
+    assert results[2].detail == "held is in use by a reading" and results[3].detail == "broken: boom"
+    assert results[5] == ReleaseResult("nocontainer", None, "not_running", "nothing to release")
+    assert launcher.stopped == ["lo"]  # nothing else was stopped, the unreachable host was not even tried
+
+
+def test_release_leaves_a_held_container_alone_with_the_real_launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    held, remote = ContainerEngine("held"), ContainerEngine("re", remote=True)
+    held.up = True
+    remote.default_port = 5000
+    remote.reach = "unreachable"
+    install(monkeypatch, held, remote)
+    ssh = FakeSsh()
+    config = make_config(tmp_path, hosts=(ARAGON,))
+    launcher = SuiteLauncher(config, gpus=lambda: [], host_command=ssh)  # type: ignore[arg-type]
+    suite, _ = _suite(config, launcher)  # type: ignore[arg-type]
+
+    async def scenario() -> tuple[ReleaseResult, ...]:
+        launcher.hold(EscalationEntry(held, None, "sentence"))  # a hold starts a heartbeat task: needs the loop
+        return await suite.release((EngineTarget("held", None), EngineTarget("re", "Aragon")))
+
+    results = run_async(scenario())
+    assert [r.outcome for r in results] == ["in_use", "unreachable"]
+    assert held.stops == 0 and held.up and ssh.commands == []
+    run_async(launcher.aclose())
+
+
+def test_release_stops_a_host_container_over_ssh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    remote = ContainerEngine("re", remote=True)
+    remote.default_port = 5000
+    remote.up = True
+    install(monkeypatch, remote)
+    ssh = FakeSsh()
+    config = make_config(tmp_path, hosts=(ARAGON,))
+    suite, _ = _suite(config, SuiteLauncher(config, gpus=lambda: [], host_command=ssh))  # type: ignore[arg-type]
+    results = run_async(suite.release((EngineTarget("re", "Aragon"),)))
+    assert results[0].outcome == "stopped" and [c[:2] for c in ssh.commands] == [("Aragon", "stop")]
+
+
+def test_release_all_takes_every_catalog_row_with_a_container(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    results = run_async(suite.release("all"))
+    rows = {(r.engine, r.host): r.outcome for r in results}
+    # The registry's own container engines are in the catalog too; ours are all there, the one without a container is not.
+    assert {key: rows[key] for key in (("lo", None), ("re", None), ("re", "Aragon"))} == {
+        ("lo", None): "stopped", ("re", None): "stopped", ("re", "Aragon"): "stopped"
+    }
+    assert ("nocontainer", None) not in rows and set(rows.values()) == {"stopped"}
+    assert {"lo", "re", "re@Aragon"} <= set(launcher.stopped)
+
+
+def test_a_bad_release_request_stops_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    lo = EngineTarget("lo", None)
+    bad: list[tuple[type[Exception], tuple[EngineTarget, ...]]] = [
+        (InvalidRequest, ()),
+        (InvalidRequest, (lo, lo)),
+        (UnknownEngine, (lo, EngineTarget("nope", None))),
+        (UnknownHost, (lo, EngineTarget("re", "Ghost"))),
+    ]
+    for error, targets in bad:
+        with pytest.raises(error):
+            run_async(suite.release(targets))
+    assert launcher.stopped == []
+
+
+def test_release_handles_the_targets_in_parallel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    launcher.stop_delay_s = {"re@Aragon": 0.4}  # a slow host
+    started = time.monotonic()
+    results = run_async(suite.release((EngineTarget("re", "Aragon"), EngineTarget("lo", None), EngineTarget("re", None))))
+    assert time.monotonic() - started < 0.7  # one delay, not a sum of three
+    assert [r.outcome for r in results] == ["stopped"] * 3
+    assert launcher.stopped[-1] == "re@Aragon"  # the fast ones finished first
 
 
 def test_reload_rereads_the_engine_folders_and_binds_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

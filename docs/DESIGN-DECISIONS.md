@@ -34,6 +34,19 @@ host is off, any HTTP answer means it is there. Every row asks on its own, so a 
 `GET /engines` by one health timeout, not by one per row. A start on an unreachable host fails at
 once (`stopped`, "host ... unreachable") without waiting for an SSH connect.
 
+## Release on request
+
+A client that needs room on a card (for example AIfred for a language model) asks the service with
+`POST /release` to take containers off the cards: `{"targets": "all"}` or a list of
+`{"engine", "host"}`. The container is shut down (VRAM free afterwards), not only unloaded. The
+service decides per target: `stopped`, `not_running` (not running or no container), `in_use` (a
+reading holds it; the reading comes first, it is NOT stopped), `unreachable` (the host does not
+answer, no SSH attempt) or `failed` (the stop did not work, with the message). The targets run in
+parallel, a dead host does not delay the others. The whole request is checked before the first stop
+(empty, repeated, unknown engine or host: nothing is stopped). It is the same launcher stop as
+`stop`, not a second path. The endpoint is a request like `/speak`: no token on loopback, a token
+otherwise; the commands that change the service (start, stop, configuration) always need the token.
+
 ## Card choice and memory limit
 
 The card is chosen by rules in the configuration (`gpus`: order and reserve per card,

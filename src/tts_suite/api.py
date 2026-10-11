@@ -134,6 +134,31 @@ class EngineInfo:
 
 
 @dataclass(frozen=True)
+class EngineTarget:
+    """One catalog row a client asks the suite to release. Nothing is optional: ``host=None`` is the
+    explicit value "this machine"."""
+
+    engine: str
+    host: str | None
+
+
+ReleaseOutcome = Literal["stopped", "not_running", "in_use", "unreachable", "failed"]
+"""``stopped`` = the container was taken down, its VRAM is free; ``not_running`` = nothing to release (no
+container, or it does not run); ``in_use`` = a reading holds it, so it was left alone; ``unreachable`` = the
+host does not answer; ``failed`` = the stop did not work (``detail`` says why)."""
+
+
+@dataclass(frozen=True)
+class ReleaseResult:
+    """What :meth:`TTSSuite.release` did for one target."""
+
+    engine: str
+    host: str | None
+    outcome: ReleaseOutcome
+    detail: str
+
+
+@dataclass(frozen=True)
 class VoiceInfo:
     name: str
     label: str
@@ -338,6 +363,15 @@ class TTSSuite(Protocol):
         ...
 
     async def stop(self, engine: str, host: str | None = None) -> None: ...
+
+    async def release(self, targets: tuple[EngineTarget, ...] | Literal["all"]) -> tuple[ReleaseResult, ...]:
+        """A client asks the suite to take containers off the cards (for example to make room for a language
+        model): the container is stopped, not only unloaded. The suite decides per target (see
+        :data:`ReleaseOutcome`); a container a reading holds is never stopped. ``"all"`` = every catalog row
+        with a container, on this machine and on the hosts. The targets are handled in parallel; the results
+        come in the order of the targets. The whole request is checked before the first stop:
+        :class:`InvalidRequest` (empty or a repeated target), :class:`UnknownEngine`, :class:`UnknownHost`."""
+        ...
 
     async def reload(self) -> tuple[list[str], list[str]]:
         """Read the engine folders again; returns (removed, added) engine keys. Forgets the

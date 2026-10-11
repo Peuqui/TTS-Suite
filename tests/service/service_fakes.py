@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Literal
 
 from tts_suite.api import (
     AudioSegment,
     EngineInfo,
+    EngineTarget,
+    ReleaseResult,
     SpeakRequest,
     SpeakSummary,
     SuiteConfig,
@@ -116,6 +119,12 @@ class FakeSuite:
 
     async def stop(self, engine: str, host: str | None = None) -> None:
         self.calls.append(("stop", (engine, host)))
+
+    async def release(self, targets: tuple[EngineTarget, ...] | Literal["all"]) -> tuple[ReleaseResult, ...]:
+        self.calls.append(("release", (targets,)))
+        if self.refuses is not None:
+            raise self.refuses
+        return (ReleaseResult("xtts", None, "stopped", "xtts stopped"),)
 
     async def reload(self) -> tuple[list[str], list[str]]:
         self.calls.append(("reload", ()))

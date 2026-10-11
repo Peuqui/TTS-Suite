@@ -15,6 +15,7 @@ from tts_suite.api import (
     EngineInUse,
     EngineRef,
     EngineStarting,
+    EngineTarget,
     InvalidRequest,
     NoEngineAvailable,
     Overloaded,
@@ -390,3 +391,43 @@ def test_the_page_of_the_service_is_served_without_a_token_with_a_strict_policy(
     # What the page asks for is not served without the token on a network.
     assert client.get("/engines").status_code == 401
     assert client.get("/", follow_redirects=False).headers["location"] == "/ui/"
+
+
+# ── Release on request ──────────────────────────────────────────────
+
+
+def test_release_takes_both_forms_of_the_targets_without_a_token_on_this_machine(tmp_path: Path) -> None:
+    client, suite, _ = build(tmp_path)
+    everything = client.post("/release", json={"targets": "all"})
+    assert everything.status_code == 200
+    assert everything.json() == [{"engine": "xtts", "host": None, "outcome": "stopped", "detail": "xtts stopped"}]
+    assert client.post("/release", json={"targets": [{"engine": "xtts", "host": None}]}).status_code == 200
+    assert suite.calls == [("release", ("all",)), ("release", ((EngineTarget("xtts", None),),))]
+
+
+def test_release_asks_for_the_token_where_everything_does(tmp_path: Path) -> None:
+    client, suite, _ = build(tmp_path, token_for_everything=True)
+    assert client.post("/release", json={"targets": "all"}).status_code == 401
+    assert client.post("/release", json={"targets": "all"}, headers=BEARER).status_code == 200
+    assert suite.calls == [("release", ("all",))]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{}, {"targets": "some"}, {"targets": [{"engine": "xtts"}]}],
+)
+def test_release_refuses_a_malformed_body(tmp_path: Path, body: dict[str, object]) -> None:
+    client, suite, _ = build(tmp_path)
+    assert client.post("/release", json=body).status_code == 400
+    assert suite.calls == []
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "code"),
+    [(InvalidRequest("empty"), 422, "invalid_request"), (UnknownEngine("x"), 404, "unknown_engine"), (UnknownHost("x"), 404, "unknown_host")],
+)
+def test_release_answers_the_errors_of_the_suite_like_speak(tmp_path: Path, error: Exception, status: int, code: str) -> None:
+    client, suite, _ = build(tmp_path)
+    suite.refuses = error  # type: ignore[assignment]
+    refused = client.post("/release", json={"targets": []})
+    assert refused.status_code == status and refused.json()["error"] == code
