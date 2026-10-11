@@ -17,9 +17,10 @@ Programm Text sprechen, ohne selbst Sprachausgabe zu bauen. Das Schwesterprojekt
 - **Engines sind Module.** Lokale Engines (zum Beispiel XTTS, Qwen3-TTS) laufen als Docker-Container, die
   man mit `docker compose` auswählt; Cloud-Engines (zum Beispiel Edge, DashScope) werden über das Internet
   gerufen. Man betreibt nur die, die man will.
-- **Eine Liste entscheidet, wer spricht.** Eine geordnete Eskalationsliste nennt Engine und Ort (dieser
-  Rechner, ein anderer Rechner, Cloud). Der erste Eintrag, der sprechen kann, spricht; fällt er aus, übernimmt
-  der nächste.
+- **Jede Anfrage bringt ihre eigene Liste.** Der Dienst bietet alle seine Engines an (ein Katalog: jede
+  Engine auf jedem Rechner, auf dem sie laufen kann, und die Cloud). Eine Anfrage nennt die gewünschten Engines
+  in Reihenfolge, mit Rechner und Textmenge auf einmal; der erste Eintrag, der sprechen kann, spricht, und fällt
+  er aus, übernimmt der nächste. Keine Liste wird geteilt: Jeder Client hält seine eigene.
 - **Kein Programm hängt von einem anderen ab.** Ein Client kennt nur die Adresse des Dienstes. Ohne den
   Dienst hat er seinen eigenen Ersatz (zum Beispiel die Stimme des Browsers).
 - **Stimmen sind Dateien** in einem gemeinsamen Ordner, für jede Engine nur lesbar.

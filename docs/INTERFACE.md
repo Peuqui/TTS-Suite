@@ -15,10 +15,12 @@ one. Where an engine container is concerned, the convention of AIfred Intelligen
    (`audio/wav`). The voices are files in one folder mounted read-only into every container.
 2. **The service** in front of them, running as a system service with low rights on the machine. It is the
    only owner of starting and stopping containers and of the choice of the GPU, because several programs
-   (AIfred, Agent-Orc, others) share the same cards. It picks the engine from the escalation list, **cuts the
-   text by the unit of the engine that speaks**, post-processes the audio (speed and pitch with ffmpeg for
+   (AIfred, Agent-Orc, others) share the same cards. It tries the engines **the request names**, in the order it names them, **cuts the
+   text by the unit of the entry that speaks**, post-processes the audio (speed and pitch with ffmpeg for
    engines without native support) and streams it back. A client never talks to a container directly. Other
-   machines (SSH) are an optional list; the normal case is this machine.
+   machines (SSH) are an optional list of hosts; the normal case is this machine. **There is no list of
+   engines in the service that anyone shares:** it offers all its engines (the catalog), and every request
+   brings its own list.
 
 The service cleans the text for speech by unit (Markdown, numbers, emoji, URLs; a block of code is replaced by
 a short spoken hint, once per block; `pronunciations` of the configuration swap words for the form that is
@@ -30,36 +32,38 @@ agents (which agent has which voice). The service gets text and answers with aud
 | Method and path | Purpose |
 |---|---|
 | `GET /health` | `200` with `{"status": "ok"}` while the service runs. |
-| `GET /engines` | The escalation list in speaking order; fields below. |
+| `GET /engines` | The catalog: every engine on every machine it can run on; fields below. |
 | `GET /voices?engine=<key>` | The voices of one engine: for each `name` and `label`. Without `engine`: the folders of the shared voices directory. |
 | `POST /voices/sync?engine=<key>` | Has a cloud engine that clones voices (DashScope) upload the voices of the shared directory. Answers with the voices now known. |
 | `POST /speak` | Door 1: the whole text; the answer is the stream of frames (below). |
 | `WS /speak/stream` | Door 2: the text arrives in pieces (a language model is still writing); the frames run back as they exist. |
-| `POST /engines/{engine}/start`, `POST /engines/{engine}/stop` | Starts or stops an entry's container (query `host` for another machine). |
-| `POST /engines/reload` | Reads the engine folders again (an engine is switched off by moving its folder to `disabled/`; it stays in the list as `deactivated`). Answers `{"removed": [...], "added": [...]}`. |
+| `POST /engines/{engine}/start`, `POST /engines/{engine}/stop` | Starts or stops the container of a row of the catalog (query `host`: the machine's name; none: this one). |
+| `POST /engines/reload` | Reads the engine folders again (an engine is switched off by moving its folder to `disabled/`: it is not in the catalog, and a request that names it gets a skip `deactivated`). Answers `{"removed": [...], "added": [...]}`. |
 | `GET /config`, `POST /config` | The configuration below. Changes survive a restart (as in STT-Suite). |
 
 ### `GET /engines`
 
-For each entry: `engine`, `host` (null: this machine), `label` and `label_short` (names for a user
-interface, German and English), `enabled`, `deactivated`, `status` (`running`, `stopped`, `starting`,
-`unreachable`), `unit` (the user's choice) and `unit_default` (`sentence`, `paragraph` or `whole`: how much
-text the engine takes at once), `needs_gpu`, `cloud`, `browser`, `installed` (it can be started: it needs no
-container (cloud, CPU) or runs on another host, otherwise its Docker image is built), `start_hint` (why the
-last start of this entry failed, until the next start, a new configuration or a reload; otherwise null) and
-`vram_mib`.
+One row per engine and machine: this machine (`host` null) gets a row for each engine of the suite, and each
+configured host a row for each engine that has a REST API there (no cloud or browser engines on a host).
+A row has `engine`, `host`, `label` and `label_short` (names for a user interface, German and English),
+`status` (`running`, `stopped`, `starting`, `unreachable`; a host that is off shows `stopped` for now),
+`unit_default` (`sentence`, `paragraph` or `whole`: how much text the engine recommends it is given at once),
+`needs_gpu`, `cloud`, `browser`, `installed` (it can be started: it needs no container (cloud, CPU) or runs on
+another host, otherwise its Docker image is built), `start_hint` (why the last start of this entry failed,
+until the next start, a new configuration or a reload; otherwise null) and `vram_mib`. Rows of other hosts
+are asked in parallel: a dead host does not delay the others.
 
-`browser: true` marks the entry that stands for the client's own voice (the browser speaks, the service
-cannot). It is in the list because the order is the list's business; the service always skips it, and the
-client decides whether and how it speaks.
+`browser: true` marks the row that stands for the client's own voice (the browser speaks, the service cannot);
+a request may not name it, the client decides whether and how it speaks.
 
 ### `GET /config`, `POST /config`
 
-One object: `voices_dir`; `entries` (`engine`, `host`, `enabled`, in speaking order); `hosts` (optional:
-`name`, `address`, `ssh_port`, `ssh_user`); `engines` (per engine key: `unit`, `voice` with `voice`, `speed`,
-`pitch`, `vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` and `headroom_mib` (see below);
+One object: `voices_dir`; `hosts` (optional, the machines requests refer to by name: `name`, `address`,
+`ssh_port`, `ssh_user`); `engines` (defaults per engine key: `voice` with `voice`, `speed`, `pitch`,
+`vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` and `headroom_mib` (see below);
 `pronunciations` (a word to the form spoken instead). `POST` validates once, in the engine package;
-what cannot work is `400` with the reason. Cloud keys are not part of it (below).
+what cannot work is `400` with the reason. There is no list of entries: who speaks, in which order, is the
+request's business. Cloud keys are not part of it (below).
 
 **GPU placement is a rule set**, no callback to a program: an engine starts on the first card of `gpus`
 (`gpu` = index as `nvidia-smi` lists it, or UUID; `reserve_mib` = VRAM that stays free for other programs)
@@ -72,21 +76,26 @@ with `no_vram` (not remembered: the next request chooses again).
 ### The request: the head of a reading
 
 ```json
-{"language": "en", "voice": "Alice", "speed": 1.0, "pitch": 1.0, "engines": [],
- "voices": {"edge": {"voice": "en-GB-SoniaNeural", "speed": 1.1}}, "run": "r-42", "wait": true}
+{"language": "en",
+ "engines": [{"engine": "qwen3local", "unit": "sentence", "host": null},
+             {"engine": "xtts", "unit": "paragraph", "host": "Aragon"},
+             {"engine": "edge", "unit": "sentence", "host": null}],
+ "voices": {"qwen3local": {"voice": "Alice", "speed": 1.0, "pitch": 1.0}, "edge": {"voice": "en-GB-SoniaNeural"}},
+ "speed": 1.0, "pitch": 1.0, "run": "r-42", "wait": true}
 ```
 
-- `language` is required; `voice`, `speed` and `pitch` default to the configured ones. `POST /speak`
-  carries the head and the text as `{"text": "...", ...head}`; the WebSocket opens with the head alone.
-- **A voice belongs to an engine.** `voice` is the default voice (a folder of the shared directory, valid for
-  the container engines). Other engines have names of their own (Edge, Piper, cloud voices), so `voices` may
-  override voice, speed and pitch per engine key. The client delivers its agents' voices this way; the
-  service never has to know the agents, and the client never has to know which engine will speak.
-- `engines` (optional; not to be confused with `engines` of `/config`, the defaults per engine) chooses and
-  orders: only the entries of the configured list whose engine is named here are tried, in the order of the
-  request (several entries of one engine keep their order in the list); all others are neither checked nor
-  started. Empty: the whole list. An engine the suite does not know is `404` (`unknown_engine`), one it knows
-  that is not in the list `503` (`no_engine`); an entry that is switched off stays out.
+- `language` is required. `POST /speak` carries the head and the text as `{"text": "...", ...head}`; the
+  WebSocket opens with the head alone.
+- **`engines` is required, there is no default.** Its entries are the list of this one reading, in the
+  order of speaking: `engine`, `unit` (`sentence`, `paragraph` or `whole`: how much text the engine is given
+  at once; the service cuts by it) and `host` (null: this machine, otherwise a name from `/config`). An engine
+  may appear more than once, but not the same engine on the same host twice. Nobody owns a list that others
+  use: every client keeps its own. An empty list, a double entry, an engine without a REST API on that host or
+  an invalid unit is `422` (`invalid_request`); an unknown host `404` (`unknown_host`), an unknown engine `404`
+  (`unknown_engine`).
+- **A voice belongs to an engine.** `voices` names voice, speed and pitch per engine key (a folder of the shared
+  directory for the container engines, names of their own for Edge, Piper and cloud voices); `voice`, `speed`
+  and `pitch` of the head are the defaults for engines `voices` does not name, then those of `/config`.
 - The first entry that can speak does. If it fails, the next one takes over.
 - **`run`** (optional, an ID the client makes up for one reading): the service keeps per run which entries
   failed and whether something was spoken already, for about ten minutes. Entries that failed stay out for
@@ -94,9 +103,8 @@ with `no_vram` (not remembered: the next request chooses again).
   (for example "Voice change to X because of Y", German or English by `language`; the texts live in the
   suite), **a segment of its own in front of the successor's first one**, and then the unfinished piece. The
   choice and the state of a run sit behind a lock, so two pieces never both start the successor and the
-  announcement is made once.
-  If the service restarts in the middle of a run, the state is lost and the escalation starts at the top of the
-  list again (the client sees it in `engine` of the frames).
+  announcement is made once. If the service restarts in the middle of a run, the state is lost and the
+  escalation starts at the top of the request's list again (the client sees it in `engine` of the frames).
 - **`wait`** (default `true`): the reading may wait for a container to start (cold start: typically 20 s and
   more). With `false` it ends at once with `503` `{"error": "starting"}`, and the start goes on in the
   background.
@@ -123,7 +131,7 @@ Before the first frame the service has not committed to a status: a reading that
 proper HTTP status (the WebSocket sends an `error` frame and closes). Errors are JSON
 `{"error": "<code>", "detail": "<text>", "trace": [...]}`: `no_engine` (`503`: no entry can speak),
 `starting` (`503`), `overloaded` (`429`: more requests for an engine than its queue takes), `unknown_engine`
-(`404`), `engine_in_use` (`409`: a stop for a container a reading is using), `engine_control_failed` (`502`:
+(`404`), `unknown_host` (`404`), `invalid_request` (`422`: the list or an entry is wrong), `engine_in_use` (`409`: a stop for a container a reading is using), `engine_control_failed` (`502`:
 Docker or the host did not do a start or stop), `bad_request` and `config_invalid` (`400`),
 `unsupported_language` (`422`: no text of the suite in that language), `unauthorized` (`401`). `starting`
 carries `Retry-After`. On the WebSocket a refused handshake (no token) is a closed connection.
@@ -169,8 +177,9 @@ the tests of escalation, reload, completeness and the DashScope engine. The engi
 (and the volume `xtts_voices`) are pinned in the compose files (`name:`), so Docker does not recreate running
 containers. The suite keeps its own data (Piper models, the DashScope voice mapping) in one data folder, `~/.local/share/tts-suite`
 or the folder `TTS_SUITE_DATA_DIR` names. The voices folder holds the user's own data: it is not in the public repository, its path is a
-setting, and both the suite and AIfred (agent bundles) use that one place. The list and hosts, today in
-AIfred's `settings.json`, move to `/config` as the one place; AIfred reads and writes them over HTTP through a
+setting, and both the suite and AIfred (agent bundles) use that one place. The hosts, today in AIfred's
+`settings.json`, move to `/config` as the one place; the lists of engines stay with the clients (AIfred keeps
+his, Agent-Orc its own): each request brings its list. AIfred reads and writes the hosts over HTTP through a
 thin client, with a one-time migration and no parallel operation. Stays with AIfred: `resolve_voice` and the
 agents' voices, file names and storage of the audio, and a client test.
 

@@ -17,8 +17,10 @@ text spoken without implementing speech output itself. The sister project is
 - **Engines are modules.** Local engines (for example XTTS, Qwen3-TTS) run as Docker containers
   you choose with `docker compose`; cloud engines (for example Edge, DashScope) are called over
   the internet. You run only the ones you want.
-- **One list decides who speaks.** An ordered escalation list names engine and place (this machine,
-  another machine, cloud). The first entry that can speak does; if it fails, the next takes over.
+- **Every request brings its own list.** The service offers all its engines (a catalog: each engine on
+  each machine it can run on, and the cloud). A request names the engines it wants, in order, with the
+  machine and how much text at once; the first entry that can speak does, and if it fails, the next
+  takes over. No list is shared: every client keeps its own.
 - **No program depends on another.** A client only knows the address of the service. Without the
   service it has its own fallback (the browser's voice, for example).
 - **Voices are files** in one shared folder, read-only for every engine.
