@@ -51,7 +51,7 @@ dann beenden und `systemctl --user enable --now tts-suite`.
 Solange der Dienst auf `127.0.0.1` lauscht, verlangen Sprechen und jedes `GET` nichts; ein Befehl, der etwas
 ändert (`POST /config`, Container starten und stoppen, Stimmen hochladen), braucht immer das Token
 (`Authorization: Bearer <Token>`). Auf einer anderen Adresse braucht alles eines, und der Dienst startet ohne
-keines nicht (`--host`, `--token-file`). Die Eskalationsliste, die Rechner und die GPU-Regeln setzt man mit
+keines nicht (`--host`, `--token-file`). Die Rechner, die GPU-Regeln und die Vorgaben je Engine setzt man mit
 `POST /config`; siehe die [Schnittstelle](docs/INTERFACE.de.md).
 
 ## Lizenz

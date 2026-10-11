@@ -51,7 +51,7 @@ it, then `systemctl --user enable --now tts-suite`.
 While the service listens on `127.0.0.1`, speaking and every `GET` ask for nothing; a command that changes
 something (`POST /config`, starting and stopping containers, uploading voices) always needs the token
 (`Authorization: Bearer <token>`). On another address everything needs it, and the service does not start
-without one (`--host`, `--token-file`). The escalation list, the hosts and the GPU rules are set with
+without one (`--host`, `--token-file`). The hosts, the GPU rules and the defaults per engine are set with
 `POST /config`; see the [interface](docs/INTERFACE.md).
 
 ## License
