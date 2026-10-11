@@ -32,6 +32,7 @@ agents (which agent has which voice). The service gets text and answers with aud
 | Method and path | Purpose |
 |---|---|
 | `GET /health` | `200` with `{"status": "ok"}` while the service runs. |
+| `GET /ui/` | The page of the service (plain HTML, CSS and JavaScript, light or dark, German or English): the catalog with start and stop, the configuration, the voices with sync, and trying a reading with a list of its own and its course. It holds no data and needs no token; what it asks for follows the rules below (the token is entered once and kept in `sessionStorage`). |
 | `GET /engines` | The catalog: every engine on every machine it can run on; fields below. |
 | `GET /voices?engine=<key>` | The voices of one engine: for each `name` and `label`. Without `engine`: the folders of the shared voices directory. |
 | `POST /voices/sync?engine=<key>` | Has a cloud engine that clones voices (DashScope) upload the voices of the shared directory. Answers with the voices now known. |
@@ -46,7 +47,7 @@ agents (which agent has which voice). The service gets text and answers with aud
 One row per engine and machine: this machine (`host` null) gets a row for each engine of the suite, and each
 configured host a row for each engine that has a REST API there (no cloud or browser engines on a host).
 A row has `engine`, `host`, `label` and `label_short` (names for a user interface, German and English),
-`status` (`running`, `stopped`, `starting`, `unreachable`; a host that is off shows `stopped` for now),
+`status` (`running`, `stopped`, `starting`, `unreachable`: the host does not answer),
 `unit_default` (`sentence`, `paragraph` or `whole`: how much text the engine recommends it is given at once),
 `needs_gpu`, `cloud`, `browser`, `installed` (it can be started: it needs no container (cloud, CPU) or runs on
 another host, otherwise its Docker image is built), `start_hint` (why the last start of this entry failed,

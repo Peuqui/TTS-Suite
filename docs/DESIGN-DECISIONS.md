@@ -25,6 +25,15 @@ instances and the slots per engine and address (`max_parallel` holds across all 
 programs), because the capacity belongs to the service. Start and stop work on any row of
 the catalog, without a list.
 
+**Status of a catalog row (2026-10-11).** `running` = it speaks; `starting` = a start is under way;
+`stopped` = the host is up (or it is this machine) and the container is not running, so it can be
+started; `unreachable` = the host does not answer (for a cloud engine: no access). The difference
+comes from the engine's own health request (HTTP to host:port), no ping: a refused connection means the
+host is up and nothing listens, a connect timeout, a missing route or an unresolvable name means the
+host is off, any HTTP answer means it is there. Every row asks on its own, so a dead host delays
+`GET /engines` by one health timeout, not by one per row. A start on an unreachable host fails at
+once (`stopped`, "host ... unreachable") without waiting for an SSH connect.
+
 ## Card choice and memory limit
 
 The card is chosen by rules in the configuration (`gpus`: order and reserve per card,

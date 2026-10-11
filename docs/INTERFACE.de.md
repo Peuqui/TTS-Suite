@@ -32,6 +32,7 @@ Agenten kennt (welcher Agent welche Stimme hat). Der Dienst bekommt Text und ant
 | Methode und Pfad | Zweck |
 |---|---|
 | `GET /health` | `200` mit `{"status": "ok"}`, solange der Dienst läuft. |
+| `GET /ui/` | Die Seite des Dienstes (reines HTML, CSS und JavaScript, hell oder dunkel, Deutsch oder Englisch): der Katalog mit Starten und Stoppen, die Konfiguration, die Stimmen mit Abgleich und das Probesprechen mit eigener Liste und ihrem Verlauf. Sie enthält keine Daten und braucht kein Token; was sie abfragt, folgt den Regeln unten (das Token wird einmal eingetragen und nur in `sessionStorage` gehalten). |
 | `GET /engines` | Der Katalog: jede Engine auf jedem Rechner, auf dem sie laufen kann; Felder unten. |
 | `GET /voices?engine=<key>` | Die Stimmen einer Engine: je `name` und `label`. Ohne `engine`: die Ordner des gemeinsamen Stimmenverzeichnisses. |
 | `POST /voices/sync?engine=<key>` | Lässt eine Cloud-Engine, die Stimmen klont (DashScope), die Stimmen des gemeinsamen Verzeichnisses hochladen. Antwortet mit den nun bekannten Stimmen. |
@@ -46,8 +47,8 @@ Agenten kennt (welcher Agent welche Stimme hat). Der Dienst bekommt Text und ant
 Eine Zeile je Engine und Rechner: Dieser Rechner (`host` null) bekommt eine Zeile für jede Engine der Suite, und
 jeder konfigurierte Host eine Zeile für jede Engine, die dort eine REST-API hat (keine Cloud- oder
 Browser-Engines auf einem Host). Eine Zeile hat `engine`, `host`, `label` und `label_short` (Namen für eine
-Oberfläche, Deutsch und Englisch), `status` (`running`, `stopped`, `starting`, `unreachable`; ein Host, der aus
-ist, zeigt vorerst `stopped`), `unit_default` (`sentence`, `paragraph` oder `whole`: wie viel Text die Engine
+Oberfläche, Deutsch und Englisch), `status` (`running`, `stopped`, `starting`, `unreachable`: der Host antwortet
+nicht), `unit_default` (`sentence`, `paragraph` oder `whole`: wie viel Text die Engine
 auf einmal empfiehlt), `needs_gpu`, `cloud`, `browser`, `installed` (sie lässt sich starten: sie braucht keinen
 Container (Cloud, CPU) oder läuft auf einem anderen Rechner, sonst wird ihr Docker-Image gebaut), `start_hint`
 (warum der letzte Start dieses Eintrags scheiterte, bis zum nächsten Start, einer neuen Konfiguration oder

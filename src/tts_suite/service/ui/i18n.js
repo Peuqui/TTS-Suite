@@ -1,0 +1,66 @@
+// The texts of the page in German and English; the language follows the browser until it is switched.
+const TEXTS = {
+  de: {
+    token: 'Token', language: 'English', themeLight: 'Hell', themeDark: 'Dunkel', themeAuto: 'Automatisch',
+    tabCatalog: 'Engines', tabConfig: 'Konfiguration', tabVoices: 'Stimmen', tabSpeak: 'Probesprechen',
+    reload: 'Neu laden', save: 'Speichern', saved: 'Gespeichert.', add: 'Hinzufügen', remove: 'Entfernen',
+    up: 'Nach oben', down: 'Nach unten', start: 'Starten', stop: 'Stoppen', started: 'Gestartet.', stopped: 'Gestoppt.',
+    needsToken: 'Dafür ist das Token nötig (oben eintragen).',
+    catalogHint: 'Jede Engine auf jedem Rechner, auf dem sie laufen kann. Eine Anfrage wählt daraus ihre eigene Liste.',
+    engine: 'Engine', host: 'Rechner', thisMachine: 'dieser Rechner', status: 'Zustand', installed: 'Installiert',
+    gpuMemory: 'Grafikspeicher (MiB)', hint: 'Hinweis', yes: 'ja', no: 'nein', cloud: 'Cloud', needsGpu: 'GPU',
+    unit: 'Einheit', unitSentence: 'Satz', unitParagraph: 'Absatz', unitWhole: 'ganzer Text',
+    voicesDir: 'Stimmenordner', hosts: 'Rechner (SSH)', hostName: 'Name', hostAddress: 'Adresse', sshUser: 'SSH-Benutzer', sshPort: 'SSH-Port',
+    gpus: 'Grafikkarten (Reihenfolge der Wahl)', gpu: 'Karte (Nummer oder UUID)', reserve: 'Reserve (MiB)',
+    headroom: 'Aufschlag je Engine bei der Kartenwahl (MiB)', engineDefaults: 'Vorgaben je Engine',
+    vramBudget: 'Speicherbudget (MiB)', maxParallel: 'Gleichzeitig', maxQueue: 'Warteschlange',
+    pronunciations: 'Aussprache', word: 'Wort', spoken: 'gesprochen als', emptyMeansDefault: 'leer: Vorgabe der Engine',
+    voicesHint: 'Die Stimmen einer Engine, wie der Dienst sie kennt. Der Abgleich lädt die Stimmen des gemeinsamen Ordners zu einer Cloud-Engine hoch, die Stimmen klont.',
+    sync: 'Abgleichen', synced: 'Abgeglichen: {count} Stimmen.', noVoices: 'Keine Stimmen.', voice: 'Stimme', load: 'Laden',
+    speakHint: 'Stelle eine Liste zusammen, wie eine Anfrage sie trägt: die Engines in der Reihenfolge, in der sie versucht werden.',
+    text: 'Text', language2: 'Sprache', use: 'Verwenden', order: 'Reihenfolge', speak: 'Sprechen', speaking: 'Spricht …',
+    stopPlaying: 'Abbrechen', trace: 'Verlauf', entry: 'Eintrag', outcome: 'Ergebnis', reason: 'Grund', detail: 'Einzelheiten',
+    outcomeSpoke: 'gesprochen', outcomeFailed: 'ausgefallen', outcomeSkipped: 'übergangen', switched: 'Stimmwechsel angesagt: {reason}',
+    nothingChosen: 'Wähle mindestens einen Eintrag.', failed: 'Fehlgeschlagen',
+  },
+  en: {
+    token: 'Token', language: 'Deutsch', themeLight: 'Light', themeDark: 'Dark', themeAuto: 'Automatic',
+    tabCatalog: 'Engines', tabConfig: 'Configuration', tabVoices: 'Voices', tabSpeak: 'Try speaking',
+    reload: 'Reload', save: 'Save', saved: 'Saved.', add: 'Add', remove: 'Remove',
+    up: 'Up', down: 'Down', start: 'Start', stop: 'Stop', started: 'Started.', stopped: 'Stopped.',
+    needsToken: 'This needs the token (enter it above).',
+    catalogHint: 'Every engine on every machine it can run on. A request chooses its own list from them.',
+    engine: 'Engine', host: 'Machine', thisMachine: 'this machine', status: 'Status', installed: 'Installed',
+    gpuMemory: 'GPU memory (MiB)', hint: 'Hint', yes: 'yes', no: 'no', cloud: 'cloud', needsGpu: 'GPU',
+    unit: 'Unit', unitSentence: 'sentence', unitParagraph: 'paragraph', unitWhole: 'whole text',
+    voicesDir: 'Voices folder', hosts: 'Machines (SSH)', hostName: 'Name', hostAddress: 'Address', sshUser: 'SSH user', sshPort: 'SSH port',
+    gpus: 'GPUs (order of choice)', gpu: 'Card (index or UUID)', reserve: 'Reserve (MiB)',
+    headroom: 'Margin per engine when a card is chosen (MiB)', engineDefaults: 'Defaults per engine',
+    vramBudget: 'Memory budget (MiB)', maxParallel: 'In parallel', maxQueue: 'Queue',
+    pronunciations: 'Pronunciation', word: 'Word', spoken: 'spoken as', emptyMeansDefault: 'empty: the engine’s default',
+    voicesHint: 'The voices of an engine as the service knows them. Syncing uploads the voices of the shared folder to a cloud engine that clones voices.',
+    sync: 'Sync', synced: 'Synced: {count} voices.', noVoices: 'No voices.', voice: 'Voice', load: 'Load',
+    speakHint: 'Put together a list as a request carries it: the engines in the order they are tried in.',
+    text: 'Text', language2: 'Language', use: 'Use', order: 'Order', speak: 'Speak', speaking: 'Speaking …',
+    stopPlaying: 'Cancel', trace: 'Course', entry: 'Entry', outcome: 'Outcome', reason: 'Reason', detail: 'Details',
+    outcomeSpoke: 'spoke', outcomeFailed: 'failed', outcomeSkipped: 'skipped', switched: 'Voice change announced: {reason}',
+    nothingChosen: 'Choose at least one entry.', failed: 'Failed',
+  },
+}
+
+const STORAGE_KEY = 'tts-suite-language'
+let language = localStorage.getItem(STORAGE_KEY) ?? (navigator.language.startsWith('de') ? 'de' : 'en')
+const listeners = []
+
+export function currentLanguage() { return language }
+export function onLanguageChange(listener) { listeners.push(listener) }
+export function toggleLanguage() {
+  language = language === 'de' ? 'en' : 'de'
+  localStorage.setItem(STORAGE_KEY, language)
+  document.documentElement.lang = language
+  listeners.forEach((listener) => listener())
+}
+export function t(key, values = {}) {
+  const text = TEXTS[language][key] ?? TEXTS.en[key] ?? key
+  return text.replace(/\{(\w+)\}/g, (_, name) => String(values[name] ?? ''))
+}

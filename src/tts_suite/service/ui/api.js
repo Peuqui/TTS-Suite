@@ -1,0 +1,61 @@
+// The calls to the service. The token is kept for this browser tab only (sessionStorage) and sent with
+// every call; the service asks for it only where something is changed (or everywhere on a network).
+const TOKEN_KEY = 'tts-suite-token'
+
+export const token = {
+  get: () => sessionStorage.getItem(TOKEN_KEY) ?? '',
+  set: (value) => (value ? sessionStorage.setItem(TOKEN_KEY, value) : sessionStorage.removeItem(TOKEN_KEY)),
+}
+
+export class ApiError extends Error {
+  constructor(status, code, detail) {
+    super(detail)
+    this.status = status
+    this.code = code
+  }
+}
+
+function headers(json) {
+  const result = {}
+  if (json) result['Content-Type'] = 'application/json'
+  if (token.get()) result.Authorization = `Bearer ${token.get()}`
+  return result
+}
+
+export async function fetchChecked(path, { method = 'GET', body, signal } = {}) {
+  const response = await fetch(path, {
+    method,
+    headers: headers(body !== undefined),
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
+  })
+  if (!response.ok) {
+    let data = {}
+    try { data = await response.json() } catch { /* an answer that is no JSON has no code */ }
+    throw new ApiError(response.status, data.error ?? `http${response.status}`, data.detail ?? response.statusText)
+  }
+  return response
+}
+
+export async function json(path, options) {
+  const response = await fetchChecked(path, options)
+  return response.status === 204 ? null : response.json()
+}
+
+const query = (parameters) => {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(parameters)) if (value !== null && value !== undefined) search.set(key, value)
+  const text = search.toString()
+  return text ? `?${text}` : ''
+}
+
+export const service = {
+  engines: () => json('../engines'),
+  config: () => json('../config'),
+  saveConfig: (config) => json('../config', { method: 'POST', body: config }),
+  start: (engine, host) => json(`../engines/${encodeURIComponent(engine)}/start${query({ host })}`, { method: 'POST' }),
+  stop: (engine, host) => json(`../engines/${encodeURIComponent(engine)}/stop${query({ host })}`, { method: 'POST' }),
+  voices: (engine) => json(`../voices${query({ engine })}`),
+  syncVoices: (engine) => json(`../voices/sync${query({ engine })}`, { method: 'POST' }),
+  speak: (head, signal) => fetchChecked('../speak', { method: 'POST', body: head, signal }),
+}

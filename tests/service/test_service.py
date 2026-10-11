@@ -177,7 +177,9 @@ def test_no_engine_to_speak_gives_the_course_of_the_escalation(tmp_path: Path) -
 def test_a_reading_comes_back_as_frames_in_order_with_the_summary(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
     suite.stream = FakeStream([audio(data=b"one"), audio(engine="edge@aragon", data=b"two"), audio("", b"", True)])
-    answer = client.post("/speak", json={"text": "Hello world.", "language": "en", "engines": ENGINES, "voice": "Alice"})
+    answer = client.post(
+        "/speak", json={"text": "Hello world.", "language": "en", "engines": ENGINES, "voice": "Alice"}
+    )
     assert answer.status_code == 200
     assert answer.headers["content-type"] == FRAMES_MEDIA_TYPE
     frames = decode_frames(answer.content)
@@ -237,8 +239,10 @@ def test_a_reading_without_audio_still_ends_with_its_summary(tmp_path: Path) -> 
 def test_a_request_without_text_or_language_is_a_bad_request(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
     for body in (
-        {"language": "en", "engines": ENGINES}, {"text": "Hi", "engines": ENGINES},
-        {"text": 5, "language": "en", "engines": ENGINES}, {"text": "Hi", "language": "en"},
+        {"language": "en", "engines": ENGINES},
+        {"text": "Hi", "engines": ENGINES},
+        {"text": 5, "language": "en", "engines": ENGINES},
+        {"text": "Hi", "language": "en"},
         {"text": "Hi", "language": "en", "engines": [{"engine": "xtts", "unit": "sentence"}]},
     ):
         answer = client.post("/speak", json=body)
@@ -265,7 +269,11 @@ def test_a_stream_that_cannot_start_ends_with_an_error_frame(tmp_path: Path) -> 
     client, suite, _ = build(tmp_path)
     suite.refuses = UnknownEngine("nope")
     with client.websocket_connect("/speak/stream") as socket:
-        socket.send_text(json.dumps({"type": "start", "language": "en", "engines": [{"engine": "nope", "unit": "sentence", "host": None}]}))
+        socket.send_text(
+            json.dumps(
+                {"type": "start", "language": "en", "engines": [{"engine": "nope", "unit": "sentence", "host": None}]}
+            )
+        )
         header, body = decode_frames(socket.receive_bytes())[0]
     assert header["kind"] == "error" and json.loads(body)["error"] == "unknown_engine"
 
@@ -346,7 +354,10 @@ def test_a_text_beyond_the_limit_is_refused_before_anything_is_made(tmp_path: Pa
     answer = client.post("/speak", json={"text": "x" * (MAX_TEXT_CHARS + 1), "language": "en", "engines": ENGINES})
     assert (answer.status_code, answer.json()["error"]) == (413, "text_too_long")
     assert suite.requests == []
-    assert client.post("/speak", json={"text": "x" * MAX_TEXT_CHARS, "language": "en", "engines": ENGINES}).status_code == 200
+    assert (
+        client.post("/speak", json={"text": "x" * MAX_TEXT_CHARS, "language": "en", "engines": ENGINES}).status_code
+        == 200
+    )
 
 
 def test_the_text_of_a_stream_counts_over_all_its_pieces(tmp_path: Path) -> None:
@@ -365,3 +376,17 @@ def test_the_text_of_a_stream_counts_over_all_its_pieces(tmp_path: Path) -> None
             kinds.append((header["kind"], json.loads(body)["error"] if header["kind"] == "error" else None))
     assert ("error", "text_too_long") in kinds
     assert suite.stream.closed
+
+
+def test_the_page_of_the_service_is_served_without_a_token_with_a_strict_policy(tmp_path: Path) -> None:
+    client, _, _ = build(tmp_path, token_for_everything=True)
+    page = client.get("/ui/")
+    assert page.status_code == 200 and "TTS-Suite" in page.text
+    assert "default-src 'self'" in page.headers["content-security-policy"]
+    assert page.headers["x-content-type-options"] == "nosniff"
+    script = client.get("/ui/app.js")
+    assert script.status_code == 200 and "javascript" in script.headers["content-type"]
+    assert client.get("/ui/frames.js").status_code == 200
+    # What the page asks for is not served without the token on a network.
+    assert client.get("/engines").status_code == 401
+    assert client.get("/", follow_redirects=False).headers["location"] == "/ui/"

@@ -26,6 +26,17 @@ bleibt, was die Karten betrifft: die Engine-Instanzen und die Plätze je Engine 
 (`max_parallel` gilt über alle Anfragen und Programme), denn die Kapazität gehört dem Dienst.
 Start und Stopp arbeiten auf jeder Zeile des Katalogs, ohne Liste.
 
+
+**Status einer Katalogzeile (2026-10-11).** `running` = sie spricht; `starting` = ein Start läuft;
+`stopped` = der Host ist erreichbar (oder es ist dieser Rechner) und der Container läuft nicht, sie
+lässt sich also starten; `unreachable` = der Host antwortet nicht (bei einer Cloud-Engine: kein
+Zugang). Die Unterscheidung kommt aus der Health-Anfrage der Engine selbst (HTTP an Host:Port), ohne
+Ping: eine verweigerte Verbindung heißt, der Host läuft und nichts lauscht; eine
+Verbindungs-Zeitüberschreitung, fehlende Route oder nicht auflösbarer Name heißt, der Host ist aus;
+jede HTTP-Antwort heißt, er ist da. Jede Zeile fragt für sich, ein toter Host verzögert
+`GET /engines` also um eine Health-Zeitgrenze, nicht um eine je Zeile. Ein Start auf einem
+unerreichbaren Host scheitert sofort (`stopped`, "host ... unreachable"), ohne auf den SSH-Verbindungsaufbau zu warten.
+
 ## Kartenwahl und Speichergrenze
 
 Die Wahl der Karte folgt Regeln der Konfiguration (`gpus`: Reihenfolge und Reserve je

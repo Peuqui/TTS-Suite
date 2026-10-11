@@ -8,11 +8,13 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from ..api import SpeakRequest, SuiteError, TTSSuite
@@ -30,6 +32,15 @@ from .wire import (
 )
 
 log = logging.getLogger("tts_suite.service")
+
+# The page of the service (plain HTML, CSS and JavaScript, no build step). It holds no data, so it needs no
+# token; what it asks for does. It may only load its own files and talk to this service.
+UI_DIR = Path(__file__).parent / "ui"
+UI_PREFIX = "/ui"
+UI_HEADERS = {
+    "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff",
+}
 
 # A client that is told to wait for a container to start asks again after this long.
 RETRY_AFTER_SECONDS = 5
@@ -83,6 +94,19 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
 
     def check(request: Request, changes_something: bool) -> None:
         access.check(request.headers, changes_something)
+
+    @app.middleware("http")
+    async def page_headers(request: Request, call_next: Any) -> Response:
+        response: Response = await call_next(request)
+        if request.url.path.startswith(UI_PREFIX):
+            response.headers.update(UI_HEADERS)
+        return response
+
+    @app.get("/", include_in_schema=False)
+    async def to_the_page() -> RedirectResponse:
+        return RedirectResponse(f"{UI_PREFIX}/")
+
+    app.mount(UI_PREFIX, StaticFiles(directory=UI_DIR, html=True), name="ui")
 
     @app.get("/health")
     async def health() -> dict[str, str]:

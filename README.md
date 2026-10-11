@@ -48,6 +48,10 @@ the compose files of the engines live here), links `tts-suite` into `~/.local/bi
 `tts-suite.service`. Once, run `tts-suite serve --voices-dir <folder>` so the configuration is written, stop
 it, then `systemctl --user enable --now tts-suite`.
 
+The page of the service, `http://127.0.0.1:5090/ui/`, shows the catalog (state, start and stop of each engine on each
+machine), edits the configuration, lists the voices (with the sync of a cloud engine) and tries a reading with a list
+of its own. Enter the token once on the page for what changes something.
+
 While the service listens on `127.0.0.1`, speaking and every `GET` ask for nothing; a command that changes
 something (`POST /config`, starting and stopping containers, uploading voices) always needs the token
 (`Authorization: Bearer <token>`). On another address everything needs it, and the service does not start
