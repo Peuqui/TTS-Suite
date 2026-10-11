@@ -17,6 +17,9 @@ from .engines.base import TTSEngine
 logger = logging.getLogger(__name__)
 
 NVIDIA_SMI_APP_FIELDS = "pid,used_memory,gpu_uuid"
+#: What ``docker top`` says (stderr) for a container that does not exist or does not run.
+NO_SUCH_CONTAINER = "No such container"
+NOT_RUNNING = "is not running"
 
 
 class VramMeasurementFailed(Exception):
@@ -76,15 +79,20 @@ def compute_apps() -> list[ComputeApp]:
     return parse_compute_apps(_run_measuring(command, NVIDIA_SMI_APPS_TIMEOUT_S))
 
 
-def container_host_pids(compose_file: str) -> set[str]:
-    """Host PIDs of the processes inside the running container(s) of a compose project;
-    :class:`VramMeasurementFailed` when Docker does not answer."""
-    ids = _run_measuring(["docker", "compose", "-f", compose_file, "ps", "-q"], DOCKER_PIDS_TIMEOUT_S).split()
-    pids: set[str] = set()
-    for container_id in ids:
-        top = _run_measuring(["docker", "top", container_id, "-eo", "pid"], DOCKER_PIDS_TIMEOUT_S).split()
-        pids.update(pid for pid in top[1:] if pid.isdigit())
-    return pids
+def container_host_pids(container_name: str) -> set[str]:
+    """Host PIDs of the processes inside a container (``docker top``). Compose is not involved: it would
+    need the variables of the compose files (card, voices). A container that is not there has no
+    processes; :class:`VramMeasurementFailed` when Docker does not answer otherwise."""
+    command = ["docker", "top", container_name, "-eo", "pid"]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=DOCKER_PIDS_TIMEOUT_S, check=False)
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        raise VramMeasurementFailed(f"docker unavailable: {exc}") from exc
+    if result.returncode != 0:
+        if NO_SUCH_CONTAINER in result.stderr or NOT_RUNNING in result.stderr:
+            return set()
+        raise VramMeasurementFailed(f"docker top {container_name} failed: {result.stderr.strip()[:200]}")
+    return {pid for pid in result.stdout.split()[1:] if pid.isdigit()}
 
 
 def engine_vram_mib(engine: TTSEngine) -> dict[str, int]:
@@ -96,7 +104,7 @@ def engine_vram_mib(engine: TTSEngine) -> dict[str, int]:
     apps = compute_apps()
     if not apps:
         return {}
-    pids = container_host_pids(str(engine.docker_compose_path))
+    pids = container_host_pids(engine.service_dir)
     per_card: dict[str, int] = {}
     for app in apps:
         if app.pid in pids:

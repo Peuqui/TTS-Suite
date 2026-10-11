@@ -67,7 +67,7 @@ def test_the_compute_app_lines_are_read() -> None:
 def test_only_the_processes_of_the_engines_container_count(monkeypatch: pytest.MonkeyPatch) -> None:
     apps = [ComputeApp("100", 3000, "GPU-a"), ComputeApp("101", 500, "GPU-a"), ComputeApp("200", 9000, "GPU-b")]
     monkeypatch.setattr(vram, "compute_apps", lambda: apps)
-    monkeypatch.setattr(vram, "container_host_pids", lambda compose_file: {"100", "101", "102"} if "xtts" in compose_file else set())
+    monkeypatch.setattr(vram, "container_host_pids", lambda container: {"100", "101", "102"} if container == "xtts" else set())
     assert engine_vram_mib(get_engine("xtts")) == {"GPU-a": 3500}  # type: ignore[arg-type]
     assert engine_vram_mib(get_engine("qwen3local")) == {}  # type: ignore[arg-type]
 
@@ -84,17 +84,22 @@ def test_nothing_is_measured_for_an_engine_without_a_container_or_when_no_proces
 
 
 def test_the_host_pids_of_a_container_come_from_docker_top(monkeypatch: pytest.MonkeyPatch) -> None:
-    answers = iter(["abc123\n", "PID\n400\n401\nnot-a-pid\n"])
     calls: list[list[str]] = []
 
     def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(command)
-        return subprocess.CompletedProcess(command, 0, next(answers), "")
+        return subprocess.CompletedProcess(command, 0, "PID\n400\n401\nnot-a-pid\n", "")
 
     monkeypatch.setattr(subprocess, "run", run)
-    assert vram.container_host_pids("/x/docker-compose.yml") == {"400", "401"}
-    assert calls[0] == ["docker", "compose", "-f", "/x/docker-compose.yml", "ps", "-q"]
-    assert calls[1] == ["docker", "top", "abc123", "-eo", "pid"]
+    assert vram.container_host_pids("xtts") == {"400", "401"}
+    assert calls == [["docker", "top", "xtts", "-eo", "pid"]]  # no compose: it needs the compose variables
+
+
+def test_a_container_that_is_not_there_has_no_processes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", _Run(returncode=1, stderr="Error response from daemon: No such container: xtts"))
+    assert vram.container_host_pids("xtts") == set()
+    monkeypatch.setattr(subprocess, "run", _Run(returncode=1, stderr="Error response from daemon: Container abc is not running"))
+    assert vram.container_host_pids("xtts") == set()
 
 
 @pytest.mark.parametrize(
@@ -117,9 +122,9 @@ def test_memory_the_driver_does_not_report_is_none_and_a_failed_measurement_when
     apps = parse_compute_apps("100, [N/A], GPU-a\n200, [Not Supported], GPU-a\n300, 700, GPU-a\n")
     assert [app.used_mib for app in apps] == [None, None, 700]
     monkeypatch.setattr(vram, "compute_apps", lambda: apps)
-    monkeypatch.setattr(vram, "container_host_pids", lambda compose_file: {"300"})
+    monkeypatch.setattr(vram, "container_host_pids", lambda container: {"300"})
     assert engine_vram_mib(get_engine("xtts")) == {"GPU-a": 700}  # type: ignore[arg-type]
-    monkeypatch.setattr(vram, "container_host_pids", lambda compose_file: {"100", "300"})
+    monkeypatch.setattr(vram, "container_host_pids", lambda container: {"100", "300"})
     with pytest.raises(vram.VramMeasurementFailed, match="process 100"):
         engine_vram_mib(get_engine("xtts"))  # type: ignore[arg-type]
 
@@ -127,11 +132,11 @@ def test_memory_the_driver_does_not_report_is_none_and_a_failed_measurement_when
 def test_docker_not_answering_is_a_failed_measurement_not_no_pids(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(subprocess, "run", _Run(returncode=1, stderr="Cannot connect to the Docker daemon"))
     with pytest.raises(vram.VramMeasurementFailed, match="Docker daemon"):
-        vram.container_host_pids("/x/docker-compose.yml")
-    answers = iter([subprocess.CompletedProcess([], 0, "abc123\n", ""), subprocess.CompletedProcess([], 1, "", "no such container")])
-    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: next(answers))
-    with pytest.raises(vram.VramMeasurementFailed, match="no such container"):
-        vram.container_host_pids("/x/docker-compose.yml")
+        vram.container_host_pids("xtts")
+    monkeypatch.setattr(subprocess, "run", _Run(raises=FileNotFoundError("docker")))
+    with pytest.raises(vram.VramMeasurementFailed, match="docker unavailable"):
+        vram.container_host_pids("xtts")
+
 
 def test_the_ssh_command_pins_key_port_and_target(monkeypatch: pytest.MonkeyPatch) -> None:
     run = _Run(stdout="up\n")
