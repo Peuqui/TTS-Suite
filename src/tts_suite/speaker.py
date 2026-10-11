@@ -123,6 +123,8 @@ class Speaker:
 
     def open_stream(self, request: SpeakRequest) -> Stream:
         self._require_supported_language(request)
+        if request.paragraph_pause_ms < 0:
+            raise InvalidRequest(f"paragraph_pause_ms must not be negative, got {request.paragraph_pause_ms}")
         entries = self._entries_for(request)
         run = self._run_for(request, entries)
         return AttachedStream(

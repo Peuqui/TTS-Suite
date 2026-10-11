@@ -175,9 +175,9 @@ def refs(*keys: str, unit: Unit = "sentence", host: str | None = None) -> tuple[
     return tuple(EngineRef(key, unit, host) for key in keys)
 
 
-def request(*keys: str, language: str = "de", **kwargs: Any) -> SpeakRequest:
+def request(*keys: str, language: str = "de", paragraph_pause_ms: int = 0, **kwargs: Any) -> SpeakRequest:
     """A request whose list names these engines (all by sentence, on this machine)."""
-    return SpeakRequest(language=language, engines=refs(*keys), **kwargs)
+    return SpeakRequest(language=language, engines=refs(*keys), paragraph_pause_ms=paragraph_pause_ms, **kwargs)
 
 
 def make_run(

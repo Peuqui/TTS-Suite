@@ -30,7 +30,7 @@ from tts_suite.api import (
     SpeakRequest,
 )
 from tts_suite.constants import MEDIA_TYPE_MP3, MEDIA_TYPE_OGG, MEDIA_TYPE_WAV
-from tts_suite.stream import Stream
+from tts_suite.stream import Stream, pause_marker
 
 REQUEST = request("a")
 
@@ -493,3 +493,167 @@ def test_a_reading_of_only_unspeakable_text_ends_without_audio() -> None:
         return await collect(stream)
 
     assert run_async(scenario()) == [] and engine.texts == []
+
+
+# ── Pauses between paragraphs ───────────────────────────────────────
+
+PAUSE_MS = 700
+PARAGRAPHS = f"{SENTENCES[0]} {SENTENCES[1]}\n\n{SENTENCES[2]}"
+PAUSED = request("a", paragraph_pause_ms=PAUSE_MS)
+UNSPEAKABLE = "[Quelle Nummer eins]"  # a paragraph of three words that the cleaning removes completely
+
+
+def shape(segments: list[AudioSegment]) -> list[int | str]:
+    """What was delivered: the frame count of a spoken segment, ``pause:<ms>`` for a pause marker."""
+    return [f"pause:{s.pause_ms}" if s.pause_ms else wav_info(s.audio)[0] for s in segments]
+
+
+def pause() -> str:
+    return f"pause:{PAUSE_MS}"
+
+
+async def read_text(stream: Stream, text: str) -> list[AudioSegment]:
+    await stream.feed(text)
+    await stream.finish()
+    return await collect(stream)
+
+
+def test_a_pause_marker_is_a_segment_without_audio_and_without_keepalive() -> None:
+    marker = pause_marker(PAUSE_MS)
+    assert marker == AudioSegment(audio=b"", media_type="", engine="", keepalive=False, pause_ms=PAUSE_MS)
+    assert AudioSegment(audio=b"x", media_type="audio/wav", engine="a").pause_ms == 0
+
+
+@pytest.mark.parametrize("unit", ["sentence", "paragraph"])
+def test_a_marker_comes_at_each_paragraph_boundary(unit: str) -> None:
+    engine = FakeEngine("a", unit=unit)  # type: ignore[arg-type]
+    stream = Stream(PAUSED, make_run([entry(engine)]))
+    text = f"{PARAGRAPHS}\n\nEin vierter Absatz kommt noch hinzu."
+    segments = run_async(read_text(stream, text))
+    spoken = engine.texts
+    assert shape(segments) == [
+        frames_for(spoken[0]), *([frames_for(spoken[1])] if unit == "sentence" else []), pause(),
+        frames_for(spoken[-2]), pause(), frames_for(spoken[-1]),
+    ]
+    assert [s.pause_ms for s in segments].count(PAUSE_MS) == 2
+
+
+def test_between_two_paragraphs_of_the_unit_paragraph_there_is_one_marker_each() -> None:
+    engine = FakeEngine("a", unit="paragraph")
+    segments = run_async(read_text(Stream(PAUSED, make_run([entry(engine)])), "Eins hier da.\n\nZwei hier da.\n\nDrei hier da."))
+    assert shape(segments) == [frames_for("Eins hier da."), pause(), frames_for("Zwei hier da."), pause(), frames_for("Drei hier da.")]
+
+
+def test_the_unit_whole_gets_no_marker() -> None:
+    engine = FakeEngine("a", unit="whole")
+    segments = run_async(read_text(Stream(PAUSED, make_run([entry(engine)])), PARAGRAPHS))
+    assert shape(segments) == [frames_for(PARAGRAPHS)]
+
+
+def test_no_marker_before_the_first_or_after_the_last_paragraph() -> None:
+    engine = FakeEngine("a")
+    segments = run_async(read_text(Stream(PAUSED, make_run([entry(engine)])), f"\n\n{SENTENCES[0]}\n\n\n"))
+    assert shape(segments) == [frames_for(SENTENCES[0])]
+
+
+def test_a_pause_of_zero_gives_no_marker() -> None:
+    engine = FakeEngine("a")
+    segments = run_async(read_text(Stream(request("a", paragraph_pause_ms=0), make_run([entry(engine)])), PARAGRAPHS))
+    assert shape(segments) == [frames_for(s) for s in SENTENCES]
+
+
+def test_markers_keep_their_place_when_the_sentences_finish_the_other_way_round() -> None:
+    engine = FakeEngine("a")
+    engine.max_parallel_requests = 3
+    engine.gates = {"erste": asyncio.Event(), "zweite": asyncio.Event(), "dritte": asyncio.Event()}
+    stream = Stream(PAUSED, make_run([entry(engine)]))
+
+    async def scenario() -> list[AudioSegment]:
+        await stream.feed(PARAGRAPHS)
+        await stream.finish()
+        reader = asyncio.create_task(collect(stream))
+        for gate in ("dritte", "zweite", "erste"):
+            await asyncio.sleep(0.01)
+            engine.gates[gate].set()
+        return await reader
+
+    segments = run_async(scenario())
+    assert shape(segments) == [frames_for(SENTENCES[0]), frames_for(SENTENCES[1]), pause(), frames_for(SENTENCES[2])]
+    assert engine.peak == 3  # the marker did not hold back the generation of the sentence behind it
+
+
+def test_a_marker_waits_for_the_segment_in_front_of_it() -> None:
+    engine = FakeEngine("a")
+    engine.gates = {"zweite": asyncio.Event()}
+    stream = Stream(PAUSED, make_run([entry(engine)]), keepalive_s=10)
+
+    async def scenario() -> None:
+        await stream.feed(PARAGRAPHS)
+        await stream.finish()
+        segments = stream.segments()
+        assert wav_info((await anext(segments)).audio)[0] == frames_for(SENTENCES[0])
+        pending = asyncio.ensure_future(anext(segments))
+        await asyncio.sleep(0.05)
+        assert not pending.done()  # the second sentence hangs, the marker behind it must not overtake
+        engine.gates["zweite"].set()
+        assert wav_info((await pending).audio)[0] == frames_for(SENTENCES[1])
+        assert (await anext(segments)).pause_ms == PAUSE_MS
+
+    run_async(scenario())
+
+
+@pytest.mark.parametrize("unit", ["sentence", "paragraph"])
+def test_paragraphs_with_nothing_left_to_speak_add_no_pause_of_their_own(unit: str) -> None:
+    engine = FakeEngine("a", unit=unit)  # type: ignore[arg-type]
+    text = f"Eins hier da.\n\n{UNSPEAKABLE}\n\n\n\n{UNSPEAKABLE}\n\nZwei hier da."
+    segments = run_async(read_text(Stream(PAUSED, make_run([entry(engine)])), text))
+    assert shape(segments) == [frames_for("Eins hier da."), pause(), frames_for("Zwei hier da.")]
+
+
+def test_empty_paragraphs_at_the_start_and_end_give_no_marker() -> None:
+    engine = FakeEngine("a")
+    segments = run_async(read_text(Stream(PAUSED, make_run([entry(engine)])), f"{UNSPEAKABLE}\n\nEins hier da.\n\n{UNSPEAKABLE}"))
+    assert shape(segments) == [frames_for("Eins hier da.")]
+
+
+def test_a_change_of_the_speaking_entry_in_mid_text_keeps_the_markers_and_the_announcement_gets_none() -> None:
+    first, second = FakeEngine("a", fail="unreachable", fail_after=1), FakeEngine("b")
+    stream = Stream(PAUSED, make_run([entry(first), entry(second)]))
+    text = f"{SENTENCES[0]}\n\n{SENTENCES[1]}\n\n{SENTENCES[2]}"
+    segments = run_async(read_text(stream, text))
+    assert shape(segments) == [
+        frames_for(SENTENCES[0]), pause(), frames_for(ANNOUNCEMENT), frames_for(SENTENCES[1]), pause(), frames_for(SENTENCES[2]),
+    ]
+    assert [s.engine for s in segments if not s.pause_ms and s.engine] == ["a", "b", "b", "b"]
+    assert stream.summary.switch == "unreachable"
+
+
+def test_markers_do_not_count_as_keepalive() -> None:
+    engine = FakeEngine("a")
+    segments = run_async(read_text(Stream(PAUSED, make_run([entry(engine)])), PARAGRAPHS))
+    assert [s.keepalive for s in segments] == [False] * 4
+
+
+@pytest.mark.parametrize("unit", ["sentence", "paragraph", "whole"])
+def test_a_text_in_any_pieces_gives_the_segments_of_the_whole_text(unit: str) -> None:
+    text = (
+        f"{PARAGRAPHS}\n\n{UNSPEAKABLE}\n\nEin vierter Absatz kommt noch hinzu. Und ein weiterer Satz folgt hier.\n \n"
+        "Zuletzt kommt der fünfte Absatz."
+    )
+
+    def read_in_pieces(size: int) -> list[int | str]:
+        engine = FakeEngine("a", unit=unit)  # type: ignore[arg-type]
+        stream = Stream(PAUSED, make_run([entry(engine)]))
+
+        async def scenario() -> list[AudioSegment]:
+            for start in range(0, len(text), size):
+                await stream.feed(text[start:start + size])
+            await stream.finish()
+            return await collect(stream)
+
+        return shape(run_async(scenario()))
+
+    expected = read_in_pieces(len(text))
+    assert (pause() in expected) == (unit != "whole")
+    for size in (1, 2, 5, 11, 40):
+        assert read_in_pieces(size) == expected, f"piece size {size}"

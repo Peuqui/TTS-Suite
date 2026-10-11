@@ -12,6 +12,9 @@ Two entry points, one implementation:
 * :class:`UnitCutter` — a text that arrives in pieces; a unit is released as soon as it
   is complete. :func:`split_text` is ``feed`` + ``flush`` of a cutter, so both give the
   same units by construction (for any way the text is divided into pieces).
+
+A unit is a :class:`CutUnit`: its text and whether it begins a new paragraph (a blank line lies between it
+and the unit before). The speech stream turns that into pauses between paragraphs.
 """
 
 from __future__ import annotations
@@ -40,6 +43,15 @@ MIN_SENTENCE_CHARS = 2
 MIN_COLON_SENTENCE_CHARS = 11
 
 
+@dataclass(frozen=True)
+class CutUnit:
+    """One unit of the cut text. ``paragraph_start``: a blank line lies between this unit and the one
+    before (or the start of the text) — so a pause belongs in front of it."""
+
+    text: str
+    paragraph_start: bool = False
+
+
 def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
@@ -51,6 +63,7 @@ class _Extraction:
     sentence: str
     index: int
     next_start: int
+    paragraph_start: bool
 
 
 def _ends_with_abbreviation(before: str) -> bool:
@@ -85,9 +98,25 @@ def _period_ends_sentence(text: str, i: int) -> bool:
     return after[0] in SENTENCE_CLOSERS
 
 
-def _scan_sentences(text: str, start: int) -> tuple[list[_Extraction], int]:
+def _opens_paragraph(gap: str) -> bool:
+    """Whether the whitespace ``gap`` contains a blank line."""
+    return PARAGRAPH_BREAK.search(gap) is not None
+
+
+def _leading_whitespace(text: str) -> str:
+    return text[:len(text) - len(text.lstrip())]
+
+
+def _trailing_whitespace(text: str) -> str:
+    return text[len(text.rstrip()):]
+
+
+def _scan_sentences(text: str, start: int) -> tuple[list[_Extraction], int, bool]:
     """Find the sentences of ``text`` from ``start`` on (``text`` has ``\\n`` line ends only).
-    Returns them and the position where the unfinished rest begins. The text before ``start``
+    Returns them, the position where the unfinished rest begins and whether a blank line lies right in
+    front of that rest. A sentence begins a paragraph if a blank line lies between it and the sentence
+    before: either in the whitespace in front of its text, or consumed by the scan as a paragraph break
+    (``paragraph_break_seen``). The text before ``start``
     is only looked at, never cut again (the end detection looks back up to 20 characters).
     A code block that is still open (an odd number of fences) is not scanned; the sentences in
     front of it are found as if the text ended at its opening fence — so ``start`` never lies
@@ -96,7 +125,12 @@ def _scan_sentences(text: str, start: int) -> tuple[list[_Extraction], int]:
         text = text[:text.rfind(CODE_FENCE)]
     found: list[_Extraction] = []
     sentence_start = start
+    paragraph_break_seen = _opens_paragraph(_trailing_whitespace(text[:start]))
     i = start
+
+    def starts_paragraph() -> bool:
+        return paragraph_break_seen or _opens_paragraph(_leading_whitespace(text[sentence_start:]))
+
     while i < len(text):
         char = text[i]
         if char == "\n":
@@ -109,12 +143,14 @@ def _scan_sentences(text: str, start: int) -> tuple[list[_Extraction], int]:
                 if len(sentence) >= MIN_SENTENCE_CHARS:
                     if sentence[-1] not in SENTENCE_FINAL_CHARS:
                         sentence += "."
-                    found.append(_Extraction(sentence, i, next_content_start))
+                    found.append(_Extraction(sentence, i, next_content_start, starts_paragraph()))
+                paragraph_break_seen = True  # the next sentence follows a blank line
                 sentence_start = next_content_start
                 i = next_content_start - 1
             elif len(sentence) >= MIN_SENTENCE_CHARS and sentence[-1] not in SENTENCE_FINAL_CHARS:
                 # Single line break after a line without punctuation: a heading
-                found.append(_Extraction(sentence + ".", i, i + 1))
+                found.append(_Extraction(sentence + ".", i, i + 1, starts_paragraph()))
+                paragraph_break_seen = False
                 sentence_start = i + 1
         if char == ":":
             after_colon = text[i + 1:i + 3]
@@ -122,7 +158,8 @@ def _scan_sentences(text: str, start: int) -> tuple[list[_Extraction], int]:
                 # Colon before line breaks: an introduction to a list or table
                 sentence = text[sentence_start:i + 1].strip()
                 if len(sentence) >= MIN_COLON_SENTENCE_CHARS:
-                    found.append(_Extraction(sentence, i, i + 1))
+                    found.append(_Extraction(sentence, i, i + 1, starts_paragraph()))
+                    paragraph_break_seen = False
                 sentence_start = i + 1
                 while i + 1 < len(text) and text[i + 1] in "\n\t ":
                     i += 1
@@ -139,10 +176,11 @@ def _scan_sentences(text: str, start: int) -> tuple[list[_Extraction], int]:
                 i = end - 1
                 sentence = text[sentence_start:end].strip()
                 if len(sentence) >= MIN_SENTENCE_CHARS:
-                    found.append(_Extraction(sentence, i, end))
+                    found.append(_Extraction(sentence, i, end, starts_paragraph()))
+                    paragraph_break_seen = False
                 sentence_start = end
         i += 1
-    return found, sentence_start
+    return found, sentence_start, starts_paragraph()
 
 
 class UnitCutter:
@@ -170,8 +208,8 @@ class UnitCutter:
         self._unit: Unit | None = None
         self._text = ""
         self._start = 0  # position in the normalized text where the unreleased part begins
-        self._carry = ""  # a too short sentence, waiting for the next one
-        self._held: list[str] = []  # complete sentences waiting for their successor
+        self._carry: CutUnit | None = None  # a too short sentence, waiting for the next one
+        self._held: list[CutUnit] = []  # complete sentences waiting for their successor
         self._released = 0  # sentences released so far
         if unit is not None:
             self.set_unit(unit)
@@ -180,7 +218,7 @@ class UnitCutter:
     def unit(self) -> Unit | None:
         return self._unit
 
-    def set_unit(self, unit: Unit) -> list[str]:
+    def set_unit(self, unit: Unit) -> list[CutUnit]:
         """Fix the unit (once) and release what the text collected so far yields."""
         if unit not in SPEECH_UNITS:
             raise ValueError(f"speech unit must be one of {SPEECH_UNITS}, got {unit!r}")
@@ -189,19 +227,19 @@ class UnitCutter:
         self._unit = unit
         return self._cut(final=False)
 
-    def feed(self, text: str) -> list[str]:
+    def feed(self, text: str) -> list[CutUnit]:
         self._text += text
         return self._cut(final=False)
 
-    def flush(self) -> list[str]:
+    def flush(self) -> list[CutUnit]:
         """The text has ended: release everything that is left. The cutter is empty afterwards."""
         if self._unit is None:
             raise RuntimeError("the unit is not set yet (set_unit)")
         units = self._cut(final=True)
-        self._text, self._start, self._carry, self._held, self._released = "", 0, "", [], 0
+        self._text, self._start, self._carry, self._held, self._released = "", 0, None, [], 0
         return units
 
-    def _cut(self, final: bool) -> list[str]:
+    def _cut(self, final: bool) -> list[CutUnit]:
         if self._unit is None:
             return []
         text = _normalize_newlines(self._text)
@@ -209,70 +247,77 @@ class UnitCutter:
             return self._cut_sentences(text, final)
         if self._unit == "paragraph":
             return self._cut_paragraphs(text, final)
-        return [text.strip()] if final and text.strip() else []
+        return [CutUnit(text.strip())] if final and text.strip() else []
 
-    def _cut_paragraphs(self, text: str, final: bool) -> list[str]:
-        units: list[str] = []
+    def _cut_paragraphs(self, text: str, final: bool) -> list[CutUnit]:
+        units: list[CutUnit] = []
         position = self._start
+        after_separator = position > 0  # the position only moves past a blank line
         for separator in PARAGRAPH_BREAK.finditer(text, position):
-            units.append(text[position:separator.start()].strip())
+            units.append(CutUnit(text[position:separator.start()].strip(), after_separator))
+            after_separator = True
             position = separator.end()
         self._start = position
         if final:
-            units.append(text[position:].strip())
-        return [unit for unit in units if unit]
+            units.append(CutUnit(text[position:].strip(), after_separator))
+        return [unit for unit in units if unit.text]
 
-    def _cut_sentences(self, text: str, final: bool) -> list[str]:
+    def _cut_sentences(self, text: str, final: bool) -> list[CutUnit]:
         if final:
             # A paragraph end forces the last sentence to complete
             text = text.rstrip() + "\n\n"
-        found, rest_start = _scan_sentences(text, min(self._start, len(text)))
+        found, rest_start, rest_opens_paragraph = _scan_sentences(text, min(self._start, len(text)))
         if final:
-            sentences = [extraction.sentence for extraction in found]
+            sentences = [CutUnit(extraction.sentence, extraction.paragraph_start) for extraction in found]
             rest = text[rest_start:].strip()
             if rest:
-                sentences.append(rest)
+                sentences.append(CutUnit(rest, rest_opens_paragraph))
         else:
             certain = [e for e in found if len(text) - e.index > SENTENCE_LOOKAHEAD_CHARS]
             if certain:
                 self._start = certain[-1].next_start
-            sentences = [extraction.sentence for extraction in certain]
+            sentences = [CutUnit(extraction.sentence, extraction.paragraph_start) for extraction in certain]
         self._held += self._join_short(sentences)
         if final and self._carry:
             # A short ending joins its predecessor if that one is still here; a released one stays as it is
             if self._held:
-                self._held[-1] = f"{self._held[-1]} {self._carry}"
+                self._held[-1] = self._joined(self._held[-1], self._carry)
             else:
                 self._held.append(self._carry)
-            self._carry = ""
+            self._carry = None
         return self._release_ready(final)
 
-    def _join_short(self, sentences: list[str]) -> list[str]:
+    @staticmethod
+    def _joined(first: CutUnit, second: CutUnit) -> CutUnit:
+        """Two sentences spoken as one unit; it begins where the first one begins."""
+        return CutUnit(f"{first.text} {second.text}", first.paragraph_start)
+
+    def _join_short(self, sentences: list[CutUnit]) -> list[CutUnit]:
         """Sentences with fewer than ``TTS_MIN_SENTENCE_WORDS`` words go to the next one."""
-        units: list[str] = []
+        units: list[CutUnit] = []
         for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
+            sentence = CutUnit(sentence.text.strip(), sentence.paragraph_start)
+            if not sentence.text:
                 continue
             if self._carry:
-                sentence = f"{self._carry} {sentence}"
-                self._carry = ""
-            if len(sentence.split()) < TTS_MIN_SENTENCE_WORDS:
+                sentence = self._joined(self._carry, sentence)
+                self._carry = None
+            if len(sentence.text.split()) < TTS_MIN_SENTENCE_WORDS:
                 self._carry = sentence
             else:
                 units.append(sentence)
         return units
 
-    def _release_ready(self, final: bool) -> list[str]:
+    def _release_ready(self, final: bool) -> list[CutUnit]:
         """The held sentences that may go: the immediate ones, those whose successor is complete, all at the end."""
-        units: list[str] = []
+        units: list[CutUnit] = []
         while self._held and (final or self._released < self._immediate_sentences or len(self._held) >= 2):
             units.append(self._held.pop(0))
             self._released += 1
         return units
 
 
-def split_text(text: str, unit: Unit) -> list[str]:
+def split_text(text: str, unit: Unit) -> list[CutUnit]:
     """A finished text cut by ``unit``."""
     cutter = UnitCutter(unit)
     return cutter.feed(text) + cutter.flush()

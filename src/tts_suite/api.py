@@ -199,6 +199,11 @@ class SpeakRequest:
     # a host is refused at once (``InvalidRequest``, ``UnknownEngine``, ``UnknownHost``). Not to be
     # confused with ``SuiteConfig.engines`` (defaults per engine).
     engines: tuple[EngineRef, ...]
+    # Silence between two paragraphs of the input (a blank line), in ms; 0 = none, negative = ``InvalidRequest``.
+    # The suite does not make the silence: it delivers a pause marker (``AudioSegment.pause_ms``) at each
+    # paragraph boundary for the units sentence and paragraph; an engine with the unit ``whole`` sets the
+    # pause at the blank line itself. Nothing is optional: the client says "no pause" with 0.
+    paragraph_pause_ms: int
     voice: str | None = None  # default voice (valid for the container engines)
     speed: float | None = None
     pitch: float | None = None
@@ -212,12 +217,17 @@ class AudioSegment:
     """One piece of audio, delivered in speaking order as soon as it exists."""
 
     audio: bytes
-    media_type: str  # "audio/wav", "audio/ogg", "audio/mpeg"; empty for a keep-alive
-    engine: str  # who spoke it, ``engine@host``; empty for a keep-alive
+    media_type: str  # "audio/wav", "audio/ogg", "audio/mpeg"; empty for a keep-alive or pause marker
+    engine: str  # who spoke it, ``engine@host``; empty for a keep-alive or pause marker
     keepalive: bool = False
     """Marker without audio (``audio`` empty); the client decides what to do with it, for example a
     device channel plays its own silence. It comes only after the first delivered segment and only
     while a segment takes longer than ``KEEPALIVE_SEC``, in every audio format."""
+    pause_ms: int = 0
+    """> 0: a pause marker (``audio`` empty, no keep-alive): the client makes this much silence for its output
+    (a device channel plays PCM silence, a browser waits between its files). It comes at a paragraph
+    boundary of the input, in speaking order, between the last segment of a paragraph and the first of the
+    next one (``SpeakRequest.paragraph_pause_ms``)."""
 
 
 @dataclass(frozen=True)
@@ -294,7 +304,7 @@ class UnknownHost(SuiteError):
 
 class InvalidRequest(SuiteError):
     """The list of a request cannot work: empty, the same engine@host twice, an engine without REST
-    API on a host, a unit that does not exist. Raised at once, before anything is started."""
+    API on a host, a unit that does not exist, a negative ``paragraph_pause_ms``. Raised at once, before anything is started."""
 
 
 class UnsupportedLanguage(SuiteError):

@@ -150,7 +150,7 @@ def test_an_entry_on_a_host_is_labelled_with_the_host(tmp_path: Path, monkeypatc
     one, two = _remote_capable(FakeEngine("onefake")), FakeEngine("twofake")
     install(monkeypatch, one, two)
     speaker = _speaker(tmp_path, hosts=(ARAGON,))
-    head = SpeakRequest(language="de", engines=(
+    head = SpeakRequest(language="de", paragraph_pause_ms=0, engines=(
         EngineRef("twofake", "sentence", None), EngineRef("onefake", "sentence", ARAGON.name), EngineRef("onefake", "sentence", None),
     ))
     assert [entry.label for entry in speaker._entries_for(head)] == ["twofake", f"onefake@{ARAGON.name}", "onefake"]
@@ -170,9 +170,9 @@ def test_each_entry_has_its_own_unit_and_the_speaking_entry_cuts_the_text(
     mixed = (EngineRef("paragraphfake", "paragraph", None), EngineRef("sentencefake", "sentence", None))
 
     async def scenario() -> None:
-        first = await collect(speaker.speak(TWO_PARAGRAPHS, SpeakRequest(language="de", engines=mixed)))
+        first = await collect(speaker.speak(TWO_PARAGRAPHS, SpeakRequest(language="de", paragraph_pause_ms=0, engines=mixed)))
         assert [segment.engine for segment in first] == ["paragraphfake"] * 2
-        reversed_ = await collect(speaker.speak(TWO_PARAGRAPHS, SpeakRequest(language="de", engines=mixed[::-1])))
+        reversed_ = await collect(speaker.speak(TWO_PARAGRAPHS, SpeakRequest(language="de", paragraph_pause_ms=0, engines=mixed[::-1])))
         assert [segment.engine for segment in reversed_] == ["sentencefake"] * 4
 
     run_async(scenario())
@@ -187,7 +187,7 @@ def test_when_the_first_entry_is_passed_over_the_text_is_cut_by_the_unit_of_the_
     mixed = (EngineRef("paragraphfake", "paragraph", None), EngineRef("sentencefake", "sentence", None))
 
     async def scenario() -> list[AudioSegment]:
-        return await collect(speaker.speak(TWO_PARAGRAPHS, SpeakRequest(language="de", engines=mixed)))
+        return await collect(speaker.speak(TWO_PARAGRAPHS, SpeakRequest(language="de", paragraph_pause_ms=0, engines=mixed)))
 
     assert [segment.engine for segment in run_async(scenario())] == ["sentencefake"] * 4
 
@@ -200,9 +200,21 @@ def test_an_empty_list_is_refused_before_anything_is_checked_or_started(tmp_path
     launcher = FakeLauncher({"onefake": None})
     speaker = _speaker(tmp_path, launcher)
     with pytest.raises(InvalidRequest, match="empty"):
-        speaker.open_stream(SpeakRequest(language="de", engines=()))
+        speaker.open_stream(SpeakRequest(language="de", paragraph_pause_ms=0, engines=()))
     with pytest.raises(InvalidRequest, match="empty"):
-        speaker.speak("Ein Satz kommt hier.", SpeakRequest(language="de", engines=()))
+        speaker.speak("Ein Satz kommt hier.", SpeakRequest(language="de", paragraph_pause_ms=0, engines=()))
+    assert launcher.asked == [] and launcher.starts == []
+
+
+def test_a_negative_paragraph_pause_is_refused_before_anything_is_started(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch, FakeEngine("onefake"))
+    launcher = FakeLauncher({"onefake": None})
+    speaker = _speaker(tmp_path, launcher)
+    negative = request("onefake", paragraph_pause_ms=-1)
+    with pytest.raises(InvalidRequest, match="paragraph_pause_ms"):
+        speaker.open_stream(negative)
+    with pytest.raises(InvalidRequest, match="paragraph_pause_ms"):
+        speaker.speak("Ein Satz kommt hier.", negative)
     assert launcher.asked == [] and launcher.starts == []
 
 
@@ -211,7 +223,7 @@ def test_the_same_engine_on_the_same_host_twice_is_refused(tmp_path: Path, monke
     launcher = FakeLauncher()
     speaker = _speaker(tmp_path, launcher)
     with pytest.raises(InvalidRequest, match="twice"):
-        speaker.open_stream(SpeakRequest(language="de", engines=(
+        speaker.open_stream(SpeakRequest(language="de", paragraph_pause_ms=0, engines=(
             EngineRef("onefake", "sentence", None), EngineRef("onefake", "whole", None),  # another unit is no other entry
         )))
     assert launcher.asked == []
@@ -220,7 +232,7 @@ def test_the_same_engine_on_the_same_host_twice_is_refused(tmp_path: Path, monke
 def test_one_engine_on_this_machine_and_on_a_host_are_two_entries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, _remote_capable(FakeEngine("onefake")))
     speaker = _speaker(tmp_path, hosts=(ARAGON,))
-    assert len(speaker._entries_for(SpeakRequest(language="de", engines=(
+    assert len(speaker._entries_for(SpeakRequest(language="de", paragraph_pause_ms=0, engines=(
         EngineRef("onefake", "sentence", None), EngineRef("onefake", "sentence", ARAGON.name),
     )))) == 2
 
@@ -232,7 +244,7 @@ def test_an_unknown_engine_or_host_is_refused_at_once(tmp_path: Path, monkeypatc
     with pytest.raises(UnknownEngine):
         speaker.open_stream(request("onefake", "nope"))
     with pytest.raises(UnknownHost, match="Ghost"):
-        speaker.open_stream(SpeakRequest(language="de", engines=(EngineRef("onefake", "sentence", "Ghost"),)))
+        speaker.open_stream(SpeakRequest(language="de", paragraph_pause_ms=0, engines=(EngineRef("onefake", "sentence", "Ghost"),)))
     assert launcher.asked == [] and launcher.starts == []
 
 
@@ -242,9 +254,9 @@ def test_an_engine_without_rest_api_on_a_host_and_an_unknown_unit_are_refused(
     install(monkeypatch, FakeEngine("onefake"))  # no default_port: no REST API
     speaker = _speaker(tmp_path, hosts=(ARAGON,))
     with pytest.raises(InvalidRequest, match="no REST API"):
-        speaker.open_stream(SpeakRequest(language="de", engines=(EngineRef("onefake", "sentence", ARAGON.name),)))
+        speaker.open_stream(SpeakRequest(language="de", paragraph_pause_ms=0, engines=(EngineRef("onefake", "sentence", ARAGON.name),)))
     with pytest.raises(InvalidRequest, match="unit"):
-        speaker.open_stream(SpeakRequest(language="de", engines=(EngineRef("onefake", "word", None),)))  # type: ignore[arg-type]
+        speaker.open_stream(SpeakRequest(language="de", paragraph_pause_ms=0, engines=(EngineRef("onefake", "word", None),)))  # type: ignore[arg-type]
 
 
 # ── What requests share ─────────────────────────────────────────────
@@ -335,7 +347,7 @@ def test_a_run_is_identified_by_its_id_and_its_list(tmp_path: Path, monkeypatch:
         assert len(broken.texts) == 1
         await collect(speaker.speak(SENTENCES[2], request("brokenfake", run="r-1")))
         assert len(broken.texts) == 2                             # another list: a run of its own, tries again
-        paragraph = SpeakRequest(language="de", run="r-1", engines=(
+        paragraph = SpeakRequest(language="de", paragraph_pause_ms=0, run="r-1", engines=(
             EngineRef("brokenfake", "paragraph", None), EngineRef("healthyfake", "sentence", None),
         ))
         await collect(speaker.speak(SENTENCES[2], paragraph))     # another unit is another list too

@@ -29,6 +29,7 @@ def audio_frame(segment: AudioSegment) -> bytes:
         "media_type": segment.media_type,
         "engine": segment.engine,
         "keepalive": segment.keepalive,
+        "pause_ms": segment.pause_ms,
     }
     return encode_frame(header, segment.audio)
 

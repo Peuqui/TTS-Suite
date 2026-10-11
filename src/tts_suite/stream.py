@@ -5,6 +5,9 @@ once and delivered, the others are generated meanwhile (in parallel, as far as t
 slots allow) and delivered in speaking order. While a segment takes longer than the keep-alive
 interval, a keep-alive marker (a segment without audio) is delivered so that the client sees the stream
 is alive; what it does with the marker is its decision (a device channel plays its own silence).
+At each paragraph boundary of the text a pause marker (``SpeakRequest.paragraph_pause_ms``) is delivered
+in the same way, in speaking order: after the last segment of a paragraph and in front of the first of the
+next one, never before the first or after the last, and once even if a paragraph has nothing left to speak.
 
 Which unit the text is cut by depends on the engine that speaks. That engine is chosen when
 the first text arrives (the choice may start a container), so the stream collects text until
@@ -31,10 +34,15 @@ from typing import Any, AsyncIterator, Mapping
 from .api import AudioSegment, SpeakRequest, SpeakSummary
 from .constants import KEEPALIVE_SEC
 from .escalation import EscalationEntry, SpeechRun, Spoken
-from .splitting import UnitCutter
+from .splitting import CutUnit, UnitCutter
 
 #: Sent while a segment takes long: no audio, no format, no engine — the client decides what to do with it.
 KEEPALIVE_MARKER = AudioSegment(audio=b"", media_type="", engine="", keepalive=True)
+
+
+def pause_marker(pause_ms: int) -> AudioSegment:
+    """Sent at a paragraph boundary: no audio, no format, no engine — the client makes the silence."""
+    return AudioSegment(audio=b"", media_type="", engine="", pause_ms=pause_ms)
 
 
 class Stream:
@@ -49,8 +57,8 @@ class Stream:
         self._keepalive_s = keepalive_s
         self._cutter = UnitCutter()
         self._cleaner = run.cleaner(request.language, pronunciations)  # the reading's, not this stream's
-        self._units: asyncio.Queue[str | None] = asyncio.Queue()  # cut units; None = text ended
-        self._results: asyncio.Queue[asyncio.Task[Spoken] | None] = asyncio.Queue()  # in speaking order
+        self._units: asyncio.Queue[CutUnit | None] = asyncio.Queue()  # cut units; None = text ended
+        self._results: asyncio.Queue[asyncio.Task[Spoken] | AudioSegment | None] = asyncio.Queue()  # in speaking order; a segment is a pause marker
         self._tasks: list[asyncio.Task[Spoken]] = []
         self._pipeline: asyncio.Task[None] | None = None
         self._has_text = False
@@ -86,7 +94,7 @@ class Stream:
             self._end_input()
         self._ensure_started()
 
-    def _release(self, units: list[str]) -> None:
+    def _release(self, units: list[CutUnit]) -> None:
         for unit in units:
             self._units.put_nowait(unit)
 
@@ -113,14 +121,21 @@ class Stream:
             self._release(self._cutter.set_unit(entry.unit))
             if self._finished:
                 self._end_input()
+            pause_due = False  # a paragraph boundary was passed since the last queued unit
+            queued_any = False
             while (raw_unit := await self._units.get()) is not None:
-                unit = self._cleaner.clean(raw_unit)  # here, in speaking order: the cleaner keeps the reading's state
+                pause_due = pause_due or raw_unit.paragraph_start
+                unit = self._cleaner.clean(raw_unit.text)  # here, in speaking order: the cleaner keeps the reading's state
                 if not unit:
-                    continue
+                    continue  # a paragraph with nothing to speak adds no pause of its own; the boundary stays due
+                if pause_due and queued_any and self._request.paragraph_pause_ms > 0:
+                    self._results.put_nowait(pause_marker(self._request.paragraph_pause_ms))
+                pause_due = False
                 await self._window.acquire()
                 task = asyncio.get_running_loop().create_task(self._run.speak(unit, self._request))
                 self._tasks.append(task)
                 self._results.put_nowait(task)
+                queued_any = True
         except Exception as error:  # noqa: BLE001 — reported to the consumer at the end of the results
             self._error = error
         finally:
@@ -141,9 +156,13 @@ class Stream:
                         getter.cancel()
                 if self._closed:
                     return
-                task = getter.result()
-                if task is None:
+                item = getter.result()
+                if item is None:
                     break
+                if isinstance(item, AudioSegment):
+                    yield item  # a pause marker: it waits for nothing, its place in the queue is its turn
+                    continue
+                task = item
                 async for keepalive in self._keep_alive_until_done(task):
                     yield keepalive
                 if self._closed:

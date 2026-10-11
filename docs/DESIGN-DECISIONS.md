@@ -109,6 +109,25 @@ The number of sentences held back should therefore stay a constant, not a hard-w
 special case in the code. Two- and one-word sentences are the borderline case in both
 steps: whether the engines speak very short pieces well will show in operation.
 
+## Pauses between paragraphs
+
+A pause between two paragraphs is a parameter of the request (`SpeakRequest.paragraph_pause_ms`, not
+optional, 0 = none, negative = `InvalidRequest`), not a setting of an engine or of the client. The suite does
+not make silence: it delivers a **pause marker**, a segment without audio (`audio=b""`, empty `media_type` and
+`engine`, `keepalive=False`) with `AudioSegment.pause_ms > 0`. The client makes silence of that length for its
+output (a device channel plays PCM silence, a browser waits between its files). On the wire it is an audio frame
+with an empty body and `pause_ms` in its header, like the keep-alive marker.
+
+The marker stands at every paragraph boundary of the input (a blank line between two paragraphs that have
+something to speak), in speaking order: after the last piece of one paragraph and in front of the first of the
+next, never before the first or after the last. It is queued in the same order as the syntheses, so it is
+delivered at its place however the sentences finish, and it neither holds back the generation of the next ones
+nor counts as keep-alive. The cutter marks the boundary (`CutUnit.paragraph_start`: a blank line lies in front of
+the unit); whole text and stream give the same units with the same marks. A paragraph that has nothing left to
+speak after the cleaning adds no pause of its own, and there are never two markers in a row. For the unit
+`whole` there are no markers: the engine sets the pause at the blank line itself. If the speaking entry changes
+in mid text, the markers stay; the announcement of the voice change gets none.
+
 ## Data folder
 
 Whatever the suite creates or needs and is no part of the source tree lives in one data

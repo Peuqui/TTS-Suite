@@ -115,6 +115,25 @@ Die Anzahl der Sätze, die zurückgehalten werden, soll deshalb eine Konstante b
 fest verdrahteter Sonderfall im Code. Zwei- und Einwort-Sätze sind bei beiden Stufen der
 Grenzfall: Ob die Engines sehr kurze Stücke gut sprechen, zeigt der Betrieb.
 
+## Pausen zwischen Absätzen
+
+Eine Pause zwischen zwei Absätzen ist ein Parameter der Anfrage (`SpeakRequest.paragraph_pause_ms`, nicht
+optional, 0 = keine, negativ = `InvalidRequest`), keine Einstellung einer Engine oder des Clients. Die Suite
+erzeugt keine Stille, sondern liefert einen **Pause-Marker**: ein Segment ohne Audio (`audio=b""`, leerer
+`media_type` und `engine`, `keepalive=False`) mit `AudioSegment.pause_ms > 0`. Der Client macht daraus Stille
+dieser Länge für seinen Ausgang (ein Gerätekanal spielt PCM-Stille, ein Browser wartet zwischen seinen Dateien).
+Auf dem Draht ist es ein audio-Frame mit leerem Körper und `pause_ms` im Kopf, wie der Keepalive-Marker.
+
+Der Marker steht an jeder Absatzgrenze des Eingabetextes (Leerzeile zwischen zwei Absätzen, die etwas zu sprechen
+haben), in Sprechreihenfolge: nach dem letzten Stück eines Absatzes und vor dem ersten des nächsten, nie vor dem
+ersten und nie nach dem letzten. Er wird in derselben Reihenfolge eingereiht wie die Synthesen, kommt also an
+seiner Stelle an, egal in welcher Reihenfolge die Sätze fertig werden, hält die Erzeugung der nächsten nicht auf
+und zählt nicht als Keepalive. Die Grenze erkennt der Zerleger (`CutUnit.paragraph_start`: vor der Einheit liegt
+eine Leerzeile); Ganztext und Strom liefern dieselben Einheiten mit denselben Kennzeichen. Ein Absatz, von dem
+nach der Bereinigung nichts zu sprechen bleibt, setzt keine eigene Pause, und zwei Marker hintereinander gibt es
+nie. Bei der Einheit `whole` gibt es keine Marker: die Engine setzt die Pause an der Leerzeile selbst. Wechselt der
+sprechende Eintrag mitten im Text, bleiben die Marker; die Ansage des Stimmwechsels bekommt keinen.
+
 ## Datenordner
 
 Was die Suite selbst erzeugt oder braucht und nicht Teil des Quellbaums ist, liegt in
