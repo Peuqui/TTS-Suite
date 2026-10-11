@@ -58,6 +58,50 @@ something (`POST /config`, starting and stopping containers, uploading voices) a
 without one (`--host`, `--token-file`). The hosts, the GPU rules and the defaults per engine are set with
 `POST /config`; see the [interface](docs/INTERFACE.md).
 
+## Working in parallel
+
+Requests are independent and re-entrant: any number of programs can call the service at the same time. The
+service owns the containers and the cards, so a program only says what it wants (its own list of engines)
+and the service sees to the rest. Nothing is loaded twice, and nothing that speaks is taken away from it.
+
+```mermaid
+flowchart TD
+    R[Request: text + own list of engines] --> C{Next entry of the list}
+    C -->|none left| E[Error: no engine can speak, with the trace]
+    C -->|cloud or CPU engine| S[Speak]
+    C -->|engine on a machine| L{Is it loaded and serving?}
+    L -->|yes| Q{Room in its queue?}
+    L -->|no| P{A card with room for its budget?}
+    P -->|yes| T[Start the container, once for everybody] --> Q
+    P -->|no, or machine off| C
+    Q -->|yes| S
+    Q -->|no| O[429 overloaded]
+    S -->|fails before the first sound| C
+    S -->|fails in the middle| N[The next entry takes over and announces the change] --> S
+    S --> D[Audio piece by piece, in speaking order]
+```
+
+What happens with several programs at once (examples):
+
+| Situation | What the service does |
+|---|---|
+| Program A wants Qwen3 on machine X, program B wants Qwen3 on machine Y | Two containers on two machines; both run side by side. |
+| A wants Qwen3 on the main machine, B wants a cloud engine | The cloud needs no hardware of ours; both speak at once. |
+| A and B both want Qwen3 on the same machine | One container, started once. The two take turns (Qwen3 renders one at a time, the second waits in the queue); nothing is reloaded. |
+| Qwen3 runs, B wants XTTS on the same machine | Qwen3 is left alone. XTTS starts on a card that has room for its budget (several cards: next to it). If no card has room, that entry is skipped (`no_vram`) and B's list goes on with its next entry. |
+| A and B ask for the same cold engine at once | One start, shared by both. Two starts on one machine are done one after the other, so they never pick the same card. |
+| A reads, B wants the container gone (`POST /release`) | The container that is speaking is not touched (`in_use`); every other one is shut down. |
+
+Limits: a container takes `max_parallel` readings at once and a queue of `max_queue` more; beyond that the
+service answers `429 overloaded`. The limits are set per engine on the page of the service. With more
+machines the room grows: every machine that has a GPU and the container recipes (`docker/tts/`) and the SSH key of
+the service can carry its own engines, and the service sends readings to whichever machine the client's list
+names. A list can name the same engine on several machines, in the order it prefers; the service does not spread
+the load by itself, it takes the first entry that can speak.
+
+A program that wants to hang on to what is already loaded asks the catalog (`GET /engines`: state `running` per
+engine and machine) and puts the running local engine at the front of its own list.
+
 ## License
 
 To be added with the first release.

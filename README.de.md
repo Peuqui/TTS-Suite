@@ -59,6 +59,51 @@ Solange der Dienst auf `127.0.0.1` lauscht, verlangen Sprechen und jedes `GET` n
 keines nicht (`--host`, `--token-file`). Die Rechner, die GPU-Regeln und die Vorgaben je Engine setzt man mit
 `POST /config`; siehe die [Schnittstelle](docs/INTERFACE.de.md).
 
+## Parallel arbeiten
+
+Anfragen sind unabhängig und wiedereintrittsfähig: beliebig viele Programme können den Dienst gleichzeitig
+aufrufen. Der Dienst besitzt die Container und die Karten, ein Programm sagt nur, was es will (seine eigene
+Liste von Engines), den Rest erledigt der Dienst. Nichts wird doppelt geladen, und was gerade spricht, wird
+niemandem weggenommen.
+
+```mermaid
+flowchart TD
+    R[Anfrage: Text + eigene Liste von Engines] --> C{Nächster Eintrag der Liste}
+    C -->|keiner mehr| E[Fehler: keine Engine kann sprechen, mit der Spur]
+    C -->|Cloud- oder CPU-Engine| S[Sprechen]
+    C -->|Engine auf einem Rechner| L{Geladen und bereit?}
+    L -->|ja| Q{Platz in ihrer Warteschlange?}
+    L -->|nein| P{Karte mit Platz für ihr Budget?}
+    P -->|ja| T[Container starten, einmal für alle] --> Q
+    P -->|nein, oder Rechner aus| C
+    Q -->|ja| S
+    Q -->|nein| O[429 überlastet]
+    S -->|scheitert vor dem ersten Ton| C
+    S -->|scheitert mittendrin| N[Der nächste Eintrag übernimmt und sagt den Wechsel an] --> S
+    S --> D[Audio Stück für Stück, in Sprechreihenfolge]
+```
+
+Was bei mehreren Programmen gleichzeitig passiert (Beispiele):
+
+| Lage | Was der Dienst tut |
+|---|---|
+| Programm A will Qwen3 auf Rechner X, Programm B Qwen3 auf Rechner Y | Zwei Container auf zwei Rechnern, beide laufen nebeneinander. |
+| A will Qwen3 auf dem Hauptrechner, B eine Cloud-Engine | Die Cloud braucht keine eigene Hardware, beide sprechen zugleich. |
+| A und B wollen beide Qwen3 auf demselben Rechner | Ein Container, einmal gestartet. Die beiden wechseln sich ab (Qwen3 rendert eins nach dem anderen, das zweite wartet in der Warteschlange), nichts wird umgeladen. |
+| Qwen3 läuft, B will XTTS auf demselben Rechner | Qwen3 bleibt unberührt. XTTS startet auf einer Karte mit Platz für sein Budget (bei mehreren Karten daneben). Hat keine Karte Platz, wird dieser Eintrag übersprungen (`no_vram`) und die Liste von B geht mit dem nächsten Eintrag weiter. |
+| A und B fordern gleichzeitig dieselbe kalte Engine an | Ein Start, den beide teilen. Zwei Starts auf einem Rechner laufen nacheinander, sie wählen nie dieselbe Karte. |
+| A liest, B will den Container loswerden (`POST /release`) | Der Container, der gerade spricht, wird nicht angefasst (`in_use`), alle anderen werden heruntergefahren. |
+
+Grenzen: Ein Container nimmt `max_parallel` Lesungen zugleich und danach `max_queue` in der Warteschlange; darüber
+antwortet der Dienst mit `429 überlastet`. Die Grenzen stellt man je Engine auf der Seite des Dienstes ein. Mit
+mehr Rechnern wächst der Platz: Jeder Rechner mit einer GPU, den Rezepten (`docker/tts/`) und dem SSH-Schlüssel
+des Dienstes kann eigene Engines tragen, und der Dienst schickt Lesungen an den Rechner, den die Liste des Clients
+nennt. Eine Liste kann dieselbe Engine auf mehreren Rechnern in der gewünschten Reihenfolge nennen; der Dienst
+verteilt die Last nicht von selbst, er nimmt den ersten Eintrag, der sprechen kann.
+
+Ein Programm, das sich an bereits Geladenes hängen will, fragt den Katalog (`GET /engines`: Zustand `running` je
+Engine und Rechner) und setzt die laufende lokale Engine an den Anfang seiner eigenen Liste.
+
 ## Lizenz
 
 Kommt mit der ersten Veröffentlichung.
