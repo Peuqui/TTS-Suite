@@ -1,6 +1,8 @@
 """Text cleaning: what is removed, what becomes a hint, and the state of one reading."""
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from tts_suite.cleaning import TextCleaner
@@ -124,3 +126,14 @@ def test_pronunciations_replace_whole_words_with_the_case_as_given() -> None:
 
 def test_a_unit_with_nothing_to_speak_is_empty() -> None:
     assert clean_all(["...", "   ", "<!-- nur Kommentar -->", "😢", "---"]) == [""] * 5
+
+
+@pytest.mark.parametrize("opener", ["[", "![", "<"])
+def test_hostile_text_with_many_unclosed_brackets_is_cleaned_in_linear_time(opener: str) -> None:
+    started = time.perf_counter()
+    TextCleaner("en", {}).clean(opener * 32000)
+    assert time.perf_counter() - started < 1.0  # was 5.7 s for "[" when the patterns were unbounded
+
+
+def test_a_bracket_marker_and_a_link_are_still_cleaned() -> None:
+    assert TextCleaner("en", {}).clean("See [1] and [the docs](https://example.com/x) now.") == "See and the docs now."

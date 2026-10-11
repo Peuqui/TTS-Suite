@@ -201,3 +201,10 @@ DOCKER_PIDS_TIMEOUT_S = 10
 #: command; a value starting with ``-`` would be read as an ssh option, so neither may.
 HOST_ADDRESS_PATTERN = r"[A-Za-z0-9][A-Za-z0-9.:_-]*"
 HOST_SSH_USER_PATTERN = r"[A-Za-z0-9_][A-Za-z0-9_.-]*"
+
+#: Bounds of the bracket patterns of the text cleaning (a marker like ``[1]``, a link ``[text](url)``).
+#: An unbounded pattern scans to the end of the text for every ``[`` without a closing ``]`` — quadratic
+#: on hostile input (measured: 32,000 ``[`` took 5.7 s). Longer brackets are not cut out, they are read.
+BRACKET_MAX_CHARS = 200
+LINK_TEXT_MAX_CHARS = 300
+LINK_URL_MAX_CHARS = 2000

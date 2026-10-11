@@ -21,7 +21,14 @@ import re
 import string
 from typing import Mapping
 
-from .constants import LAUGHTER_EMOJIS, MULTILINE_TEXT_MIN_CHARS, TTS_LIST_MAX_ITEMS
+from .constants import (
+    BRACKET_MAX_CHARS,
+    LAUGHTER_EMOJIS,
+    LINK_TEXT_MAX_CHARS,
+    LINK_URL_MAX_CHARS,
+    MULTILINE_TEXT_MIN_CHARS,
+    TTS_LIST_MAX_ITEMS,
+)
 from .i18n import translate
 from .splitting import SENTENCE_FINAL_CHARS
 
@@ -44,10 +51,10 @@ _LIST_ITEM_MARK = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])\s+", re.MULTILINE)
 _BLOCK_FORMULA = re.compile(r"\$\$[^$]+\$\$", re.DOTALL)
 _INLINE_FORMULA = re.compile(r"\$[^$]+\$")
 _INLINE_CODE = re.compile(r"`[^`]+`")
-_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")
-_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
+_LINK = re.compile(rf"\[([^\]]{{1,{LINK_TEXT_MAX_CHARS}}})\]\([^)]{{1,{LINK_URL_MAX_CHARS}}}\)")
+_IMAGE = re.compile(rf"!\[[^\]]{{0,{LINK_TEXT_MAX_CHARS}}}\]\([^)]{{1,{LINK_URL_MAX_CHARS}}}\)")
 _BLOCKQUOTE = re.compile(r"^>\s*", re.MULTILINE)
-_BRACKETS = re.compile(r"\[.*?\]")
+_BRACKETS = re.compile(rf"\[[^\]\n]{{0,{BRACKET_MAX_CHARS}}}\]")
 _EMOJI = re.compile(
     "["
     "\U0001F300-\U0001F5FF"  # Symbols & Pictographs (incl. clock faces)
