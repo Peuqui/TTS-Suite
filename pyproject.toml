@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tts-suite"
+version = "0.1.0"
+description = "Text-to-speech as a service: engines in containers, an escalation list, one HTTP interface"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "requests",
+    "edge-tts",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+    "types-requests",
+    "httpx2",
+]
+
+[project.scripts]
+tts-suite = "tts_suite.service.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tts_suite"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

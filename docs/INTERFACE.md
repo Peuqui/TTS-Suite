@@ -20,9 +20,10 @@ one. Where an engine container is concerned, the convention of AIfred Intelligen
    engines without native support) and streams it back. A client never talks to a container directly. Other
    machines (SSH) are an optional list; the normal case is this machine.
 
-What stays with the client: cleaning the text for speech (Markdown, numbers, emoji), file names and storage
-of the audio, and everything that knows its agents (which agent has which voice). The service gets text and
-answers with audio.
+The service cleans the text for speech by unit (Markdown, numbers, emoji, URLs; a block of code is replaced by
+a short spoken hint, once per block; `pronunciations` of the configuration swap words for the form that is
+spoken). What stays with the client: file names and storage of the audio, and everything that knows its
+agents (which agent has which voice). The service gets text and answers with audio.
 
 ## Endpoints
 
@@ -53,13 +54,17 @@ client decides whether and how it speaks.
 
 One object: `voices_dir`; `entries` (`engine`, `host`, `enabled`, in speaking order); `hosts` (optional:
 `name`, `address`, `ssh_port`, `ssh_user`); `engines` (per engine key: `unit`, `voice` with `voice`, `speed`,
-`pitch`, `max_parallel`, `max_queue`); `gpus` (see below). `POST` validates once, in the engine package;
+`pitch`, `vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` and `headroom_mib` (see below);
+`pronunciations` (a word to the form spoken instead). `POST` validates once, in the engine package;
 what cannot work is `400` with the reason. Cloud keys are not part of it (below).
 
 **GPU placement is a rule set**, no callback to a program: an engine starts on the first card of `gpus`
 (`gpu` = index as `nvidia-smi` lists it, or UUID; `reserve_mib` = VRAM that stays free for other programs)
-whose free VRAM minus the reserve covers the engine's measured peak. An empty `gpus` means every card, the
-one with the most free VRAM first. No card fits: the entry is skipped with `no_vram`.
+whose free VRAM minus the reserve covers the engine's `vram_budget_mib` plus `headroom_mib` (a margin so a
+card is not filled to the last MiB). The container gets the budget as its cap; the suite does not watch the
+use or stop an engine for it (`GET /engines` reports what an engine holds as `vram_mib`, for display). An
+empty `gpus` means every card, the one with the most free VRAM first. No card fits: the entry is skipped
+with `no_vram` (not remembered: the next request chooses again).
 
 ### The request: the head of a reading
 
@@ -80,8 +85,9 @@ one with the most free VRAM first. No card fits: the entry is skipped with `no_v
   failed and whether something was spoken already, for about ten minutes. Entries that failed stay out for
   the rest of the run. If an entry fails after the first sound, the successor first speaks an announcement
   (for example "Voice change to X because of Y", German or English by `language`; the texts live in the
-  suite) and then the unfinished piece. The choice and the state of a run sit behind a lock, so two pieces
-  never both start the successor, and **only the first piece the successor serves gets the announcement**.
+  suite), **a segment of its own in front of the successor's first one**, and then the unfinished piece. The
+  choice and the state of a run sit behind a lock, so two pieces never both start the successor and the
+  announcement is made once.
   If the service restarts in the middle of a run, the state is lost and the escalation starts at the top of the
   list again (the client sees it in `engine` of the frames).
 - **`wait`** (default `true`): the reading may wait for a container to start (cold start: typically 20 s and
@@ -97,8 +103,8 @@ whole text, so the first piece starts as early as possible. Both doors use the s
   `kind` and the body's `bytes`. On the WebSocket one frame is one binary message; in the HTTP body
   (`application/x-tts-frames`, chunked) they follow each other.
 - `kind: "audio"`: body = audio (`media_type`, e.g. `audio/wav`); header also `engine` (who spoke it, as
-  `engine@host`) and `keepalive` (`true`: silence that only holds the stream open while a piece takes long;
-  play or drop it).
+  `engine@host`) and `keepalive` (`true`: a marker with an empty body (`bytes: 0`) that only holds the stream open while a piece
+  takes long, for every format; drop it).
 - `kind: "summary"`: the last frame, body = JSON `{"trace": [...], "switch": null | "<reason>"}`. `trace` is
   the whole course of the escalation, a list of `{entry, outcome, reason, detail}` with `outcome` one of
   `skipped`, `failed`, `spoke`; the client builds its notes from it (for example "XTTS · Aragon → DashScope
@@ -110,7 +116,10 @@ Before the first frame the service has not committed to a status: a reading that
 proper HTTP status (the WebSocket sends an `error` frame and closes). Errors are JSON
 `{"error": "<code>", "detail": "<text>", "trace": [...]}`: `no_engine` (`503`: no entry can speak),
 `starting` (`503`), `overloaded` (`429`: more requests for an engine than its queue takes), `unknown_engine`
-(`404`), `bad_request` and `config_invalid` (`400`), `unauthorized` (`401`).
+(`404`), `engine_in_use` (`409`: a stop for a container a reading is using), `engine_control_failed` (`502`:
+Docker or the host did not do a start or stop), `bad_request` and `config_invalid` (`400`),
+`unsupported_language` (`422`: no text of the suite in that language), `unauthorized` (`401`). `starting`
+carries `Retry-After`. On the WebSocket a refused handshake (no token) is a closed connection.
 
 Reasons are the same codes everywhere. Failures (after the attempt): `engine`, `software`, `unreachable`,
 `timeout`, `cloud_quota`. Skips (before the attempt): `disabled`, `deactivated`, `stopped`, `no_vram`.
@@ -147,15 +156,15 @@ as binary messages; after the `summary` frame the service closes.
 ## Moving out of AIfred Intelligence
 
 Goes with the suite: the engine folders and their containers, the escalation, engine manager and hosts
-(including `scripts/tts-host-ctl.sh` and the compose call that sets `TTS_GPU_UUID`), the text cutting by unit,
+(including `scripts/tts-host-ctl.sh` and the compose call that sets `TTS_GPU_UUID`), the cleaning and cutting of the text by unit,
 the post-processing, the announcement texts and engine labels (German and English), the configuration, and
-the tests of escalation, reload, completeness and the DashScope engine. The container and project names (and
-the volume `xtts_voices`) are pinned in the compose files (`name:`), so Docker does not recreate running
+the tests of escalation, reload, completeness and the DashScope engine. The engines are the ones that exist in the suite (no MOSS, no Fish-Speech). The container and project names
+(and the volume `xtts_voices`) are pinned in the compose files (`name:`), so Docker does not recreate running
 containers. The voices folder holds the user's own data: it is not in the public repository, its path is a
 setting, and both the suite and AIfred (agent bundles) use that one place. The list and hosts, today in
 AIfred's `settings.json`, move to `/config` as the one place; AIfred reads and writes them over HTTP through a
 thin client, with a one-time migration and no parallel operation. Stays with AIfred: `resolve_voice` and the
-agents' voices, the cleaning of the text, file names and storage of the audio, and a client test.
+agents' voices, file names and storage of the audio, and a client test.
 
 ## Open points
 

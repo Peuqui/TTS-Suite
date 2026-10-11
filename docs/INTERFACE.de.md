@@ -20,9 +20,10 @@ Intelligence (`docs/de/architecture/tts-container-conventions.md`) unverändert 
    ohne eigene Unterstützung) und schickt es als Strom zurück. Ein Client spricht nie direkt mit einem
    Container. Weitere Rechner (SSH) sind eine optionale Liste; der Normalfall ist dieser Rechner.
 
-Beim Client bleibt: den Text fürs Sprechen bereinigen (Markdown, Zahlen, Emoji), Dateinamen und Ablage des
-Audios und alles, was seine Agenten kennt (welcher Agent welche Stimme hat). Der Dienst bekommt Text und
-antwortet mit Audio.
+Der Dienst bereinigt den Text fürs Sprechen je Einheit (Markdown, Zahlen, Emoji, Adressen; ein Codeblock wird
+durch einen kurzen gesprochenen Hinweis ersetzt, einmal je Block; `pronunciations` der Konfiguration tauschen
+Wörter gegen die gesprochene Form). Beim Client bleibt: Dateinamen und Ablage des Audios und alles, was seine
+Agenten kennt (welcher Agent welche Stimme hat). Der Dienst bekommt Text und antwortet mit Audio.
 
 ## Endpunkte
 
@@ -53,14 +54,18 @@ der Dienst kann es nicht). Er steht in der Liste, weil die Reihenfolge Sache der
 
 Ein Objekt: `voices_dir`; `entries` (`engine`, `host`, `enabled`, in Sprechreihenfolge); `hosts` (optional:
 `name`, `address`, `ssh_port`, `ssh_user`); `engines` (je Engine-Schlüssel: `unit`, `voice` mit `voice`,
-`speed`, `pitch`, `max_parallel`, `max_queue`); `gpus` (siehe unten). `POST` prüft einmal, im Engine-Paket;
+`speed`, `pitch`, `vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` und `headroom_mib` (siehe unten);
+`pronunciations` (ein Wort zur Form, die stattdessen gesprochen wird). `POST` prüft einmal, im Engine-Paket;
 was nicht funktionieren kann, ist `400` mit dem Grund. Cloud-Schlüssel gehören nicht dazu (unten).
 
 **Die Platzierung auf der GPU ist ein Regelsatz**, kein Rückruf an ein Programm: Eine Engine startet auf der
 ersten Karte aus `gpus` (`gpu` = Index wie `nvidia-smi` ihn nennt, oder UUID; `reserve_mib` = VRAM, der für
-andere Programme frei bleibt), deren freier VRAM abzüglich der Reserve den gemessenen Spitzenbedarf der
-Engine deckt. Leeres `gpus` heißt alle Karten, die mit dem meisten freien VRAM zuerst. Passt keine Karte,
-wird der Eintrag mit `no_vram` übersprungen.
+andere Programme frei bleibt), deren freier VRAM abzüglich der Reserve das `vram_budget_mib` der Engine plus `headroom_mib` deckt (ein
+Aufschlag, damit keine Karte bis auf das letzte MiB gefüllt wird). Der Container bekommt das Budget als Kappe;
+die Suite beobachtet den Verbrauch nicht und stoppt keine Engine deswegen (`GET /engines` meldet, was eine
+Engine belegt, als `vram_mib`, nur zur Anzeige). Leeres `gpus` heißt alle Karten, die mit dem meisten freien
+VRAM zuerst. Passt keine Karte, wird der Eintrag mit `no_vram` übersprungen (nicht gemerkt: die nächste
+Anfrage wählt neu).
 
 ### Die Anfrage: der Kopf eines Vorlesens
 
@@ -83,9 +88,9 @@ wird der Eintrag mit `no_vram` übersprungen.
   zehn Minuten, welche Einträge ausfielen und ob schon gesprochen wurde. Ausgefallene Einträge bleiben für
   den Rest des Laufs draußen. Fällt ein Eintrag nach dem ersten Ton aus, spricht der Nachfolger zuerst eine
   Ansage (zum Beispiel „Stimmwechsel zu X wegen Y“, deutsch oder englisch nach `language`; die Texte liegen
-  in der Suite) und dann das unfertige Stück. Auswahl und Zustand eines Laufs liegen hinter einer Sperre,
-  sodass nie zwei Stücke beide den Nachfolger starten und **nur das erste Stück, das der Nachfolger bedient,
-  die Ansage bekommt**. Startet der Dienst mitten im Lauf neu, ist der Zustand verloren, und die Eskalation
+  in der Suite), **ein eigenes Segment vor dem ersten des Nachfolgers**, und dann das unfertige Stück. Auswahl
+  und Zustand eines Laufs liegen hinter einer Sperre, sodass nie zwei Stücke beide den Nachfolger starten und
+  die Ansage einmal erfolgt. Startet der Dienst mitten im Lauf neu, ist der Zustand verloren, und die Eskalation
   beginnt wieder oben in der Liste (der Client sieht es an `engine` der Frames).
 - **`wait`** (Standard `true`): das Vorlesen darf auf den Start eines Containers warten (Kaltstart: üblich
   20 s und mehr). Mit `false` endet es sofort mit `503` `{"error": "starting"}`, und der Start läuft im
@@ -100,8 +105,8 @@ ganzen Text, damit das erste Stück so früh wie möglich beginnt. Beide Türen 
   nennt `kind` und die `bytes` des Körpers. Auf dem WebSocket ist ein Frame eine Binärnachricht; im
   HTTP-Körper (`application/x-tts-frames`, gestückelt) folgen sie aufeinander.
 - `kind: "audio"`: Körper = Audio (`media_type`, z. B. `audio/wav`); der Kopf nennt auch `engine` (wer es
-  gesprochen hat, als `engine@host`) und `keepalive` (`true`: Stille, die den Strom nur offen hält, solange
-  ein Stück lange braucht; abspielen oder verwerfen).
+  gesprochen hat, als `engine@host`) und `keepalive` (`true`: eine Markierung mit leerem Körper (`bytes: 0`), die den Strom nur offen hält, solange
+  ein Stück lange braucht, für jedes Format; verwerfen).
 - `kind: "summary"`: der letzte Frame, Körper = JSON `{"trace": [...], "switch": null | "<Grund>"}`. `trace`
   ist der ganze Verlauf der Eskalation, eine Liste von `{entry, outcome, reason, detail}` mit `outcome` aus
   `skipped`, `failed`, `spoke`; der Client baut daraus seine Hinweise (etwa „XTTS · Aragon → DashScope
@@ -113,7 +118,11 @@ Vor dem ersten Frame hat der Dienst sich auf keinen Status festgelegt: Ein Vorle
 endet mit einem passenden HTTP-Status (der WebSocket schickt einen `error`-Frame und schließt). Fehler sind
 JSON `{"error": "<code>", "detail": "<text>", "trace": [...]}`: `no_engine` (`503`: kein Eintrag kann
 sprechen), `starting` (`503`), `overloaded` (`429`: mehr Anfragen für eine Engine, als ihre Warteschlange
-nimmt), `unknown_engine` (`404`), `bad_request` und `config_invalid` (`400`), `unauthorized` (`401`).
+nimmt), `unknown_engine` (`404`), `engine_in_use` (`409`: ein Stopp für einen Container, den gerade ein Vorlesen
+nutzt), `engine_control_failed` (`502`: Docker oder der Rechner hat Start oder Stopp nicht geschafft),
+`bad_request` und `config_invalid` (`400`), `unsupported_language` (`422`: kein Text der Suite in dieser
+Sprache), `unauthorized` (`401`). `starting` trägt `Retry-After`. Am WebSocket ist ein abgelehnter
+Handshake (kein Token) eine geschlossene Verbindung.
 
 Die Gründe sind überall dieselben Codes. Ausfälle (nach dem Anlauf): `engine`, `software`, `unreachable`,
 `timeout`, `cloud_quota`. Überspringen (vor dem Anlauf): `disabled`, `deactivated`, `stopped`, `no_vram`.
@@ -150,16 +159,16 @@ gesprochen. Die Frames kommen als Binärnachrichten zurück; nach dem `summary`-
 ## Herauslösen aus AIfred Intelligence
 
 Zieht mit in die Suite: die Engine-Ordner und ihre Container, Eskalation, Engine-Verwaltung und Rechner
-(samt `scripts/tts-host-ctl.sh` und dem Compose-Aufruf, der `TTS_GPU_UUID` setzt), die Zerlegung des Textes
+(samt `scripts/tts-host-ctl.sh` und dem Compose-Aufruf, der `TTS_GPU_UUID` setzt), die Bereinigung und Zerlegung des Textes
 nach Einheit, die Nachbearbeitung, die Ansagetexte und Engine-Namen (deutsch und englisch), die
-Konfiguration und die Tests von Eskalation, Reload, Vollständigkeit und der DashScope-Engine. Container- und
-Projektnamen (und das Volume `xtts_voices`) werden in den Compose-Dateien gepinnt (`name:`), damit Docker
+Konfiguration und die Tests von Eskalation, Reload, Vollständigkeit und der DashScope-Engine. Die Engines sind die, die es in der Suite gibt (kein
+MOSS, kein Fish-Speech). Container- und Projektnamen (und das Volume `xtts_voices`) werden in den Compose-Dateien gepinnt (`name:`), damit Docker
 laufende Container nicht neu anlegt. Der Stimmenordner enthält Nutzerdaten: Er liegt nicht im öffentlichen
 Repository, sein Pfad ist eine Einstellung, und Suite wie AIfred (Agent-Bündel) nutzen diesen einen Ort. Die
 Liste und die Rechner, heute in AIfreds `settings.json`, ziehen nach `/config` als den einen Ort; AIfred
 liest und schreibt sie über HTTP mit einem dünnen Client, mit einmaliger Migration und ohne Parallelbetrieb.
-Bei AIfred bleibt: `resolve_voice` und die Stimmen der Agenten, die Bereinigung des Textes, Dateinamen und
-Ablage des Audios und ein Client-Test.
+Bei AIfred bleibt: `resolve_voice` und die Stimmen der Agenten, Dateinamen und Ablage des Audios und ein
+Client-Test.
 
 ## Offene Punkte
 

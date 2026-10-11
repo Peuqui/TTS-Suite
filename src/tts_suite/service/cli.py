@@ -1,0 +1,68 @@
+"""`tts-suite serve` starts the service, `tts-suite token` makes the token for the commands that
+change something."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+import uvicorn
+
+from ..api import SuiteConfig
+from ..suite import create_suite
+from .app import create_app
+from .auth import access_for, create_token, read_token
+from .config_store import ConfigStore
+
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 5090
+CONFIG_FILE_NAME = "config.json"
+TOKEN_FILE_NAME = "token"
+
+
+def config_dir() -> Path:
+    """The service's own folder below the XDG config directory."""
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "tts-suite"
+
+
+def parser() -> argparse.ArgumentParser:
+    main = argparse.ArgumentParser(prog="tts-suite", description="The TTS-Suite service.")
+    commands = main.add_subparsers(dest="command", required=True)
+    serve = commands.add_parser("serve", help="start the service")
+    serve.add_argument("--host", default=DEFAULT_HOST)
+    serve.add_argument("--port", type=int, default=DEFAULT_PORT)
+    serve.add_argument("--config", type=Path, default=config_dir() / CONFIG_FILE_NAME)
+    serve.add_argument("--token-file", type=Path, default=config_dir() / TOKEN_FILE_NAME)
+    serve.add_argument("--voices-dir", type=Path, help="the shared voices folder, for the first start")
+    token = commands.add_parser("token", help="make the token file if there is none")
+    token.add_argument("--token-file", type=Path, default=config_dir() / TOKEN_FILE_NAME)
+    return main
+
+
+def first_configuration(voices_dir: Path | None, config_path: Path) -> SuiteConfig:
+    if voices_dir is None:
+        sys.exit(f"No configuration at {config_path} yet: name the shared voices folder with --voices-dir.")
+    return SuiteConfig(voices_dir=voices_dir)
+
+
+def serve(arguments: argparse.Namespace) -> None:
+    store = ConfigStore(arguments.config)
+    config = store.load() or first_configuration(arguments.voices_dir, arguments.config)
+    try:
+        access = access_for(arguments.host, read_token(arguments.token_file))
+    except ValueError as error:
+        sys.exit(str(error))
+    store.save(config)
+    uvicorn.run(create_app(create_suite(config), access, store), host=arguments.host, port=arguments.port)
+
+
+def main() -> None:
+    arguments = parser().parse_args()
+    if arguments.command == "token":
+        create_token(arguments.token_file)
+        print(f"The token is in {arguments.token_file} (readable for you alone).")
+    else:
+        serve(arguments)

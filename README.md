@@ -7,9 +7,10 @@ Docker container (or a cloud service), and one interface in front of them lets a
 text spoken without implementing speech output itself. The sister project is
 [STT-Suite](https://github.com/Peuqui/STT-Suite) (speech recognition).
 
-> **Status: design stage.** The repository starts with the interface ([docs/INTERFACE.md](docs/INTERFACE.md)),
-> which the programs that will use it review first. The engines are taken over from
-> [AIfred Intelligence](https://github.com/Peuqui/AIfred-Intelligence), where they run today.
+> **Status: early.** The engine layer (taken over from
+> [AIfred Intelligence](https://github.com/Peuqui/AIfred-Intelligence), where the engines run today) and
+> the HTTP service are written and tested against fakes; a run with real containers is still to come. The
+> interface is in [docs/INTERFACE.md](docs/INTERFACE.md).
 
 ## Idea
 
@@ -25,6 +26,21 @@ text spoken without implementing speech output itself. The sister project is
 ## Requirements
 
 - Docker with Compose; for local GPU engines an NVIDIA GPU with the NVIDIA Container Toolkit.
+
+## Start
+
+```bash
+pip install .                                   # Python 3.12+
+tts-suite token                                 # makes ~/.config/tts-suite/token (readable for you alone)
+tts-suite serve --voices-dir ~/voices           # http://127.0.0.1:5090, configuration in ~/.config/tts-suite/config.json
+curl http://127.0.0.1:5090/health
+```
+
+While the service listens on `127.0.0.1`, speaking and every `GET` ask for nothing; a command that changes
+something (`POST /config`, starting and stopping containers, uploading voices) always needs the token
+(`Authorization: Bearer <token>`). On another address everything needs it, and the service does not start
+without one (`--host`, `--token-file`). The escalation list, the hosts and the GPU rules are set with
+`POST /config`; see the [interface](docs/INTERFACE.md).
 
 ## License
 
