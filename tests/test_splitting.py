@@ -109,3 +109,97 @@ def test_the_unit_is_set_once_and_must_be_valid() -> None:
         UnitCutter("word")  # type: ignore[arg-type]
     with pytest.raises(RuntimeError, match="not set"):
         UnitCutter().flush()
+
+
+# ── Look-ahead of the unit "sentence" ───────────────────────────────
+
+FIRST = "Das ist der erste Satz."
+SECOND = "Hier kommt der zweite Satz."
+THIRD = "Und dies ist der dritte Satz."
+# A sentence end is certain when more than 10 characters follow it (and a period needs a capital after it)
+TAIL = " Nächster Anfang"
+
+
+def split_text_with(text: str, immediate: int) -> list[str]:
+    cutter = UnitCutter("sentence", immediate_sentences=immediate)
+    return cutter.feed(text) + cutter.flush()
+
+
+def test_the_first_sentence_goes_at_once_the_second_waits_for_the_third() -> None:
+    cutter = UnitCutter("sentence")
+    assert cutter.feed(FIRST) == []  # nothing follows it yet
+    assert cutter.feed(" Hier kommt") == [FIRST]  # complete: it goes, although the next one is not even there
+    assert cutter.feed(" der zweite Satz.") == []
+    assert cutter.feed(f" {THIRD}") == []  # the second is complete now, but it waits for its successor
+    assert cutter.feed(" Vierter Satz hier") == [SECOND]  # the third is complete: the second goes
+    assert cutter.flush() == [THIRD, "Vierter Satz hier."]
+
+
+def test_the_second_sentence_goes_at_flush_if_no_third_comes() -> None:
+    cutter = UnitCutter("sentence")
+    assert cutter.feed(f"{FIRST} {SECOND}{TAIL}") == [FIRST]
+    assert cutter.flush() == [f"{SECOND}{TAIL}."]
+
+
+def test_a_short_ending_is_joined_to_its_unreleased_predecessor() -> None:
+    cutter = UnitCutter("sentence")
+    assert cutter.feed(f"{FIRST} {SECOND} Und du?") == [FIRST]
+    assert cutter.flush() == [f"{SECOND} Und du?"]
+    assert split_text(f"{FIRST} Ja?", "sentence") == [f"{FIRST} Ja?"]  # the first is not out yet either
+
+
+def test_a_short_ending_stays_alone_if_its_predecessor_is_out() -> None:
+    cutter = UnitCutter("sentence")
+    assert cutter.feed(f"{FIRST}{TAIL}") == [FIRST]
+    assert cutter.feed(" Ja?") == []
+    assert cutter.flush() == [f"{TAIL.strip()} Ja?"]  # joined with what came after; a lone "Ja?" is tested below
+    alone = UnitCutter("sentence")
+    assert alone.feed(f"{FIRST} Hier kommt der Rest davon.") == [FIRST]
+    assert alone.flush() == ["Hier kommt der Rest davon."]
+    assert split_text("Und du?", "sentence") == ["Und du?"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (f"{FIRST}{TAIL}", {0: [], 1: [FIRST], 2: [FIRST]}),
+        (f"{FIRST} {SECOND}{TAIL}", {0: [FIRST], 1: [FIRST], 2: [FIRST, SECOND]}),
+    ],
+)
+@pytest.mark.parametrize("immediate", [0, 1, 2])
+def test_the_number_of_immediately_released_sentences_is_a_parameter(
+    text: str, expected: dict[int, list[str]], immediate: int,
+) -> None:
+    cutter = UnitCutter("sentence", immediate_sentences=immediate)
+    released = cutter.feed(text)
+    assert released == expected[immediate]
+    assert released + cutter.flush() == split_text_with(text, immediate)
+
+
+def test_with_no_immediate_sentence_the_first_waits_for_the_second() -> None:
+    cutter = UnitCutter("sentence", immediate_sentences=0)
+    assert cutter.feed(f"{FIRST}{TAIL}") == []
+    assert cutter.feed(" bringt noch einen vollen Satz. Dann Ende hier") == [FIRST]
+
+
+def test_the_default_is_the_named_constant() -> None:
+    from tts_suite import splitting
+
+    assert splitting.SENTENCES_RELEASED_IMMEDIATELY == 1
+    cutter = UnitCutter("sentence")
+    assert cutter.feed(f"{FIRST}{TAIL}") == [FIRST]  # one sentence at once
+
+
+def test_look_ahead_leaves_paragraph_and_whole_alone() -> None:
+    paragraphs = UnitCutter("paragraph", immediate_sentences=0)
+    assert paragraphs.feed("Absatz eins hier.\n\nAbsatz zwei") == ["Absatz eins hier."]
+
+
+@pytest.mark.parametrize("immediate", [0, 1, 2])
+@pytest.mark.parametrize("text", TEXTS + [f"{FIRST} {SECOND} Und du?", f"{FIRST} {SECOND} {THIRD} Ja."])
+def test_pieces_anywhere_give_the_same_units_with_any_look_ahead(text: str, immediate: int) -> None:
+    expected = split_text_with(text, immediate)
+    for size in range(1, 14):
+        cutter = UnitCutter("sentence", immediate_sentences=immediate)
+        units = [u for start in range(0, len(text), size) for u in cutter.feed(text[start:start + size])]
+        assert units + cutter.flush() == expected, f"piece size {size}"

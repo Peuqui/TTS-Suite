@@ -16,6 +16,9 @@ services:
               device_ids: ['${TTS_GPU_UUID}']
               capabilities: [gpu]
     environment:
+      # VRAM limit of the suite: sitecustomize.py (mounted at /sc) caps PyTorch at TTS_VRAM_BUDGET_MIB; empty = no limit
+      - PYTHONPATH=/sc
+      - TTS_VRAM_BUDGET_MIB=${TTS_VRAM_BUDGET_MIB:-}
       - PYTHONUNBUFFERED=1
       - NVIDIA_VISIBLE_DEVICES=${TTS_GPU_UUID}
       - CUDA_VISIBLE_DEVICES=0
@@ -39,6 +42,7 @@ services:
       - FISH_SPEECH_KEEP_ALIVE=${FISH_SPEECH_KEEP_ALIVE:-45}
 
     volumes:
+      - ./../_vram_limit:/sc:ro
       # Model weights — persistent named volume so the ~8 GB download
       # survives image rebuilds.
       - fish_speech_checkpoints:/app/checkpoints

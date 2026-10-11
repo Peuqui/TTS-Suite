@@ -1,4 +1,24 @@
 {
+  "tts_hint_code": {
+    "de": "Hier steht Code.",
+    "en": "There is code here."
+  },
+  "tts_hint_table": {
+    "de": "Hier wird eine Tabelle angezeigt.",
+    "en": "A table is shown here."
+  },
+  "tts_hint_formula": {
+    "de": "Hier steht eine Formel.",
+    "en": "There is a formula here."
+  },
+  "tts_hint_more_items": {
+    "de": "und weitere Einträge.",
+    "en": "and more items."
+  },
+  "tts_hint_list": {
+    "de": "Hier wird eine Liste mit {items} Einträgen angezeigt.",
+    "en": "A list with {items} items is shown here."
+  },
   "tts_switch_unreachable": {
     "de": "Stimmwechsel wegen Serverausfall, weiter mit {target}.",
     "en": "Voice change due to a server outage, continuing with {target}."

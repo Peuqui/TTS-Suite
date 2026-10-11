@@ -64,18 +64,39 @@ class EscalationEntry:
         return self.engine.key if self.host is None else f"{self.engine.key}@{self.host.name}"
 
 
+@dataclass(frozen=True)
+class Skip:
+    """Why an entry is passed over before an attempt: the reason, and a text that says more
+    (``TraceStep.detail``)."""
+
+    reason: SkipReason
+    detail: str = ""
+
+
 class EngineLauncher(Protocol):
-    """Brings the container of an entry up (Package 4: card choice for local GPU engines, SSH
-    for engines on another host). The escalation only asks; it never starts anything itself."""
+    """Brings the container of an entry up (card choice for local GPU engines, SSH for engines on
+    another host) and watches it. The escalation only asks; it never starts anything itself."""
 
     async def is_serving(self, entry: EscalationEntry) -> bool:
         """Whether the entry can take a request right now (a cheap check, never starts anything)."""
         ...
 
-    async def ensure_serving(self, entry: EscalationEntry, *, wait: bool) -> SkipReason | None:
-        """Start the entry and wait until it serves; ``None`` = it serves now. A reason when it
+    async def ensure_serving(self, entry: EscalationEntry, *, wait: bool) -> Skip | None:
+        """Start the entry and wait until it serves; ``None`` = it serves now. A :class:`Skip` when it
         cannot (``stopped``: no way to start it or the start failed, ``no_vram``: no card fits).
         With ``wait=False`` a start that is needed is begun and ``EngineStarting`` raised."""
+        ...
+
+    def hold(self, entry: EscalationEntry) -> None:
+        """A reading uses the entry: its container is not stopped and is kept alive until :meth:`release`."""
+        ...
+
+    def release(self, entry: EscalationEntry) -> None:
+        ...
+
+    async def check_vram(self, entry: EscalationEntry) -> None:
+        """Called after each synthesis: raises ``TTSFailure("vram_exceeded")`` (and stops the container)
+        when the entry uses more VRAM than its budget."""
         ...
 
 
@@ -102,6 +123,12 @@ def _check_defaults(config: SuiteConfig) -> None:
             raise ConfigInvalid(f"engines[{key}]: max_parallel must be at least 1")
         if defaults.max_queue is not None and defaults.max_queue < 0:
             raise ConfigInvalid(f"engines[{key}]: max_queue must not be negative")
+
+
+def _check_pronunciations(config: SuiteConfig) -> None:
+    for word in config.pronunciations:
+        if not word.strip():
+            raise ConfigInvalid("pronunciations: a word must not be empty")
 
 
 def _bind_entry(engine_key: str, host_name: str | None, enabled: bool, config: SuiteConfig,
@@ -136,6 +163,7 @@ def bind_entries(config: SuiteConfig) -> tuple[EscalationEntry, ...]:
         raise ConfigInvalid(f"voices_dir {config.voices_dir} is not a directory")
     hosts = _index_hosts(config)
     _check_defaults(config)
+    _check_pronunciations(config)
     entries = tuple(
         _bind_entry(raw.engine, raw.host, raw.enabled, config, hosts) for raw in config.entries
     )
@@ -256,6 +284,30 @@ class SpeechRun:
         self._pending_switch: FailureReason | None = None
         self._switch_claimed = False
         self._switch: FailureReason | None = None
+        # The entries this run holds (their containers are in use) while streams are attached to it.
+        self._attached = 0
+        self._held: dict[str, EscalationEntry] = {}
+
+    def attach(self) -> None:
+        """A stream starts to use this run (several streams may share one under a run ID)."""
+        self._attached += 1
+
+    def detach(self) -> None:
+        """A stream stopped using this run; the last one lets go of the containers the run holds."""
+        self._attached -= 1
+        if self._attached <= 0:
+            for entry in self._held.values():
+                self._launcher.release(entry)
+            self._held.clear()
+
+    def _hold(self, entry: EscalationEntry) -> None:
+        if entry.label not in self._held:
+            self._held[entry.label] = entry
+            self._launcher.hold(entry)
+
+    def _unhold(self, entry: EscalationEntry) -> None:
+        if self._held.pop(entry.label, None) is not None:
+            self._launcher.release(entry)
 
     @property
     def trace(self) -> tuple[TraceStep, ...]:
@@ -285,28 +337,28 @@ class SpeechRun:
                 if skip is None:
                     logger.info("TTS escalation: %s speaks", entry.label)
                     self._current = entry
+                    self._hold(entry)
                     return entry
                 self._note_skip(entry, skip)
             raise NoEngineAvailable("no TTS entry can speak", self._trace)
 
-    async def _skip(self, entry: EscalationEntry, wait: bool) -> tuple[SkipReason, str] | None:
+    async def _skip(self, entry: EscalationEntry, wait: bool) -> Skip | None:
         """Why this entry cannot speak right now; ``None`` = it can. A stopped container is
         started by the launcher if it can be."""
         if entry.engine.deactivated:
-            return "deactivated", ""
+            return Skip("deactivated")
         if not entry.enabled:
-            return "disabled", ""
+            return Skip("disabled")
         if entry.engine.renders_in_browser:
-            return "disabled", "speaks only in the client's own browser"
+            return Skip("disabled", "speaks only in the client's own browser")
         if await self._launcher.is_serving(entry):
             return None
-        reason = await self._launcher.ensure_serving(entry, wait=wait)
-        return None if reason is None else (reason, "")
+        return await self._launcher.ensure_serving(entry, wait=wait)
 
-    def _note_skip(self, entry: EscalationEntry, skip: tuple[SkipReason, str]) -> None:
-        logger.info("TTS escalation: skip %s (%s)", entry.label, skip[0])
+    def _note_skip(self, entry: EscalationEntry, skip: Skip) -> None:
+        logger.info("TTS escalation: skip %s (%s) %s", entry.label, skip.reason, skip.detail)
         if not any(step.entry == entry.label and step.outcome == "skipped" for step in self._trace):
-            self._trace.append(TraceStep(entry.label, "skipped", skip[0], skip[1]))
+            self._trace.append(TraceStep(entry.label, "skipped", skip.reason, skip.detail))
 
     async def speak(self, text: str, request: SpeakRequest) -> Spoken:
         """Have ``text`` spoken; the entry that manages it delivers the audio. A failing entry
@@ -336,11 +388,14 @@ class SpeechRun:
     async def _synthesize(self, entry: EscalationEntry, text: str, request: SpeakRequest) -> bytes:
         voice, speed, pitch = resolve_voice(entry.engine, request, self._defaults)
         async with self._slots.for_engine(entry.engine).slot():
-            return await synthesize(entry.engine, text, voice, request.language, speed, pitch)
+            audio = await synthesize(entry.engine, text, voice, request.language, speed, pitch)
+        await self._launcher.check_vram(entry)
+        return audio
 
     def _fail(self, entry: EscalationEntry, reason: FailureReason, detail: str) -> None:
         logger.warning("TTS escalation: %s failed (%s): %s", entry.label, reason, detail)
         self._failed.add(entry.label)
+        self._unhold(entry)
         self._trace.append(TraceStep(entry.label, "failed", reason, detail))
         if entry.label in self._spoken and self._pending_switch is None:
             self._pending_switch = reason

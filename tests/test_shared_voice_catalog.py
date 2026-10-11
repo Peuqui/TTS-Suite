@@ -65,6 +65,6 @@ def test_bindings_survive_placing_the_engine(voice_tree: Path) -> None:
     assert engine is not None
     placed = engine.with_voices_dir(voice_tree).on_gpu("GPU-1")
     assert (placed.gpu_uuid, placed.voices_dir) == ("GPU-1", voice_tree)
-    remote = placed.at_host("10.0.0.2", 6051)
-    assert (remote.service_url, remote.voices_dir, remote.is_remote) == ("http://10.0.0.2:6051", voice_tree, True)
+    remote = placed.at_host("192.0.2.2", 6051)
+    assert (remote.service_url, remote.voices_dir, remote.is_remote) == ("http://192.0.2.2:6051", voice_tree, True)
     assert engine.service_url == "http://localhost:5051" and not engine.is_remote  # the registry instance stays

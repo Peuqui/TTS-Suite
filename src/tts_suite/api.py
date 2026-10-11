@@ -102,6 +102,10 @@ class SuiteConfig:
     ``vram_exceeded``, its container is stopped and the escalation goes on. An empty
     ``gpus`` means every card, the one with the most free VRAM first. No card fits: the
     entry is skipped with ``no_vram``.
+
+    ``pronunciations`` maps a word to the form that is spoken instead (whole words, case as
+    written; for example "AIfred" -> "Alfred"). The text cleaning of every unit applies it; it is
+    the one program-specific part of the cleaning that is configuration.
     """
 
     voices_dir: Path
@@ -110,6 +114,7 @@ class SuiteConfig:
     engines: Mapping[str, EngineDefaults] = field(default_factory=dict)
     gpus: tuple[GpuRule, ...] = ()
     headroom_mib: int = HEADROOM_MIB_DEFAULT
+    pronunciations: Mapping[str, str] = field(default_factory=dict)
 
 
 # ── What the suite reports ──────────────────────────────────────────
@@ -236,6 +241,15 @@ class Overloaded(SuiteError):
 
 class UnknownEngine(SuiteError):
     pass
+
+
+class EngineInUse(SuiteError):
+    """``stop`` for a container that a reading is using right now (HTTP 409)."""
+
+
+class EngineControlFailed(SuiteError):
+    """``start`` or ``stop`` of a container did not work; the message says why (a skip reason and
+    its detail, the host's answer, Docker's)."""
 
 
 class ConfigInvalid(SuiteError):

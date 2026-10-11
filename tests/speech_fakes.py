@@ -6,9 +6,9 @@ import io
 import wave
 from typing import Any, Coroutine, TypeVar
 
-from tts_suite.api import EngineDefaults, EngineStarting, SkipReason, Unit
+from tts_suite.api import EngineDefaults, EngineStarting, Unit
 from tts_suite.engines.base import TTSEngine, TTSFailure
-from tts_suite.escalation import EngineSlotTable, EscalationEntry, SpeechRun
+from tts_suite.escalation import EngineSlotTable, EscalationEntry, Skip, SpeechRun
 
 SAMPLE_RATE = 24000
 FRAMES_PER_CHARACTER = 10
@@ -55,7 +55,7 @@ class FakeEngine(TTSEngine):
         self, key: str, *, remote: bool = False, fail: Any = None, fail_after: int | None = None,
         unit: Unit = "sentence", cloud: bool = False,
     ) -> None:
-        super().__init__(address="10.0.0.2" if remote else "localhost")
+        super().__init__(address="192.0.2.2" if remote else "localhost")
         self.key = key
         self.label_short = key.upper()
         self.default_speech_unit = unit
@@ -99,16 +99,18 @@ class FakeLauncher:
     """``down``: label -> what ``ensure_serving`` answers while the entry is not serving
     (``None`` = it starts and serves from then on). Everything else serves."""
 
-    def __init__(self, down: dict[str, SkipReason | None] | None = None) -> None:
+    def __init__(self, down: dict[str, Skip | None] | None = None) -> None:
         self.down = dict(down or {})
         self.starts: list[str] = []
         self.asked: list[str] = []
+        self.held: list[str] = []  # labels held right now, one item per hold
+        self.vram_checks: list[str] = []
 
     async def is_serving(self, entry: EscalationEntry) -> bool:
         self.asked.append(entry.label)
         return entry.label not in self.down
 
-    async def ensure_serving(self, entry: EscalationEntry, *, wait: bool) -> SkipReason | None:
+    async def ensure_serving(self, entry: EscalationEntry, *, wait: bool) -> Skip | None:
         if not wait:
             raise EngineStarting(f"{entry.label} is starting")
         await asyncio.sleep(0)  # a start takes time: parallel sentences must not start it twice
@@ -117,6 +119,15 @@ class FakeLauncher:
         if outcome is None:
             del self.down[entry.label]
         return outcome
+
+    def hold(self, entry: EscalationEntry) -> None:
+        self.held.append(entry.label)
+
+    def release(self, entry: EscalationEntry) -> None:
+        self.held.remove(entry.label)
+
+    async def check_vram(self, entry: EscalationEntry) -> None:
+        self.vram_checks.append(entry.label)
 
 
 def entry(engine: TTSEngine, host: Any = None, enabled: bool = True) -> EscalationEntry:

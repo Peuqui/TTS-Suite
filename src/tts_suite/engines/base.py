@@ -183,28 +183,32 @@ class TTSEngine(ABC):
         port: Optional[int] = None,
         gpu_uuid: str = "",
         voices_dir: Optional[Path] = None,
+        vram_budget_mib: Optional[int] = None,
     ) -> None:
         """``address``/``port`` of the REST API. The registry instances run on
         this machine (``localhost``); :meth:`at_host` binds the same engine to
         a remote TTS host (escalation entries). ``gpu_uuid``: card a local
         container starts on ("" = the card named in the compose file's ``.env``).
-        ``voices_dir``: the shared voices tree; :meth:`with_voices_dir` binds it."""
+        ``voices_dir``: the shared voices tree; :meth:`with_voices_dir` binds it.
+        ``vram_budget_mib``: the limit a local container is started with (:meth:`on_gpu`)."""
         self.address = address
         self.port = port or self.default_port
         self.gpu_uuid = gpu_uuid
         self.voices_dir = voices_dir
+        self.vram_budget_mib = vram_budget_mib
 
     def _bound(self, **changes: Any) -> Self:
         """The same engine with some of its bindings replaced."""
         bindings: dict[str, Any] = {
             "address": self.address, "port": self.port, "gpu_uuid": self.gpu_uuid, "voices_dir": self.voices_dir,
+            "vram_budget_mib": self.vram_budget_mib,
         }
         return type(self)(**(bindings | changes))
 
-    def on_gpu(self, gpu_uuid: str) -> Self:
-        """The same local engine, started on another card."""
+    def on_gpu(self, gpu_uuid: str, vram_budget_mib: Optional[int] = None) -> Self:
+        """The same local engine, started on another card with a VRAM limit (``None`` = none)."""
         self._require_local("place")
-        return self._bound(gpu_uuid=gpu_uuid)
+        return self._bound(gpu_uuid=gpu_uuid, vram_budget_mib=vram_budget_mib)
 
     def at_host(self, address: str, port: Optional[int] = None) -> Self:
         """The same engine, bound to a remote host. Raises ``ValueError`` for
@@ -412,7 +416,9 @@ class TTSEngine(ABC):
     def _start_local(self) -> tuple[bool, str]:
         if self.docker_compose_path is None:
             return True, "no-op"
-        return docker_compose_action(self.docker_compose_path, "up", self.label_short, self.gpu_uuid)
+        return docker_compose_action(
+            self.docker_compose_path, "up", self.label_short, self.gpu_uuid, self.vram_budget_mib,
+        )
 
     def _stop_local(self) -> tuple[bool, str]:
         if self.docker_compose_path is None:

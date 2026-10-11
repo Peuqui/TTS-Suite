@@ -114,6 +114,15 @@ PITCH_DEFAULT = 1.0
 #: Source: ``TTS_MIN_SENTENCE_WORDS``.
 TTS_MIN_SENTENCE_WORDS = 3
 
+#: How many sentences of a reading (unit "sentence") are released as soon as they are complete; every
+#: later sentence waits until the NEXT one is complete or the text ends (safer sentence ends, and a
+#: very short closing sentence can still be joined to its predecessor). The first sentence decides the
+#: time to the first sound, so it goes at once. Fallback steps if that proves too weak (too many wrongly
+#: cut sentences, too short pieces sounding bad), see docs/DESIGN-DECISIONS.de.md: 2 = the second sentence
+#: goes at once as well (less look-ahead); 0 = even the first waits for the second (safest detection, costs
+#: one sentence's generation time before the first sound: ~2.5-3.5 s at 10 tokens/s, ~0.5 s at 50).
+SENTENCES_RELEASED_IMMEDIATELY = 1
+
 #: A sentence end is only final when this many characters follow it: the end detection looks ahead
 #: (URL context 10 characters, closing quotes), so a cutter that sees a text in pieces must wait for them.
 SENTENCE_LOOKAHEAD_CHARS = 10
@@ -141,3 +150,42 @@ ABBREVIATIONS = ABBREVIATIONS_DE | ABBREVIATIONS_EN
 
 #: Texts the suite speaks itself (voice-change announcements), German and English, next to the modules.
 I18N_FILE_NAME = "i18n.json"
+
+# ── Text cleaning ───────────────────────────────────────────────────
+
+#: A single unit longer than this (or with a line break) counts as a whole text, not as one item of a
+#: run of sentences. Source: AIfred's ``clean_text_for_tts``.
+MULTILINE_TEXT_MIN_CHARS = 500
+
+#: Lists with more items than this are replaced by a spoken hint. Source: AIfred's ``tts_list.full_max_items``.
+TTS_LIST_MAX_ITEMS = 5
+
+#: Emojis the cleaning keeps: the engine normalization in the container turns them into laughter.
+LAUGHTER_EMOJIS = "😂🤣😆😄😅😁🙂😊"
+
+# ── Containers: control from the suite (SSH, cards, VRAM) ───────────
+
+#: Languages the suite names its engines in (the keys of ``EngineInfo.label``); every engine's
+#: ``i18n.json`` carries them.
+LABEL_LANGUAGES = ("de", "en")
+
+#: SSH key the suite uses to start and stop containers on another host. The key is pinned on that
+#: host to ``scripts/tts-host-ctl.sh`` (``command=`` in ``authorized_keys``), so nothing else can run.
+#: The environment variable names another path; without it the default applies.
+#: Source: AIfred ``TTS_HOST_SSH_KEY`` (there ``~/.ssh/aifred_tts_host``).
+TTS_HOST_SSH_KEY_ENV = "TTS_SUITE_SSH_KEY"
+TTS_HOST_SSH_KEY_DEFAULT = Path.home() / ".ssh" / "tts_suite_host"
+#: Connecting to the host, and one control command (``start`` returns once ``docker compose up -d`` is done).
+#: Source: ``TTS_HOST_SSH_CONNECT_TIMEOUT_S`` / ``TTS_HOST_SSH_COMMAND_TIMEOUT_S``.
+TTS_HOST_SSH_CONNECT_TIMEOUT_S = 3
+TTS_HOST_SSH_COMMAND_TIMEOUT_S = 60
+
+#: ``nvidia-smi`` queries: the card list, the processes using a card, and ``docker compose ps`` /
+#: ``docker top`` (the host PIDs of a container).
+NVIDIA_SMI_QUERY_TIMEOUT_S = 5
+NVIDIA_SMI_APPS_TIMEOUT_S = 10
+DOCKER_PIDS_TIMEOUT_S = 10
+
+#: A GPU engine's VRAM use is looked at after a synthesis at most this often (seconds) per engine —
+#: not after every sentence of a reading, which would put an ``nvidia-smi`` call behind each one.
+VRAM_CHECK_MIN_INTERVAL_S = 30.0

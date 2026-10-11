@@ -114,7 +114,7 @@ def test_moss_on_cpu_stays_when_no_gpu_is_available(monkeypatch: pytest.MonkeyPa
 
 
 def test_remote_engine_is_never_started_or_stopped() -> None:
-    remote = XTTSEngine().at_host("10.0.0.2")
+    remote = XTTSEngine().at_host("192.0.2.2")
     with pytest.raises(RuntimeError, match="remote host"):
         remote.start()
     with pytest.raises(RuntimeError, match="remote host"):
@@ -122,18 +122,18 @@ def test_remote_engine_is_never_started_or_stopped() -> None:
 
 
 def test_remote_ensure_ready_only_checks_health(monkeypatch: pytest.MonkeyPatch) -> None:
-    remote = XTTSEngine().at_host("10.0.0.2")
+    remote = XTTSEngine().at_host("192.0.2.2")
     monkeypatch.setattr(type(remote), "is_running", lambda self: False)
     ok, message, _device = remote.ensure_ready()
     assert not ok
-    assert "10.0.0.2" in message
+    assert "192.0.2.2" in message
 
 
 def test_an_engine_without_rest_api_cannot_go_to_another_host() -> None:
     engine = get_engine("piper")
     assert engine is not None
     with pytest.raises(ValueError, match="no REST API"):
-        engine.at_host("10.0.0.2")
+        engine.at_host("192.0.2.2")
 
 
 def test_lightweight_engines_have_nothing_to_start() -> None:

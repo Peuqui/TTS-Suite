@@ -24,6 +24,7 @@ from .constants import (
     ABBREVIATIONS,
     SENTENCE_CLOSERS,
     SENTENCE_LOOKAHEAD_CHARS,
+    SENTENCES_RELEASED_IMMEDIATELY,
     TTS_MIN_SENTENCE_WORDS,
 )
 from .engines.base import SPEECH_UNITS
@@ -149,6 +150,11 @@ class UnitCutter:
     certain (:data:`SENTENCE_LOOKAHEAD_CHARS` characters follow it, or the text ended), a
     paragraph at its blank line, the whole text only at ``flush``.
 
+    Look-ahead of the unit "sentence": the first ``immediate_sentences`` sentences are released
+    as soon as they are complete, every later one only when the NEXT sentence is complete too
+    (or at ``flush``). A closing sentence with fewer than ``TTS_MIN_SENTENCE_WORDS`` words is joined
+    to its predecessor if that is not released yet.
+
     The unit is that of the engine that speaks, which is known only after the first
     selection — later than the first piece of text. So the unit may be set after the
     construction (:meth:`set_unit`): until then pieces are only collected and nothing is
@@ -156,11 +162,14 @@ class UnitCutter:
     for the whole text (a successor engine with another unit takes the same units).
     """
 
-    def __init__(self, unit: Unit | None = None) -> None:
+    def __init__(self, unit: Unit | None = None, *, immediate_sentences: int = SENTENCES_RELEASED_IMMEDIATELY) -> None:
+        self._immediate_sentences = immediate_sentences
         self._unit: Unit | None = None
         self._text = ""
         self._start = 0  # position in the normalized text where the unreleased part begins
         self._carry = ""  # a too short sentence, waiting for the next one
+        self._held: list[str] = []  # complete sentences waiting for their successor
+        self._released = 0  # sentences released so far
         if unit is not None:
             self.set_unit(unit)
 
@@ -186,7 +195,7 @@ class UnitCutter:
         if self._unit is None:
             raise RuntimeError("the unit is not set yet (set_unit)")
         units = self._cut(final=True)
-        self._text, self._start, self._carry = "", 0, ""
+        self._text, self._start, self._carry, self._held, self._released = "", 0, "", [], 0
         return units
 
     def _cut(self, final: bool) -> list[str]:
@@ -225,9 +234,17 @@ class UnitCutter:
             if certain:
                 self._start = certain[-1].next_start
             sentences = [extraction.sentence for extraction in certain]
-        return self._join_short(sentences, final)
+        self._held += self._join_short(sentences)
+        if final and self._carry:
+            # A short ending joins its predecessor if that one is still here; a released one stays as it is
+            if self._held:
+                self._held[-1] = f"{self._held[-1]} {self._carry}"
+            else:
+                self._held.append(self._carry)
+            self._carry = ""
+        return self._release_ready(final)
 
-    def _join_short(self, sentences: list[str], final: bool) -> list[str]:
+    def _join_short(self, sentences: list[str]) -> list[str]:
         """Sentences with fewer than ``TTS_MIN_SENTENCE_WORDS`` words go to the next one."""
         units: list[str] = []
         for sentence in sentences:
@@ -241,10 +258,14 @@ class UnitCutter:
                 self._carry = sentence
             else:
                 units.append(sentence)
-        if final and self._carry:
-            # AIfred appended this rest to the last sentence; a stream has released that one already
-            units.append(self._carry)
-            self._carry = ""
+        return units
+
+    def _release_ready(self, final: bool) -> list[str]:
+        """The held sentences that may go: the immediate ones, those whose successor is complete, all at the end."""
+        units: list[str] = []
+        while self._held and (final or self._released < self._immediate_sentences or len(self._held) >= 2):
+            units.append(self._held.pop(0))
+            self._released += 1
         return units
 
 

@@ -23,9 +23,9 @@ from tts_suite.api import (
     VoiceSettings,
 )
 from tts_suite.engines import get_engine
-from tts_suite.escalation import EngineSlots, RunTable, bind_entries, resolve_voice
+from tts_suite.escalation import EngineSlots, RunTable, Skip, bind_entries, resolve_voice
 
-ARAGON = Host("Aragon", "10.0.0.2")
+ARAGON = Host("Aragon", "192.0.2.2")
 REQUEST = SpeakRequest(language="de")
 
 
@@ -46,7 +46,7 @@ def test_a_local_entry_uses_the_registry_engine_bound_to_the_voices(tmp_path: Pa
 def test_a_remote_entry_is_bound_to_its_host_and_keeps_the_registry_engine_local(tmp_path: Path) -> None:
     [bound] = bind_entries(_config(tmp_path, [EntryConfig("qwen3local", host="Aragon")], hosts=(ARAGON,)))
     assert bound.label == "qwen3local@Aragon"
-    assert bound.engine.service_url == "http://10.0.0.2:5052"
+    assert bound.engine.service_url == "http://192.0.2.2:5052"
     assert get_engine("qwen3local").service_url == "http://localhost:5052"  # type: ignore[union-attr]
 
 
@@ -74,6 +74,11 @@ def test_an_entry_of_a_deactivated_engine_stays_in_the_list_as_off(tmp_path: Pat
 def test_a_broken_list_is_refused(tmp_path: Path, entries: list[EntryConfig], hosts: tuple[Host, ...], message: str) -> None:
     with pytest.raises(ConfigInvalid, match=message):
         bind_entries(_config(tmp_path, entries, hosts=hosts))
+
+
+def test_an_empty_pronunciation_word_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ConfigInvalid, match="pronunciations"):
+        bind_entries(_config(tmp_path, [], pronunciations={" ": "x"}))
 
 
 def test_a_missing_voices_dir_is_refused(tmp_path: Path) -> None:
@@ -135,7 +140,7 @@ def test_the_first_entry_that_can_speak_speaks_and_the_skips_are_traced() -> Non
     browser.renders_in_browser = True
     deactivated = FakeEngine("gone")
     deactivated.deactivated = True
-    launcher = FakeLauncher({"c": "stopped", "d": "no_vram"})
+    launcher = FakeLauncher({"c": Skip("stopped"), "d": Skip("no_vram", "needs 7000 MiB, most free 900 MiB on GPU 1")})
     run = make_run([
         entry(deactivated, enabled=False), entry(engines[0], enabled=False), entry(browser),
         entry(engines[2]), entry(engines[3]), entry(engines[4]),
@@ -147,7 +152,7 @@ def test_the_first_entry_that_can_speak_speaks_and_the_skips_are_traced() -> Non
         TraceStep("a", "skipped", "disabled"),
         TraceStep("browser", "skipped", "disabled", "speaks only in the client's own browser"),
         TraceStep("c", "skipped", "stopped"),
-        TraceStep("d", "skipped", "no_vram"),
+        TraceStep("d", "skipped", "no_vram", "needs 7000 MiB, most free 900 MiB on GPU 1"),
         TraceStep("e", "spoke"),
     )
     assert launcher.starts == ["c", "d"]
@@ -167,7 +172,7 @@ def test_without_waiting_a_cold_start_is_reported() -> None:
 
 
 def test_when_nobody_can_speak_the_trace_says_why() -> None:
-    run = make_run([entry(FakeEngine("a")), entry(FakeEngine("b"), enabled=False)], FakeLauncher({"a": "stopped"}))
+    run = make_run([entry(FakeEngine("a")), entry(FakeEngine("b"), enabled=False)], FakeLauncher({"a": Skip("stopped")}))
     with pytest.raises(NoEngineAvailable) as error:
         run_async(run.speak("Hallo Welt hier.", REQUEST))
     assert error.value.trace == (TraceStep("a", "skipped", "stopped"), TraceStep("b", "skipped", "disabled"))

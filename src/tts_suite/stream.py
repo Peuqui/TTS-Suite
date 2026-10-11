@@ -7,7 +7,9 @@ interval, a piece of silence is delivered so that the connection of the client s
 
 Which unit the text is cut by depends on the engine that speaks. That engine is chosen when
 the first text arrives (the choice may start a container), so the stream collects text until
-the choice is made and cuts afterwards (:class:`~tts_suite.splitting.UnitCutter`).
+the choice is made and cuts afterwards (:class:`~tts_suite.splitting.UnitCutter`). Each cut unit is
+cleaned (:class:`~tts_suite.cleaning.TextCleaner`, one per reading) before it goes to the engine; a unit
+with nothing left to speak is dropped.
 """
 
 from __future__ import annotations
@@ -15,9 +17,11 @@ from __future__ import annotations
 import asyncio
 import io
 import wave
-from typing import Any, AsyncIterator
+from types import MappingProxyType
+from typing import Any, AsyncIterator, Mapping
 
 from .api import AudioSegment, SpeakRequest, SpeakSummary
+from .cleaning import TextCleaner
 from .constants import KEEPALIVE_SEC, KEEPALIVE_SILENCE_MS, MEDIA_TYPE_WAV
 from .escalation import SpeechRun
 from .splitting import UnitCutter
@@ -44,11 +48,15 @@ def silence_like(reference_wav: bytes, duration_ms: int) -> bytes:
 class Stream:
     """One reading, implementing :class:`~tts_suite.api.SpeechStream`."""
 
-    def __init__(self, request: SpeakRequest, run: SpeechRun, *, keepalive_s: float = KEEPALIVE_SEC) -> None:
+    def __init__(
+        self, request: SpeakRequest, run: SpeechRun, *, keepalive_s: float = KEEPALIVE_SEC,
+        pronunciations: Mapping[str, str] = MappingProxyType({}),
+    ) -> None:
         self._request = request
         self._run = run
         self._keepalive_s = keepalive_s
         self._cutter = UnitCutter()
+        self._cleaner = TextCleaner(request.language, pronunciations)
         self._units: asyncio.Queue[str | None] = asyncio.Queue()  # cut units; None = text ended
         self._results: asyncio.Queue[asyncio.Task[AudioSegment] | None] = asyncio.Queue()  # in speaking order
         self._tasks: list[asyncio.Task[AudioSegment]] = []
@@ -110,7 +118,10 @@ class Stream:
             self._release(self._cutter.set_unit(self._run.unit(entry)))
             if self._finished:
                 self._end_input()
-            while (unit := await self._units.get()) is not None:
+            while (raw_unit := await self._units.get()) is not None:
+                unit = self._cleaner.clean(raw_unit)  # here, in speaking order: the cleaner keeps the reading's state
+                if not unit:
+                    continue
                 await window.acquire()
                 task = asyncio.get_running_loop().create_task(self._synthesize(unit, window))
                 self._tasks.append(task)

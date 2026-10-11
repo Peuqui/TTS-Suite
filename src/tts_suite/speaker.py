@@ -7,13 +7,31 @@ opens the streams. ``TTSSuite`` (api) wraps it together with the engine manageme
 from __future__ import annotations
 
 import time
-from typing import Callable
+from typing import Any, Callable
 
 from .api import NoEngineAvailable, SpeakRequest, SuiteConfig, UnknownEngine
 from .constants import KEEPALIVE_SEC, RUN_TTL_S
 from .engines.registry import get_engine
 from .escalation import EngineLauncher, EngineSlotTable, EscalationEntry, RunTable, SpeechRun, bind_entries
 from .stream import Stream
+
+
+class AttachedStream(Stream):
+    """A :class:`Stream` that is attached to its run while it lives: the run holds the containers it
+    speaks with (no stop, heartbeat) until the last attached stream has ended. A stream that is
+    neither read to its end nor closed keeps them held."""
+
+    def __init__(self, request: SpeakRequest, run: SpeechRun, **options: Any) -> None:
+        super().__init__(request, run, **options)
+        self._attached_run = run
+        self._attached_run.attach()
+        self._detached = False
+
+    async def aclose(self) -> None:
+        await super().aclose()
+        if not self._detached:
+            self._detached = True
+            self._attached_run.detach()
 
 
 class Speaker:
@@ -38,10 +56,19 @@ class Speaker:
         self._config = config
         self._slots = EngineSlotTable(config.engines)
 
+    @property
+    def config(self) -> SuiteConfig:
+        return self._config
+
+    @property
+    def entries(self) -> tuple[EscalationEntry, ...]:
+        """The escalation list of the configuration, bound (disabled entries included)."""
+        return self._entries
+
     def open_stream(self, request: SpeakRequest) -> Stream:
         entries = self._entries_for(request)
         run = self._run_for(request, entries)
-        return Stream(request, run, keepalive_s=self._keepalive_s)
+        return AttachedStream(request, run, keepalive_s=self._keepalive_s, pronunciations=self._config.pronunciations)
 
     def speak(self, text: str, request: SpeakRequest) -> Stream:
         """The whole text at once: the stream of :meth:`open_stream` with all text handed over."""

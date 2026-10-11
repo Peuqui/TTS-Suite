@@ -409,3 +409,52 @@ def _install(monkeypatch: pytest.MonkeyPatch, *engines: FakeEngine) -> None:
 
     for engine in engines:
         monkeypatch.setitem(registry.TTS_ENGINES, engine.key, engine)
+
+
+# ── Text cleaning in the stream ─────────────────────────────────────
+
+
+def test_units_are_cleaned_before_the_engine_and_empty_ones_drop_out_in_order() -> None:
+    engine = FakeEngine("a")
+    pronunciations = {"AIfred": "Alfred"}
+    stream = Stream(REQUEST, make_run([entry(engine)]), pronunciations=pronunciations)
+    text = (
+        "AIfred sagt **hier** etwas Wichtiges.\n\n```python\nx = 1\n```\n\n"
+        "Danach folgt noch ein langer Satz hier. Zum Schluss kommt noch einer."
+    )
+
+    async def scenario() -> list[AudioSegment]:
+        await stream.feed(text)
+        await stream.finish()
+        return await collect(stream)
+
+    segments = run_async(scenario())
+    assert engine.texts == [
+        "Alfred sagt hier etwas Wichtiges.", "Hier steht Code.", "Danach folgt noch ein langer Satz hier.", "Zum Schluss kommt noch einer.",
+    ]
+    assert lengths(segments) == [frames_for(spoken) for spoken in engine.texts]
+
+
+def test_the_speaker_hands_its_pronunciations_to_the_stream(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = FakeEngine("fake")
+    _install(monkeypatch, engine)
+    config = SuiteConfig(voices_dir=tmp_path, entries=(EntryConfig("fake"),), pronunciations={"AIfred": "Alfred"})
+    speaker = Speaker(config, FakeLauncher())
+
+    async def scenario() -> list[AudioSegment]:
+        return await collect(speaker.speak("AIfred spricht hier einen vollständigen Satz.", REQUEST))
+
+    run_async(scenario())
+    assert engine.texts == ["Alfred spricht hier einen vollständigen Satz."]
+
+
+def test_a_reading_of_only_unspeakable_text_ends_without_audio() -> None:
+    engine = FakeEngine("a")
+    stream = Stream(REQUEST, make_run([entry(engine)]))
+
+    async def scenario() -> list[AudioSegment]:
+        await stream.feed("---\n\n...")
+        await stream.finish()
+        return await collect(stream)
+
+    assert run_async(scenario()) == [] and engine.texts == []

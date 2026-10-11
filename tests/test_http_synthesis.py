@@ -50,8 +50,8 @@ def test_success_returns_the_audio_bytes(container: FakeContainer) -> None:
 
 
 def test_a_remote_engine_posts_to_its_host(container: FakeContainer) -> None:
-    XTTSEngine().at_host("10.0.0.2", 6051)._synthesize_via_http("/tts", {"text": "Hallo"})
-    assert container.posts[0]["url"] == "http://10.0.0.2:6051/tts"
+    XTTSEngine().at_host("192.0.2.2", 6051)._synthesize_via_http("/tts", {"text": "Hallo"})
+    assert container.posts[0]["url"] == "http://192.0.2.2:6051/tts"
 
 
 def test_connection_refused_is_unreachable(container: FakeContainer) -> None:

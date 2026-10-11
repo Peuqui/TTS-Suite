@@ -14,6 +14,9 @@ services:
               device_ids: ['${TTS_GPU_UUID}']
               capabilities: [gpu]
     environment:
+      # VRAM limit of the suite: sitecustomize.py (mounted at /sc) caps PyTorch at TTS_VRAM_BUDGET_MIB; empty = no limit
+      - PYTHONPATH=/sc
+      - TTS_VRAM_BUDGET_MIB=${TTS_VRAM_BUDGET_MIB:-}
       - NVIDIA_VISIBLE_DEVICES=${TTS_GPU_UUID}
       - CUDA_VISIBLE_DEVICES=0
       - COQUI_TOS_AGREED=1
@@ -44,6 +47,7 @@ services:
       # Set to 0 to disable auto-shutdown
       - XTTS_KEEP_ALIVE=${XTTS_KEEP_ALIVE:-45}
     volumes:
+      - ./../_vram_limit:/sc:ro
       # Server code from the repo: a code change needs a restart, no rebuild
       - ./server.py:/app/server.py:ro
       # Cache models persistently
