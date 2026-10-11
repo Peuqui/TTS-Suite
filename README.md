@@ -36,6 +36,10 @@ tts-suite serve --voices-dir ~/voices           # http://127.0.0.1:5090, configu
 curl http://127.0.0.1:5090/health
 ```
 
+Cloud engines need their keys in the environment, never in the configuration: put them into
+`~/.config/tts-suite/env` (`DASHSCOPE_API_KEY=...`, readable for you alone, `chmod 600`); the service
+loads that file.
+
 As a service of your user: `deploy/install.sh` makes a venv (with the code of this clone, in editable form:
 the compose files of the engines live here), links `tts-suite` into `~/.local/bin` and installs
 `tts-suite.service`. Once, run `tts-suite serve --voices-dir <folder>` so the configuration is written, stop

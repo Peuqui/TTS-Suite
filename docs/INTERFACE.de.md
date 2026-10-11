@@ -44,7 +44,10 @@ Agenten kennt (welcher Agent welche Stimme hat). Der Dienst bekommt Text und ant
 Je Eintrag: `engine`, `host` (null: dieser Rechner), `label` und `label_short` (Namen für eine Oberfläche,
 Deutsch und Englisch), `enabled`, `deactivated`, `status` (`running`, `stopped`, `starting`, `unreachable`),
 `unit` (Wahl des Nutzers) und `unit_default` (`sentence`, `paragraph` oder `whole`: wie viel Text die Engine
-auf einmal nimmt), `needs_gpu`, `cloud`, `browser`.
+auf einmal nimmt), `needs_gpu`, `cloud`, `browser`, `installed` (sie lässt sich starten: sie braucht keinen
+Container (Cloud, CPU) oder läuft auf einem anderen Rechner, sonst wird ihr Docker-Image gebaut), `start_hint`
+(warum der letzte Start dieses Eintrags scheiterte, bis zum nächsten Start, einer neuen Konfiguration oder
+einem Reload; sonst null) und `vram_mib`.
 
 `browser: true` kennzeichnet den Eintrag, der für die eigene Stimme des Clients steht (der Browser spricht,
 der Dienst kann es nicht). Er steht in der Liste, weil die Reihenfolge Sache der Liste ist; der Dienst
@@ -70,7 +73,7 @@ Anfrage wählt neu).
 ### Die Anfrage: der Kopf eines Vorlesens
 
 ```json
-{"language": "de", "voice": "Alice", "speed": 1.0, "pitch": 1.0, "engine": null,
+{"language": "de", "voice": "Alice", "speed": 1.0, "pitch": 1.0, "engines": [],
  "voices": {"edge": {"voice": "de-DE-KatjaNeural", "speed": 1.1}}, "run": "r-42", "wait": true}
 ```
 
@@ -81,9 +84,13 @@ Anfrage wählt neu).
   Cloud-Stimmen); darum kann `voices` Stimme, Tempo und Tonhöhe je Engine-Schlüssel überschreiben. So liefert
   der Client die Stimmen seiner Agenten mit; der Dienst muss die Agenten nie kennen, und der Client muss nie
   wissen, welche Engine sprechen wird.
-- `engine` (optional) nennt einen Eintrag und überspringt die Eskalation: Diese Engine spricht oder das
-  Vorlesen scheitert.
-- Ohne sie spricht der erste Eintrag der Liste, der sprechen kann. Scheitert er, übernimmt der nächste.
+- `engines` (optional; nicht zu verwechseln mit `engines` in `/config`, den Standards je Engine) wählt und
+  ordnet: Nur die Einträge der konfigurierten Liste, deren Engine hier genannt ist, werden versucht, in der
+  Reihenfolge der Anfrage (mehrere Einträge einer Engine behalten ihre Reihenfolge in der Liste); alle
+  anderen werden weder geprüft noch gestartet. Leer: die ganze Liste. Eine Engine, die die Suite nicht kennt,
+  ist `404` (`unknown_engine`), eine bekannte, die nicht in der Liste steht, `503` (`no_engine`); ein
+  abgeschalteter Eintrag bleibt draußen.
+- Der erste Eintrag, der sprechen kann, spricht. Scheitert er, übernimmt der nächste.
 - **`run`** (optional, eine ID, die der Client für ein Vorlesen ausdenkt): der Dienst merkt sich je Lauf etwa
   zehn Minuten, welche Einträge ausfielen und ob schon gesprochen wurde. Ausgefallene Einträge bleiben für
   den Rest des Laufs draußen. Fällt ein Eintrag nach dem ersten Ton aus, spricht der Nachfolger zuerst eine
@@ -163,7 +170,8 @@ Zieht mit in die Suite: die Engine-Ordner und ihre Container, Eskalation, Engine
 nach Einheit, die Nachbearbeitung, die Ansagetexte und Engine-Namen (deutsch und englisch), die
 Konfiguration und die Tests von Eskalation, Reload, Vollständigkeit und der DashScope-Engine. Die Engines sind die, die es in der Suite gibt (kein
 MOSS, kein Fish-Speech). Container- und Projektnamen (und das Volume `xtts_voices`) werden in den Compose-Dateien gepinnt (`name:`), damit Docker
-laufende Container nicht neu anlegt. Der Stimmenordner enthält Nutzerdaten: Er liegt nicht im öffentlichen
+laufende Container nicht neu anlegt. Die Suite hält ihre eigenen Daten (Piper-Modelle, die Zuordnung der DashScope-Stimmen) in einem Datenordner,
+`~/.local/share/tts-suite` oder dem Ordner, den `TTS_SUITE_DATA_DIR` nennt. Der Stimmenordner enthält Nutzerdaten: Er liegt nicht im öffentlichen
 Repository, sein Pfad ist eine Einstellung, und Suite wie AIfred (Agent-Bündel) nutzen diesen einen Ort. Die
 Liste und die Rechner, heute in AIfreds `settings.json`, ziehen nach `/config` als den einen Ort; AIfred
 liest und schreibt sie über HTTP mit einem dünnen Client, mit einmaliger Migration und ohne Parallelbetrieb.

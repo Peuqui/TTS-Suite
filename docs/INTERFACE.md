@@ -44,7 +44,10 @@ agents (which agent has which voice). The service gets text and answers with aud
 For each entry: `engine`, `host` (null: this machine), `label` and `label_short` (names for a user
 interface, German and English), `enabled`, `deactivated`, `status` (`running`, `stopped`, `starting`,
 `unreachable`), `unit` (the user's choice) and `unit_default` (`sentence`, `paragraph` or `whole`: how much
-text the engine takes at once), `needs_gpu`, `cloud`, `browser`.
+text the engine takes at once), `needs_gpu`, `cloud`, `browser`, `installed` (it can be started: it needs no
+container (cloud, CPU) or runs on another host, otherwise its Docker image is built), `start_hint` (why the
+last start of this entry failed, until the next start, a new configuration or a reload; otherwise null) and
+`vram_mib`.
 
 `browser: true` marks the entry that stands for the client's own voice (the browser speaks, the service
 cannot). It is in the list because the order is the list's business; the service always skips it, and the
@@ -69,7 +72,7 @@ with `no_vram` (not remembered: the next request chooses again).
 ### The request: the head of a reading
 
 ```json
-{"language": "en", "voice": "Alice", "speed": 1.0, "pitch": 1.0, "engine": null,
+{"language": "en", "voice": "Alice", "speed": 1.0, "pitch": 1.0, "engines": [],
  "voices": {"edge": {"voice": "en-GB-SoniaNeural", "speed": 1.1}}, "run": "r-42", "wait": true}
 ```
 
@@ -79,8 +82,12 @@ with `no_vram` (not remembered: the next request chooses again).
   the container engines). Other engines have names of their own (Edge, Piper, cloud voices), so `voices` may
   override voice, speed and pitch per engine key. The client delivers its agents' voices this way; the
   service never has to know the agents, and the client never has to know which engine will speak.
-- `engine` (optional) names one entry and skips the escalation: that engine speaks or the reading fails.
-- Without it the first entry of the list that can speak does. If it fails, the next one takes over.
+- `engines` (optional; not to be confused with `engines` of `/config`, the defaults per engine) chooses and
+  orders: only the entries of the configured list whose engine is named here are tried, in the order of the
+  request (several entries of one engine keep their order in the list); all others are neither checked nor
+  started. Empty: the whole list. An engine the suite does not know is `404` (`unknown_engine`), one it knows
+  that is not in the list `503` (`no_engine`); an entry that is switched off stays out.
+- The first entry that can speak does. If it fails, the next one takes over.
 - **`run`** (optional, an ID the client makes up for one reading): the service keeps per run which entries
   failed and whether something was spoken already, for about ten minutes. Entries that failed stay out for
   the rest of the run. If an entry fails after the first sound, the successor first speaks an announcement
@@ -160,7 +167,8 @@ Goes with the suite: the engine folders and their containers, the escalation, en
 the post-processing, the announcement texts and engine labels (German and English), the configuration, and
 the tests of escalation, reload, completeness and the DashScope engine. The engines are the ones that exist in the suite (no MOSS, no Fish-Speech). The container and project names
 (and the volume `xtts_voices`) are pinned in the compose files (`name:`), so Docker does not recreate running
-containers. The voices folder holds the user's own data: it is not in the public repository, its path is a
+containers. The suite keeps its own data (Piper models, the DashScope voice mapping) in one data folder, `~/.local/share/tts-suite`
+or the folder `TTS_SUITE_DATA_DIR` names. The voices folder holds the user's own data: it is not in the public repository, its path is a
 setting, and both the suite and AIfred (agent bundles) use that one place. The list and hosts, today in
 AIfred's `settings.json`, move to `/config` as the one place; AIfred reads and writes them over HTTP through a
 thin client, with a one-time migration and no parallel operation. Stays with AIfred: `resolve_voice` and the

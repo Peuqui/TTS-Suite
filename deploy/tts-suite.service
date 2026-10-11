@@ -3,6 +3,8 @@ Description=TTS-Suite: text to speech as a service
 After=network-online.target docker.service
 
 [Service]
+# The keys of cloud engines (DASHSCOPE_API_KEY=...), in a file readable for you alone (chmod 600).
+EnvironmentFile=-%h/.config/tts-suite/env
 ExecStart=%h/.local/share/tts-suite/venv/bin/tts-suite serve
 Restart=on-failure
 RestartSec=5
