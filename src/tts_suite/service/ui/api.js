@@ -55,6 +55,7 @@ export const service = {
   saveConfig: (config) => json('../config', { method: 'POST', body: config }),
   start: (engine, host) => json(`../engines/${encodeURIComponent(engine)}/start${query({ host })}`, { method: 'POST' }),
   stop: (engine, host) => json(`../engines/${encodeURIComponent(engine)}/stop${query({ host })}`, { method: 'POST' }),
+  release: (targets) => json('../release', { method: 'POST', body: { targets } }),
   voices: (engine) => json(`../voices${query({ engine })}`),
   syncVoices: (engine) => json(`../voices/sync${query({ engine })}`, { method: 'POST' }),
   speak: (head, signal) => fetchChecked('../speak', { method: 'POST', body: head, signal }),

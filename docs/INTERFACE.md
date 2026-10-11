@@ -39,6 +39,7 @@ agents (which agent has which voice). The service gets text and answers with aud
 | `POST /speak` | Door 1: the whole text; the answer is the stream of frames (below). |
 | `WS /speak/stream` | Door 2: the text arrives in pieces (a language model is still writing); the frames run back as they exist. |
 | `POST /engines/{engine}/start`, `POST /engines/{engine}/stop` | Starts or stops the container of a row of the catalog (query `host`: the machine's name; none: this one). |
+| `POST /release` | A client asks for room on the cards. Body `{"targets": "all"}` or `{"targets": [{"engine", "host"}]}` (`host` null: this machine). Shuts the containers down (not only unloads) and answers per target `{engine, host, outcome, detail}`: `stopped`, `not_running`, `in_use` (a reading holds it, left alone), `unreachable` (host does not answer), `failed`. A request like `/speak`: no token on this machine. |
 | `POST /engines/reload` | Reads the engine folders again (an engine is switched off by moving its folder to `disabled/`: it is not in the catalog, and a request that names it gets a skip `deactivated`). Answers `{"removed": [...], "added": [...]}`. |
 | `GET /config`, `POST /config` | The configuration below. Changes survive a restart (as in STT-Suite). |
 

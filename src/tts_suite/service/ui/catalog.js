@@ -22,11 +22,21 @@ export function catalogView({ show, fail }) {
     } catch (error) { fail(error) }
   }
 
+  // Takes the containers down so their GPU memory is free: the targets, or "all" rows. A reading that
+  // holds one keeps it; the answer says what became of each.
+  async function release(targets) {
+    try {
+      const results = await service.release(targets)
+      show(results.map((result) => `${result.engine}${result.host ? `@${result.host}` : ''}: ${t(`release${result.outcome[0].toUpperCase()}${result.outcome.slice(1)}`)}${result.detail ? ` (${result.detail})` : ''}`).join(' · '))
+      await load()
+    } catch (error) { fail(error) }
+  }
+
   function render() {
     replaceChildren(root, 
       h('h2', {}, t('tabCatalog')),
       h('p', { class: 'muted' }, t('catalogHint')),
-      h('div', { class: 'row' }, h('button', { onclick: load }, t('reload'))),
+      h('div', { class: 'row' }, h('button', { onclick: load }, t('reload')), h('button', { onclick: () => release('all') }, t('releaseAll'))),
       h('div', { class: 'table-scroll' }, h('table', {},
         h('thead', {}, h('tr', {}, ...['engine', 'host', 'status', 'installed', 'gpuMemory', 'hint', ''].map((key) => h('th', {}, key ? t(key) : '')))),
         h('tbody', {}, rows.filter((row) => !row.browser).map((row) => h('tr', {},
@@ -41,7 +51,8 @@ export function catalogView({ show, fail }) {
           h('td', {}, row.start_hint ? h('span', { class: 'hint' }, row.start_hint) : ''),
           h('td', {}, row.cloud ? '' : h('div', { class: 'row' },
             h('button', { class: 'small', onclick: () => control('start', row), disabled: row.status === 'running' }, t('start')),
-            h('button', { class: 'small', onclick: () => control('stop', row), disabled: row.status === 'stopped' }, t('stop'))))))),
+            h('button', { class: 'small', onclick: () => control('stop', row), disabled: row.status === 'stopped' }, t('stop')),
+            h('button', { class: 'small', onclick: () => release([{ engine: row.engine, host: row.host }]), disabled: row.status === 'stopped' }, t('release'))))))),
       )),
     )
   }
