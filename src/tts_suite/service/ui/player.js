@@ -26,6 +26,10 @@ export class Player {
             throw new Error(`${failure.error}: ${failure.detail}`)
           }
           if (header.kind === 'summary') summary = JSON.parse(new TextDecoder().decode(body))
+          if (header.kind === 'audio' && header.pause_ms > 0) {
+            startAt = Math.max(startAt, context.currentTime) + header.pause_ms / 1000
+            continue
+          }
           if (header.kind !== 'audio' || header.keepalive || body.length === 0) continue
           const buffer = await context.decodeAudioData(body.buffer)
           const source = context.createBufferSource()

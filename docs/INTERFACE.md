@@ -78,7 +78,7 @@ with `no_vram` (not remembered: the next request chooses again).
 ### The request: the head of a reading
 
 ```json
-{"language": "en",
+{"language": "en", "paragraph_pause_ms": 700,
  "engines": [{"engine": "qwen3local", "unit": "sentence", "host": null},
              {"engine": "xtts", "unit": "paragraph", "host": "Aragon"},
              {"engine": "edge", "unit": "sentence", "host": null}],
@@ -86,7 +86,7 @@ with `no_vram` (not remembered: the next request chooses again).
  "speed": 1.0, "pitch": 1.0, "run": "r-42", "wait": true}
 ```
 
-- `language` is required. `POST /speak` carries the head and the text as `{"text": "...", ...head}`; the
+- `language` and `paragraph_pause_ms` are required. `paragraph_pause_ms` (integer, 0: no pause; negative: `invalid_request`; missing: `bad_request`) is the silence between paragraphs, given as pause markers. `POST /speak` carries the head and the text as `{"text": "...", ...head}`; the
   WebSocket opens with the head alone.
 - **`engines` is required, there is no default.** Its entries are the list of this one reading, in the
   order of speaking: `engine`, `unit` (`sentence`, `paragraph` or `whole`: how much text the engine is given
@@ -121,7 +121,7 @@ whole text, so the first piece starts as early as possible. Both doors use the s
   (`application/x-tts-frames`, chunked) they follow each other.
 - `kind: "audio"`: body = audio (`media_type`, e.g. `audio/wav`); header also `engine` (who spoke it, as
   `engine@host`) and `keepalive` (`true`: a marker with an empty body (`bytes: 0`) that only holds the stream open while a piece
-  takes long, for every format; drop it).
+  takes long, for every format; drop it). `pause_ms` (`N > 0`, empty body, `engine` empty, `keepalive` false): a pause marker, to be played as N ms of silence in the client's own output. It stands in the order of speaking at every paragraph boundary (blank line), not before the first or after the last paragraph, and only when the speaking entry's unit is `sentence` or `paragraph` (not `whole`). On a change of the speaking entry the marker comes first, then the announcement, then the successor's piece.
 - `kind: "summary"`: the last frame, body = JSON `{"trace": [...], "switch": null | "<reason>"}`. `trace` is
   the whole course of the escalation, a list of `{entry, outcome, reason, detail}` with `outcome` one of
   `skipped`, `failed`, `spoke`; the client builds its notes from it (for example "XTTS · Aragon → DashScope

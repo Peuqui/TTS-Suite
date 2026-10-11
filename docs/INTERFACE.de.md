@@ -80,7 +80,7 @@ Anfrage wählt neu).
 ### Die Anfrage: der Kopf eines Vorlesens
 
 ```json
-{"language": "de",
+{"language": "de", "paragraph_pause_ms": 700,
  "engines": [{"engine": "qwen3local", "unit": "sentence", "host": null},
              {"engine": "xtts", "unit": "paragraph", "host": "Aragon"},
              {"engine": "edge", "unit": "sentence", "host": null}],
@@ -88,7 +88,7 @@ Anfrage wählt neu).
  "speed": 1.0, "pitch": 1.0, "run": "r-42", "wait": true}
 ```
 
-- `language` ist Pflicht. `POST /speak` trägt Kopf und Text als `{"text": "...", ...Kopf}`; der WebSocket
+- `language` und `paragraph_pause_ms` sind Pflicht. `paragraph_pause_ms` (ganze Zahl, 0: keine Pause; negativ: `invalid_request`; fehlt: `bad_request`) ist die Stille zwischen Absätzen, geliefert als Pause-Marker. `POST /speak` trägt Kopf und Text als `{"text": "...", ...Kopf}`; der WebSocket
   beginnt mit dem Kopf allein.
 - **`engines` ist Pflicht, es gibt keinen Standard.** Seine Einträge sind die Liste dieses einen Vorlesens, in
   Sprechreihenfolge: `engine`, `unit` (`sentence`, `paragraph` oder `whole`: wie viel Text die Engine auf
@@ -124,7 +124,7 @@ ganzen Text, damit das erste Stück so früh wie möglich beginnt. Beide Türen 
   HTTP-Körper (`application/x-tts-frames`, gestückelt) folgen sie aufeinander.
 - `kind: "audio"`: Körper = Audio (`media_type`, z. B. `audio/wav`); der Kopf nennt auch `engine` (wer es
   gesprochen hat, als `engine@host`) und `keepalive` (`true`: eine Markierung mit leerem Körper (`bytes: 0`), die den Strom nur offen hält, solange
-  ein Stück lange braucht, für jedes Format; verwerfen).
+  ein Stück lange braucht, für jedes Format; verwerfen). `pause_ms` (`N > 0`, leerer Körper, `engine` leer, `keepalive` false): ein Pause-Marker, im eigenen Ausgang des Clients als N ms Stille abzuspielen. Er steht in Sprechreihenfolge an jeder Absatzgrenze (Leerzeile), nicht vor dem ersten und nicht nach dem letzten Absatz, und nur wenn die Einheit des sprechenden Eintrags `sentence` oder `paragraph` ist (nicht `whole`). Bei einem Wechsel des sprechenden Eintrags kommt erst der Marker, dann die Ansage, dann das Stück des Nachfolgers.
 - `kind: "summary"`: der letzte Frame, Körper = JSON `{"trace": [...], "switch": null | "<Grund>"}`. `trace`
   ist der ganze Verlauf der Eskalation, eine Liste von `{entry, outcome, reason, detail}` mit `outcome` aus
   `skipped`, `failed`, `spoke`; der Client baut daraus seine Hinweise (etwa „XTTS · Aragon → DashScope

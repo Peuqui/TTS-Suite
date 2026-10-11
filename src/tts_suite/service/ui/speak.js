@@ -18,6 +18,8 @@ export function speakView({ show, fail }) {
   let voiceLists = {} // engine -> [{name, label}]
   let text = 'Hallo Welt. Das ist ein Test der Sprachausgabe.'
   let language = 'de'
+  // The service requires the pause; this page starts with a usual one.
+  let pauseMs = 700
   let speaking = null // the AbortController of a reading in progress
   let summary = null
 
@@ -50,7 +52,7 @@ export function speakView({ show, fail }) {
     const chosen = rows.filter((row) => use[place(row)])
     if (chosen.length === 0) { fail(new Error(t('nothingChosen'))); return }
     const head = {
-      text, language,
+      text, language, paragraph_pause_ms: pauseMs,
       engines: chosen.map((row) => ({ engine: row.engine, unit: units[place(row)], host: row.host })),
       voices: Object.fromEntries([...new Set(chosen.map((row) => row.engine))].filter((engine) => voices[engine]).map((engine) => [engine, { voice: voices[engine] }])),
     }
@@ -97,7 +99,9 @@ export function speakView({ show, fail }) {
             voiceLists[row.engine].map((voice) => h('option', { value: voice.name, selected: voices[row.engine] === voice.name }, voice.label))))))),
       )),
       h('div', { class: 'row' }, h('label', {}, t('language2') + ' ',
-        h('select', { onchange: (event) => (language = event.target.value) }, ['de', 'en'].map((code) => h('option', { value: code, selected: code === language }, code))))),
+        h('select', { onchange: (event) => (language = event.target.value) }, ['de', 'en'].map((code) => h('option', { value: code, selected: code === language }, code)))),
+        h('label', {}, t('pause') + ' ',
+          h('input', { type: 'number', min: '0', step: '50', value: String(pauseMs), oninput: (event) => (pauseMs = Math.max(0, Number(event.target.value) || 0)) }))),
       h('textarea', { onchange: (event) => (text = event.target.value) }, text),
       h('div', { class: 'actions' },
         h('button', { class: 'primary', onclick: run, disabled: speaking !== null }, speaking === null ? t('speak') : t('speaking')),
