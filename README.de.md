@@ -37,6 +37,11 @@ tts-suite serve --voices-dir ~/voices           # http://127.0.0.1:5090, Konfigu
 curl http://127.0.0.1:5090/health
 ```
 
+Als Dienst deines Benutzers: `deploy/install.sh` legt eine venv an (mit dem Code dieses Klons, editierbar: die
+Compose-Dateien der Engines liegen hier), verlinkt `tts-suite` nach `~/.local/bin` und installiert
+`tts-suite.service`. Einmal `tts-suite serve --voices-dir <Ordner>` starten, damit die Konfiguration entsteht,
+dann beenden und `systemctl --user enable --now tts-suite`.
+
 Solange der Dienst auf `127.0.0.1` lauscht, verlangen Sprechen und jedes `GET` nichts; ein Befehl, der etwas
 ändert (`POST /config`, Container starten und stoppen, Stimmen hochladen), braucht immer das Token
 (`Authorization: Bearer <Token>`). Auf einer anderen Adresse braucht alles eines, und der Dienst startet ohne
