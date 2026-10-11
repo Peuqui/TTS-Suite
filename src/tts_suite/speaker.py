@@ -116,19 +116,30 @@ class Speaker:
             )
 
     def _entries_for(self, request: SpeakRequest) -> tuple[EscalationEntry, ...]:
-        """The list, or — for a request that names an engine — only that engine's entries."""
-        if request.engine is None:
+        """The list, or — for a request that names engines — only their entries, in the order of the
+        request (several entries of one engine keep the order of the list)."""
+        keys = self._requested_engines(request)
+        if not keys:
             return self._entries
-        if get_engine(request.engine) is None:
-            raise UnknownEngine(f"unknown TTS engine {request.engine!r}")
-        pinned = tuple(entry for entry in self._entries if entry.engine.key == request.engine)
-        if not pinned:
-            raise NoEngineAvailable(f"engine {request.engine!r} is not in the escalation list", ())
-        return pinned
+        for key in keys:
+            if get_engine(key) is None:
+                raise UnknownEngine(f"unknown TTS engine {key!r}")
+        chosen: list[EscalationEntry] = []
+        for key in keys:
+            entries = [entry for entry in self._entries if entry.engine.key == key]
+            if not entries:
+                raise NoEngineAvailable(f"engine {key!r} is not in the escalation list", ())
+            chosen.extend(entries)
+        return tuple(chosen)
+
+    @staticmethod
+    def _requested_engines(request: SpeakRequest) -> tuple[str, ...]:
+        """The engine keys of the request without repeats: naming an engine twice asks for nothing more."""
+        return tuple(dict.fromkeys(request.engines))
 
     def _run_ended(self, request: SpeakRequest) -> None:
         if request.run is not None:
-            self._runs.touch((request.run, request.engine))
+            self._runs.touch((request.run, self._requested_engines(request)))
 
     def _run_for(self, request: SpeakRequest, entries: tuple[EscalationEntry, ...]) -> SpeechRun:
         def create() -> SpeechRun:
@@ -136,4 +147,4 @@ class Speaker:
 
         if request.run is None:
             return create()
-        return self._runs.get_or_create((request.run, request.engine), create)
+        return self._runs.get_or_create((request.run, self._requested_engines(request)), create)

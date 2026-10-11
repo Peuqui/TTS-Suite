@@ -12,13 +12,13 @@ import subprocess
 from dataclasses import dataclass
 
 from .constants import DOCKER_PIDS_TIMEOUT_S, NVIDIA_SMI_APPS_TIMEOUT_S
+from .docker_ctl import NO_SUCH_CONTAINER
 from .engines.base import TTSEngine
 
 logger = logging.getLogger(__name__)
 
 NVIDIA_SMI_APP_FIELDS = "pid,used_memory,gpu_uuid"
-#: What ``docker top`` says (stderr) for a container that does not exist or does not run.
-NO_SUCH_CONTAINER = "No such container"
+#: What ``docker top`` says (stderr) for a container that does not run (a missing one: ``NO_SUCH_CONTAINER``).
 NOT_RUNNING = "is not running"
 
 

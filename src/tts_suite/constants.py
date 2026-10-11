@@ -6,20 +6,31 @@ Values marked "source" carry the value AIfred Intelligence has used so far
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # ── Locations ───────────────────────────────────────────────────────
 
 #: Root of the repository (``src/tts_suite/constants.py`` → two levels up). The Docker recipes
-#: (``docker/tts/<service>/docker-compose.yml``) and the Piper models live below it.
+#: (``docker/tts/<service>/docker-compose.yml``) live below it.
 SUITE_ROOT = Path(__file__).resolve().parents[2]
 
 #: Build recipes of the container engines, one folder per service.
 DOCKER_TTS_DIR = SUITE_ROOT / "docker" / "tts"
 COMPOSE_FILE_NAME = "docker-compose.yml"
 
-#: Piper voice models (``*.onnx``), a folder next to the recipes.
-PIPER_MODELS_DIR = SUITE_ROOT / "piper_models"
+#: The one data folder of the suite (Piper models, the DashScope voice mapping): the environment
+#: variable names another path; without it the default applies. Read through :func:`data_dir`.
+DATA_DIR_ENV = "TTS_SUITE_DATA_DIR"
+DATA_DIR_DEFAULT = Path.home() / ".local" / "share" / "tts-suite"
+#: Piper voice models (``*.onnx``) inside the data folder.
+PIPER_MODELS_DIR_NAME = "piper_models"
+
+
+def data_dir() -> Path:
+    """The data folder of the suite. Read at every call, so a changed environment applies at once."""
+    return Path(os.environ.get(DATA_DIR_ENV) or DATA_DIR_DEFAULT)
+
 
 # ── Timeouts and intervals (seconds) ────────────────────────────────
 
@@ -46,6 +57,9 @@ TTS_VOICES_TIMEOUT_S = 5
 TTS_READY_POLL_TIMEOUT_S = 2
 TTS_READY_POLL_INTERVAL_S = 1
 TTS_READY_LOG_INTERVAL_S = 30
+#: While waiting, Docker is asked every this many seconds whether the container is still there
+#: (a container whose model fails to load ends; waiting for the whole timeout would be pointless).
+TTS_READY_STATE_CHECK_INTERVAL_S = 5
 
 #: ``docker compose up -d`` / ``down``: a hanging Docker daemon must not block the start lock for good.
 DOCKER_COMPOSE_TIMEOUT_S = 60
@@ -55,6 +69,10 @@ START_WAIT_RESERVE_S = 90
 
 #: ``docker image inspect`` (is the engine's image built?) and the eSpeak voice listing.
 DOCKER_INSPECT_TIMEOUT_S = 5
+#: ``docker inspect`` of a container's state and ``docker logs --tail`` of an ended one: how many
+#: lines, and how many characters of them go into the error message.
+DOCKER_LOG_TAIL_LINES = 5
+DOCKER_LOG_TAIL_MAX_CHARS = 400
 ESPEAK_VOICE_LIST_TIMEOUT_S = 5
 
 # ── Audio ───────────────────────────────────────────────────────────
@@ -91,7 +109,7 @@ ESPEAK_BASE_WPM = 175
 
 #: Environment variable that holds the DashScope API key (cloud keys are no part of the config).
 DASHSCOPE_API_KEY_ENV = "DASHSCOPE_API_KEY"
-#: Mapping of enrolled cloned voices, kept in the shared voices directory.
+#: Mapping of enrolled cloned voices, kept in the data folder (:func:`data_dir`).
 DASHSCOPE_MAPPING_FILE_NAME = "dashscope_audio3_voices.json"
 #: Voice enrollment uploads a reference WAV; generous timeout.
 DASHSCOPE_ENROLL_TIMEOUT_S = 90

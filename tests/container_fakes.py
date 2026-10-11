@@ -12,7 +12,7 @@ from speech_fakes import FakeEngine, FakeLauncher
 
 from tts_suite.api import EngineDefaults, EntryConfig, EntryStatus, Host, SuiteConfig
 from tts_suite.engines import registry
-from tts_suite.escalation import EscalationEntry
+from tts_suite.escalation import EscalationEntry, Skip
 from tts_suite.host_ctl import HostControlError
 from tts_suite.placement import GpuInfo
 
@@ -138,6 +138,7 @@ class FakeManagedLauncher(FakeLauncher):
         self.configs: list[SuiteConfig] = []
         self.cleared: list[str | None] = []  # labels whose failures were forgotten (None = all)
         self.stopped: list[str] = []
+        self.failures: dict[str, Skip] = {}  # label -> why its last start failed
         self.stop_error: Exception | None = None
         self.closed = False
 
@@ -146,6 +147,10 @@ class FakeManagedLauncher(FakeLauncher):
 
     def clear_failures(self, entry: EscalationEntry | None) -> None:
         self.cleared.append(entry.label if entry is not None else None)
+        if entry is None:
+            self.failures.clear()
+        else:
+            self.failures.pop(entry.label, None)
 
     async def stop(self, entry: EscalationEntry) -> None:
         if self.stop_error is not None:
@@ -154,6 +159,9 @@ class FakeManagedLauncher(FakeLauncher):
 
     async def status(self, entry: EscalationEntry) -> EntryStatus:
         return self.statuses.get(entry.label, "running")
+
+    def start_failure(self, entry: EscalationEntry) -> Skip | None:
+        return self.failures.get(entry.label)
 
     async def aclose(self) -> None:
         self.closed = True

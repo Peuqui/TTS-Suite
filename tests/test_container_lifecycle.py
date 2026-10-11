@@ -8,7 +8,9 @@ from typing import Any
 import pytest
 
 from tts_suite import docker_ctl
+from tts_suite.constants import TTS_READY_STATE_CHECK_INTERVAL_S
 from tts_suite.engines import TTS_ENGINES, get_engine
+from tts_suite.engines import base as engines_base
 from tts_suite.engines.qwen3local.engine import Qwen3LocalEngine
 from tts_suite.engines.xtts.engine import XTTSEngine
 
@@ -60,6 +62,66 @@ def test_ensure_ready_reports_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     ok, message, device = engine.ensure_ready(timeout=3)
     assert (ok, device) == (False, "")
     assert "Timeout after 3s" in message
+
+
+def _waiting_engine(
+    monkeypatch: pytest.MonkeyPatch, states: list[str] | Exception, log_tail: str = "",
+) -> tuple[XTTSEngine, list[float], list[str]]:
+    """An engine whose container starts but whose health never answers. Returns the engine, the
+    sleeps it made and the container names Docker was asked about; ``states``: what Docker
+    answers one question after the other (the last one stays), or the error it raises."""
+    engine = XTTSEngine()
+    sleeps: list[float] = []
+    asked: list[str] = []
+    answers = iter(states if isinstance(states, list) else [])
+
+    def state(name: str) -> str:
+        asked.append(name)
+        if isinstance(states, Exception):
+            raise states
+        return next(answers)
+
+    monkeypatch.setattr(engine, "_health", lambda timeout=None: None)
+    monkeypatch.setattr(engine, "_start_local", lambda: (True, "up"))
+    monkeypatch.setattr("time.sleep", sleeps.append)
+    monkeypatch.setattr(engines_base, "container_state", state)
+    monkeypatch.setattr(engines_base, "container_log_tail", lambda name: log_tail)
+    return engine, sleeps, asked
+
+
+def test_ensure_ready_stops_waiting_when_the_container_exited(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine, sleeps, asked = _waiting_engine(monkeypatch, ["exited"], log_tail="OutOfMemoryError")
+    ok, message, device = engine.ensure_ready(timeout=1000)
+    assert (ok, device) == (False, "")
+    assert "container exited while the model loaded" in message and message.endswith(": OutOfMemoryError")
+    assert asked == ["xtts"]  # the container name, asked once
+    assert len(sleeps) == TTS_READY_STATE_CHECK_INTERVAL_S  # not the 1000 s of the limit
+
+
+def test_ensure_ready_stops_waiting_when_the_container_is_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine, _sleeps, _asked = _waiting_engine(monkeypatch, ["absent"], log_tail="never asked for")
+    ok, message, _device = engine.ensure_ready(timeout=1000)
+    assert not ok
+    assert message == "XTTS: container exited while the model loaded (state: absent)"
+
+
+@pytest.mark.parametrize("alive_state", ["created", "running", "restarting"])
+def test_ensure_ready_keeps_polling_while_the_container_is_there(
+    alive_state: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limit = 3 * TTS_READY_STATE_CHECK_INTERVAL_S
+    engine, sleeps, asked = _waiting_engine(monkeypatch, [alive_state] * 10)
+    ok, message, _device = engine.ensure_ready(timeout=limit)
+    assert not ok and f"Timeout after {limit}s" in message
+    assert len(sleeps) == limit
+    assert len(asked) == 2  # at 5 and 10 s; the poll at 15 s does not exist (the range ends at 14)
+
+
+def test_ensure_ready_stops_when_docker_cannot_tell(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine, sleeps, _asked = _waiting_engine(monkeypatch, docker_ctl.ContainerStateUnreadable("docker unavailable: x"))
+    ok, message, _device = engine.ensure_ready(timeout=1000)
+    assert not ok and "cannot tell whether the container is alive: docker unavailable: x" in message
+    assert len(sleeps) == TTS_READY_STATE_CHECK_INTERVAL_S
 
 
 def test_ensure_ready_reports_a_failed_start(monkeypatch: pytest.MonkeyPatch) -> None:

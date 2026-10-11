@@ -73,3 +73,16 @@ bad), there are two steps, in this order:
 The number of sentences held back should therefore stay a constant, not a hard-wired
 special case in the code. Two- and one-word sentences are the borderline case in both
 steps: whether the engines speak very short pieces well will show in operation.
+
+## Data folder
+
+Whatever the suite creates or needs and is no part of the source tree lives in one data
+folder: `~/.local/share/tts-suite`, changeable with the environment variable
+`TTS_SUITE_DATA_DIR` (one function, `constants.data_dir()`, reads it at every call). Inside:
+`piper_models/` (Piper's `.onnx` models) and `dashscope_audio3_voices.json` (the mapping of
+the voices enrolled with DashScope). Both used to live in the source tree and in the voices
+folder respectively; the voices folder now belongs to the user and holds only the reference
+WAVs. There is no fallback to the old places and no copying by the code: an existing
+collection is moved into the data folder by hand, once. The folder is created when the
+mapping is first written; the operator puts the Piper models into it. The Piper executable
+still sits next to the suite's Python.

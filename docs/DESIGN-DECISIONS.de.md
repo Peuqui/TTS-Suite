@@ -74,3 +74,16 @@ klingen schlecht), gibt es zwei Stufen, in dieser Reihenfolge:
 Die Anzahl der Sätze, die zurückgehalten werden, soll deshalb eine Konstante bleiben, kein
 fest verdrahteter Sonderfall im Code. Zwei- und Einwort-Sätze sind bei beiden Stufen der
 Grenzfall: Ob die Engines sehr kurze Stücke gut sprechen, zeigt der Betrieb.
+
+## Datenordner
+
+Was die Suite selbst erzeugt oder braucht und nicht Teil des Quellbaums ist, liegt in
+einem einzigen Datenordner: `~/.local/share/tts-suite`, mit der Umgebungsvariable
+`TTS_SUITE_DATA_DIR` änderbar (eine Funktion, `constants.data_dir()`, liest sie bei jedem
+Aufruf). Darin: `piper_models/` (die `.onnx`-Modelle von Piper) und
+`dashscope_audio3_voices.json` (die Zuordnung der bei DashScope angemeldeten Stimmen).
+Beides lag vorher im Quellbaum bzw. im Stimmenordner; der Stimmenordner bleibt dem Benutzer
+und enthält nur noch die Referenz-WAVs. Es gibt keinen Rückgriff auf die alten Orte und kein
+Kopieren durch den Code: ein bestehender Bestand wird einmal von Hand in den Datenordner
+verschoben. Der Ordner wird beim ersten Schreiben der Zuordnung angelegt; die Piper-Modelle
+legt der Betreiber hinein. Das Piper-Programm selbst liegt weiter neben dem Python der Suite.

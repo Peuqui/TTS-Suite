@@ -30,6 +30,8 @@ ENGINE_INFO = EngineInfo(
     needs_gpu=True,
     cloud=False,
     browser=False,
+    installed=True,
+    start_hint=None,
     vram_mib={"GPU-1": 4000},
 )
 

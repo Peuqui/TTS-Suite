@@ -466,16 +466,16 @@ class RunTable:
     def __init__(self, ttl_s: float = RUN_TTL_S, clock: Callable[[], float] = time.monotonic) -> None:
         self._ttl_s = ttl_s
         self._clock = clock
-        self._runs: dict[tuple[str, str | None], tuple[SpeechRun, float]] = {}
+        self._runs: dict[tuple[str, tuple[str, ...]], tuple[SpeechRun, float]] = {}
 
-    def get_or_create(self, key: tuple[str, str | None], create: Callable[[], SpeechRun]) -> SpeechRun:
+    def get_or_create(self, key: tuple[str, tuple[str, ...]], create: Callable[[], SpeechRun]) -> SpeechRun:
         now = self._clock()
         self._runs = {k: (run, expires) for k, (run, expires) in self._runs.items() if run.attached or expires > now}
         run = self._runs[key][0] if key in self._runs else create()
         self._runs[key] = (run, now + self._ttl_s)
         return run
 
-    def touch(self, key: tuple[str, str | None]) -> None:
+    def touch(self, key: tuple[str, tuple[str, ...]]) -> None:
         """The last stream of a run ended: its time to live starts now."""
         if key in self._runs:
             self._runs[key] = (self._runs[key][0], self._clock() + self._ttl_s)

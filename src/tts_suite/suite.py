@@ -55,6 +55,7 @@ class Suite:
         config = self._speaker.config
         statuses = await asyncio.gather(*(self._status(entry) for entry in self._speaker.entries))
         vram = await asyncio.gather(*(self._vram_mib(entry, status) for entry, status in zip(self._speaker.entries, statuses)))
+        installed = await asyncio.gather(*(self._installed(entry) for entry in self._speaker.entries))
         return [
             EngineInfo(
                 engine=entry.engine.key,
@@ -69,15 +70,29 @@ class Suite:
                 needs_gpu=entry.engine.needs_gpu,
                 cloud=entry.engine.cloud,
                 browser=entry.engine.renders_in_browser,
+                installed=is_installed,
+                start_hint=self._start_hint(entry),
                 vram_mib=vram_mib,
             )
-            for entry, status, vram_mib in zip(self._speaker.entries, statuses, vram)
+            for entry, status, vram_mib, is_installed in zip(self._speaker.entries, statuses, vram, installed)
         ]
 
     async def _status(self, entry: EscalationEntry) -> EntryStatus:
         if entry.engine.deactivated:
             return "stopped"
         return await self._launcher.status(entry)
+
+    @staticmethod
+    async def _installed(entry: EscalationEntry) -> bool:
+        """Whether the entry can be started. An engine on another host is not the suite's to judge
+        (it cannot see that machine's Docker), so it counts as installed."""
+        if entry.host is not None:
+            return True
+        return await asyncio.to_thread(entry.engine.is_installed)
+
+    def _start_hint(self, entry: EscalationEntry) -> str | None:
+        failure = self._launcher.start_failure(entry)
+        return failure.detail if failure is not None else None
 
     @staticmethod
     async def _vram_mib(entry: EscalationEntry, status: EntryStatus) -> dict[str, int] | None:

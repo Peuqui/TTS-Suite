@@ -109,12 +109,12 @@ class DashScopeAudio3Engine(TTSEngine):
         return self.voices_fallback
 
     def _cloned_voices(self) -> dict[str, str]:
-        """Enrolled cloned voices from the mapping: '★ Name' → voice id. Read live
+        """Enrolled cloned voices from the mapping (data folder): '★ Name' → voice id. Read live
         (cheap JSON read) so a freshly enrolled WAV shows up without a restart."""
         from .enroll import load_mapping
         return {
             f"{CLONED_VOICE_PREFIX}{name}": entry["voice_id"]
-            for name, entry in load_mapping(self.shared_voices_dir).items()
+            for name, entry in load_mapping().items()
             if entry.get("voice_id")
         }
 

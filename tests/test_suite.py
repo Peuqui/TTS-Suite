@@ -28,8 +28,15 @@ from tts_suite.api import (
     VoiceInfo,
 )
 from tts_suite.engines import registry
+from tts_suite.engines.base import TTSEngine
 from tts_suite.escalation import Skip
 from tts_suite.suite import Suite, create_suite
+
+
+@pytest.fixture(autouse=True)
+def no_docker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real engines in these tests would ask Docker whether their image is built."""
+    monkeypatch.setattr(TTSEngine, "is_installed", lambda self: True)
 
 
 def _suite(config: SuiteConfig, launcher: FakeManagedLauncher | None = None) -> tuple[Suite, FakeManagedLauncher]:
@@ -105,6 +112,35 @@ def test_a_remote_entry_names_its_host_and_a_deactivated_one_is_listed_as_off(tm
     remote, ghost = run_async(suite.engines())
     assert (remote.host, remote.status) == ("Aragon", "unreachable")
     assert (ghost.deactivated, ghost.enabled, ghost.status, ghost.label["de"]) == (True, False, "stopped", "ghost")
+
+
+def test_installed_tells_whether_an_entry_can_be_started(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    built, missing = ContainerEngine("builtfake"), ContainerEngine("missingfake", installed=False)
+    remote = ContainerEngine("remotefake", remote=True, installed=False)  # the suite cannot see that host's Docker
+    cloud = FakeEngine("cloudfake", cloud=True)
+    install(monkeypatch, built, missing, remote, cloud)
+    monkeypatch.setattr(Suite, "_label", staticmethod(lambda entry, language: entry.engine.key))  # fakes have no i18n.json
+    monkeypatch.setattr(ContainerEngine, "at_host", lambda self, address, port=None: self)
+    config = SuiteConfig(
+        voices_dir=tmp_path, hosts=(ARAGON,),
+        entries=(EntryConfig("builtfake"), EntryConfig("missingfake"), EntryConfig("remotefake", host="Aragon"), EntryConfig("cloudfake")),
+    )
+    suite, _ = _suite(config)
+    assert [info.installed for info in run_async(suite.engines())] == [True, False, True, True]
+
+
+def test_start_hint_is_the_reason_of_the_last_failed_start_until_it_is_forgotten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install(monkeypatch, ContainerEngine("brokenfake"), ContainerEngine("fine"))
+    monkeypatch.setattr(Suite, "_label", staticmethod(lambda entry, language: entry.engine.key))  # fakes have no i18n.json
+    suite, launcher = _suite(make_config(tmp_path, ["brokenfake", "fine"]))
+    assert [info.start_hint for info in run_async(suite.engines())] == [None, None]
+    launcher.failures["brokenfake"] = Skip("stopped", "start failed: model did not load")
+    assert [info.start_hint for info in run_async(suite.engines())] == ["start failed: model did not load", None]
+    run_async(suite.set_config(make_config(tmp_path, ["brokenfake", "fine"])))  # the real launcher forgets here
+    launcher.clear_failures(None)
+    assert [info.start_hint for info in run_async(suite.engines())] == [None, None]
 
 
 def test_vram_is_reported_for_running_local_gpu_engines_only_and_a_failed_measurement_is_logged(

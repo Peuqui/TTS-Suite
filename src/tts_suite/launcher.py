@@ -52,6 +52,10 @@ class ManagedLauncher(EngineLauncher, Protocol):
 
     async def status(self, entry: EscalationEntry) -> EntryStatus: ...
 
+    def start_failure(self, entry: EscalationEntry) -> Skip | None:
+        """Why the last start of the entry did not work (until the next start, a new configuration or a reload)."""
+        ...
+
     async def aclose(self) -> None: ...
 
 

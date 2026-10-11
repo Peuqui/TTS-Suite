@@ -136,6 +136,8 @@ class EngineInfo:
     needs_gpu: bool
     cloud: bool
     browser: bool  # stands for the client's own voice; the suite always skips it
+    installed: bool  # can be started: no container needed (cloud, CPU) or runs on another host; else the Docker image is built
+    start_hint: str | None  # why the last start of this entry failed (until the next start, a new configuration or a reload); else None
     vram_mib: Mapping[str, int] | None  # {gpu_uuid: MiB} per card it holds (display only); {} = none/not local; None = measurement failed
 
 
@@ -167,7 +169,10 @@ class SpeakRequest:
     voice: str | None = None  # default voice (valid for the container engines)
     speed: float | None = None
     pitch: float | None = None
-    engine: str | None = None  # names one entry and skips the escalation
+    # Engine keys the reading may use, in the order given (the escalation order of this request): only
+    # the entries of the configured list with these engines are tried, all others are neither checked nor
+    # started. Empty = the whole list. Not to be confused with ``SuiteConfig.engines`` (defaults per engine).
+    engines: tuple[str, ...] = ()
     voices: Mapping[str, VoiceSettings] = field(default_factory=dict)  # per engine key
     run: str | None = None  # client-made ID of one reading; state is kept ~10 min
     wait: bool = True  # False: ``EngineStarting`` instead of waiting for a cold start

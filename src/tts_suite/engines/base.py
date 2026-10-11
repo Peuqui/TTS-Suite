@@ -28,9 +28,10 @@ from ..constants import (
     TTS_READY_LOG_INTERVAL_S,
     TTS_READY_POLL_INTERVAL_S,
     TTS_READY_POLL_TIMEOUT_S,
+    TTS_READY_STATE_CHECK_INTERVAL_S,
     TTS_VOICES_TIMEOUT_S,
 )
-from ..docker_ctl import docker_compose_action
+from ..docker_ctl import ContainerStateUnreadable, container_log_tail, container_state, docker_compose_action
 
 logger = logging.getLogger(__name__)
 
@@ -456,10 +457,28 @@ class TTSEngine(ABC):
                 device = self._device(health)
                 logger.info("%s: model loaded on %s", self.label_short, device)
                 return True, f"{self.label_short} ready ({device})", device
+            if waited > 0 and waited % TTS_READY_STATE_CHECK_INTERVAL_S == 0:
+                ended = self._container_ended_message()
+                if ended is not None:
+                    return False, ended, ""
             if waited > 0 and waited % TTS_READY_LOG_INTERVAL_S == 0:
                 logger.info("%s: still waiting (%ds / %ds)...", self.label_short, waited, limit)
             time.sleep(TTS_READY_POLL_INTERVAL_S)
         return False, f"{self.label_short}: Timeout after {limit}s waiting for model", ""
+
+    def _container_ended_message(self) -> str | None:
+        """Why waiting for the model is pointless: the container ended (a model that fails to load ends
+        it) or Docker cannot tell. ``None`` while the container is there (``created``, ``running``,
+        ``restarting``)."""
+        try:
+            state = container_state(self.service_dir)
+        except ContainerStateUnreadable as exc:
+            return f"{self.label_short}: cannot tell whether the container is alive: {exc}"
+        if state not in ("exited", "absent"):
+            return None
+        message = f"{self.label_short}: container exited while the model loaded (state: {state})"
+        log_tail = container_log_tail(self.service_dir) if state == "exited" else ""
+        return f"{message}: {log_tail}" if log_tail else message
 
     # ── Speech generation ──────────────────────────────────────────
     def generate_speech(

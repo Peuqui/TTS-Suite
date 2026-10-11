@@ -201,12 +201,12 @@ def test_the_head_may_carry_the_voices_of_the_engines_and_the_run(tmp_path: Path
         "language": "de",
         "run": "r-42",
         "wait": False,
-        "engine": "edge",
+        "engines": ["edge"],
         "voices": {"edge": {"voice": "de-DE-KatjaNeural", "speed": 1.1}},
     }
     assert client.post("/speak", json=head).status_code == 200
     _, request = suite.requests[0]
-    assert (request.run, request.wait, request.engine) == ("r-42", False, "edge")
+    assert (request.run, request.wait, request.engines) == ("r-42", False, ("edge",))
     assert request.voices["edge"].voice == "de-DE-KatjaNeural" and request.voices["edge"].speed == 1.1
 
 
@@ -256,7 +256,7 @@ def test_a_stream_that_cannot_start_ends_with_an_error_frame(tmp_path: Path) -> 
     client, suite, _ = build(tmp_path)
     suite.refuses = UnknownEngine("nope")
     with client.websocket_connect("/speak/stream") as socket:
-        socket.send_text(json.dumps({"type": "start", "language": "en", "engine": "nope"}))
+        socket.send_text(json.dumps({"type": "start", "language": "en", "engines": ["nope"]}))
         header, body = decode_frames(socket.receive_bytes())[0]
     assert header["kind"] == "error" and json.loads(body)["error"] == "unknown_engine"
 

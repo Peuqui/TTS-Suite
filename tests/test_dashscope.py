@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 import requests
 
-from tts_suite.constants import DASHSCOPE_API_KEY_ENV, DASHSCOPE_MAPPING_FILE_NAME
+from tts_suite.constants import DASHSCOPE_API_KEY_ENV, DASHSCOPE_MAPPING_FILE_NAME, DATA_DIR_ENV
 from tts_suite.engines import TTS_ENGINES, TTSFailure, get_engine
 from tts_suite.engines.dashscope_audio3 import engine as dashscope_audio3
 from tts_suite.engines.dashscope_audio3.enroll import enroll_progress, load_mapping
@@ -58,6 +58,14 @@ def cloud(monkeypatch: pytest.MonkeyPatch) -> FakeCloud:
     monkeypatch.setattr(requests, "get", fake.get)
     monkeypatch.setenv(DASHSCOPE_API_KEY_ENV, "key")
     return fake
+
+
+@pytest.fixture(autouse=True)
+def data_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The data folder of the suite (holds the voice mapping) — a folder that does not exist yet."""
+    folder = tmp_path / "data"
+    monkeypatch.setenv(DATA_DIR_ENV, str(folder))
+    return folder
 
 
 @pytest.fixture
@@ -147,8 +155,9 @@ def test_default_voice_is_in_the_catalog(engine: Any) -> None:
     assert engine.default_voice in engine.get_voices()
 
 
-def test_cloned_voices_come_first_and_use_the_flash_model(cloud: FakeCloud, engine: Any, tmp_path: Path) -> None:
-    (tmp_path / DASHSCOPE_MAPPING_FILE_NAME).write_text(
+def test_cloned_voices_come_first_and_use_the_flash_model(cloud: FakeCloud, engine: Any, data_folder: Path) -> None:
+    data_folder.mkdir()
+    (data_folder / DASHSCOPE_MAPPING_FILE_NAME).write_text(
         json.dumps({"Codine": {"voice_id": "qwen-audio-3.0-tts-flash-codine-1"}}), encoding="utf-8",
     )
     assert list(engine.get_voices())[0] == "★ Codine"
@@ -163,10 +172,11 @@ def test_cloned_voices_come_first_and_use_the_flash_model(cloud: FakeCloud, engi
 
 @pytest.fixture
 def voices(tmp_path: Path) -> Path:
-    voice_dir = tmp_path / "Codine"
-    voice_dir.mkdir()
+    voices_dir = tmp_path / "voices"
+    voice_dir = voices_dir / "Codine"
+    voice_dir.mkdir(parents=True)
     (voice_dir / "Codine.wav").write_bytes(_wav_bytes(16000))
-    return tmp_path
+    return voices_dir
 
 
 def _capture_post(monkeypatch: pytest.MonkeyPatch, output: dict[str, Any]) -> list[dict[str, Any]]:
@@ -180,7 +190,7 @@ def _capture_post(monkeypatch: pytest.MonkeyPatch, output: dict[str, Any]) -> li
     return sent
 
 
-def test_request_follows_the_cosyvoice_variant(voices: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_request_follows_the_cosyvoice_variant(voices: Path, data_folder: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sent = _capture_post(monkeypatch, {"voice_id": "qwen-audio-3.0-tts-flash-codine-1"})
     lines = list(enroll_progress("key", voices))
     body = sent[0]["json"]
@@ -189,7 +199,9 @@ def test_request_follows_the_cosyvoice_variant(voices: Path, monkeypatch: pytest
     assert body["input"]["target_model"] == "qwen-audio-3.0-tts-flash"
     assert body["input"]["prefix"] == "codine"
     assert body["input"]["url"].startswith("data:audio/wav;base64,")
-    assert load_mapping(voices)["Codine"]["voice_id"] == "qwen-audio-3.0-tts-flash-codine-1"
+    assert load_mapping()["Codine"]["voice_id"] == "qwen-audio-3.0-tts-flash-codine-1"
+    assert (data_folder / DASHSCOPE_MAPPING_FILE_NAME).exists()  # the folder was created on the first save
+    assert not (voices / DASHSCOPE_MAPPING_FILE_NAME).exists()  # nothing is written into the voices tree
     assert "DashScope enroll done: 1 new" in lines[-1]
 
 
@@ -200,11 +212,11 @@ def test_an_enrolled_unchanged_voice_is_not_uploaded_again(voices: Path, monkeyp
     assert len(sent) == 1
 
 
-def test_a_response_without_voice_id_is_a_failure(voices: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_response_without_voice_id_is_a_failure(voices: Path, data_folder: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _capture_post(monkeypatch, {})
     lines = list(enroll_progress("key", voices))
     assert any("failed" in line for line in lines)
-    assert not (voices / DASHSCOPE_MAPPING_FILE_NAME).exists()
+    assert not (data_folder / DASHSCOPE_MAPPING_FILE_NAME).exists()
 
 
 def test_prepare_voices_needs_the_key(voices: Path, monkeypatch: pytest.MonkeyPatch) -> None:

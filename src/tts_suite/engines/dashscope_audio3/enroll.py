@@ -2,8 +2,8 @@
 
 Clones the shared reference voices (``<voices_dir>/<Name>/<Name>.wav``)
 into DashScope's voice-cloning model ONCE each and remembers the returned
-voice id in a mapping file inside the voices directory
-(``DASHSCOPE_MAPPING_FILE_NAME``; the mapping is the source of truth for "is this
+voice id in a mapping file inside the data folder of the suite
+(``data_dir() / DASHSCOPE_MAPPING_FILE_NAME``; the mapping is the source of truth for "is this
 voice already enrolled").
 
 API (verified 2026-10-10): ``model="voice-enrollment"`` + ``action="create_voice"``
@@ -22,7 +22,7 @@ import wave
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-from ...constants import DASHSCOPE_ENROLL_TIMEOUT_S, DASHSCOPE_MAPPING_FILE_NAME
+from ...constants import DASHSCOPE_ENROLL_TIMEOUT_S, DASHSCOPE_MAPPING_FILE_NAME, data_dir
 from .engine import DashScopeAudio3Engine
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,8 @@ TARGET_MODEL = DashScopeAudio3Engine.model_flash
 Mapping = dict[str, dict[str, Any]]
 
 
-def mapping_path(voices_dir: Path) -> Path:
-    return voices_dir / DASHSCOPE_MAPPING_FILE_NAME
+def mapping_path() -> Path:
+    return data_dir() / DASHSCOPE_MAPPING_FILE_NAME
 
 
 def _wav_meta(wav_path: Path) -> tuple[float, str]:
@@ -48,9 +48,9 @@ def _wav_meta(wav_path: Path) -> tuple[float, str]:
     return duration, digest
 
 
-def load_mapping(voices_dir: Path) -> Mapping:
-    """Load the Name -> {voice_id, wav_sha256, target_model} mapping."""
-    path = mapping_path(voices_dir)
+def load_mapping() -> Mapping:
+    """Load the Name -> {voice_id, wav_sha256, target_model} mapping from the data folder."""
+    path = mapping_path()
     if not path.exists():
         return {}
     try:
@@ -61,10 +61,10 @@ def load_mapping(voices_dir: Path) -> Mapping:
         return {}
 
 
-def save_mapping(voices_dir: Path, mapping: Mapping) -> None:
-    mapping_path(voices_dir).write_text(
-        json.dumps(mapping, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+def save_mapping(mapping: Mapping) -> None:
+    path = mapping_path()
+    path.parent.mkdir(parents=True, exist_ok=True)  # the data folder does not exist before the first enrollment
+    path.write_text(json.dumps(mapping, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _enroll_one(name: str, wav_path: Path, api_key: str) -> Optional[dict[str, Any]]:
@@ -126,7 +126,7 @@ def enroll_progress(api_key: str, voices_dir: Path) -> Iterator[str]:
         yield f"DashScope enroll: voices dir not found: {voices_dir}"
         return
 
-    mapping = load_mapping(voices_dir)
+    mapping = load_mapping()
     enrolled = skipped = failed = 0
     for sub in sorted(voices_dir.iterdir()):
         wav = sub / f"{sub.name}.wav"
@@ -149,7 +149,7 @@ def enroll_progress(api_key: str, voices_dir: Path) -> Iterator[str]:
             yield f"DashScope enroll: '{name}' failed — see log for details"
 
     if enrolled:
-        save_mapping(voices_dir, mapping)
+        save_mapping(mapping)
     tail = f", {failed} failed" if failed else ""
     yield (
         f"DashScope enroll done: {enrolled} new, {skipped} already current"

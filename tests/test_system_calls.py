@@ -138,6 +138,51 @@ def test_docker_not_answering_is_a_failed_measurement_not_no_pids(monkeypatch: p
         vram.container_host_pids("xtts")
 
 
+@pytest.mark.parametrize("state", ["running", "created", "restarting", "exited"])
+def test_the_state_of_a_container_comes_from_docker_inspect(state: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = _Run(stdout=f"{state}\n")
+    monkeypatch.setattr(subprocess, "run", run)
+    assert docker_ctl.container_state("xtts") == state
+    assert run.calls[0]["command"] == ["docker", "inspect", "--type", "container", "-f", "{{.State.Status}}", "xtts"]
+
+
+def test_a_container_that_is_not_there_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", _Run(returncode=1, stderr="Error: No such container: xtts"))
+    assert docker_ctl.container_state("xtts") == "absent"
+
+
+@pytest.mark.parametrize(
+    ("run", "message"),
+    [
+        (_Run(returncode=1, stderr="Cannot connect to the Docker daemon"), "Docker daemon"),
+        (_Run(raises=FileNotFoundError("docker")), "docker unavailable"),
+        (_Run(raises=subprocess.TimeoutExpired("docker", 5)), "docker unavailable"),
+        (_Run(stdout="paused\n"), "unexpected state: 'paused'"),
+        (_Run(stdout="\n"), "unexpected state: ''"),
+    ],
+)
+def test_docker_not_answering_is_an_unreadable_state_not_absent(
+    run: _Run, message: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(docker_ctl.ContainerStateUnreadable, match=message):
+        docker_ctl.container_state("xtts")
+
+
+def test_the_log_tail_of_a_container_is_one_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    run = _Run(stdout="loading\n", stderr="OutOfMemoryError: CUDA\n  aborting \n")
+    monkeypatch.setattr(subprocess, "run", run)
+    assert docker_ctl.container_log_tail("xtts") == "loading | OutOfMemoryError: CUDA | aborting"
+    assert run.calls[0]["command"] == ["docker", "logs", "--tail", "5", "xtts"]
+
+
+def test_a_failing_docker_logs_gives_no_tail(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", _Run(returncode=1, stderr="No such container: xtts"))
+    assert docker_ctl.container_log_tail("xtts") == ""
+    monkeypatch.setattr(subprocess, "run", _Run(raises=subprocess.TimeoutExpired("docker", 5)))
+    assert docker_ctl.container_log_tail("xtts") == ""
+
+
 def test_the_ssh_command_pins_key_port_and_target(monkeypatch: pytest.MonkeyPatch) -> None:
     run = _Run(stdout="up\n")
     monkeypatch.setattr(subprocess, "run", run)

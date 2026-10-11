@@ -11,6 +11,7 @@ import pytest
 
 from speech_fakes import TEST_EXECUTOR
 
+from tts_suite.constants import DATA_DIR_DEFAULT, DATA_DIR_ENV, PIPER_MODELS_DIR_NAME, data_dir
 from tts_suite.engines import TTSFailure, get_engine
 from tts_suite.engines.edge.engine import EDGE_STANDARD_VOICE
 from tts_suite.engines.espeak.engine import ESPEAK_STANDARD_VOICE
@@ -135,6 +136,17 @@ def test_espeak_real_synthesis_returns_a_wav() -> None:
 
 # ── Piper ──────────────────────────────────────────────────────────
 
+def test_the_data_folder_comes_from_the_environment_else_the_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setenv(DATA_DIR_ENV, str(tmp_path))
+    assert data_dir() == tmp_path
+    monkeypatch.delenv(DATA_DIR_ENV)
+    assert data_dir() == DATA_DIR_DEFAULT
+    monkeypatch.setenv(DATA_DIR_ENV, "")  # an empty variable counts as unset
+    assert data_dir() == DATA_DIR_DEFAULT
+
+
 def _fake_piper(monkeypatch: pytest.MonkeyPatch, returncode: int = 0, write: bool = True) -> RunRecorder:
     recorder = RunRecorder(_completed(returncode=returncode, stdout=b"", stderr=b"model missing"))
 
@@ -147,11 +159,14 @@ def _fake_piper(monkeypatch: pytest.MonkeyPatch, returncode: int = 0, write: boo
     return recorder
 
 
-def test_piper_passes_model_and_length_scale_and_returns_the_file_content(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_piper_passes_model_and_length_scale_and_returns_the_file_content(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setenv(DATA_DIR_ENV, str(tmp_path))
     recorder = _fake_piper(monkeypatch)
     assert _engine("piper").generate_speech("Hallo", "Deutsch (Ramona)", "de", speed=2.0) == AUDIO
     command = recorder.calls[0]["command"]
-    assert command[command.index("--model") + 1] == str(piper_module.PIPER_MODELS_DIR / "de_DE-ramona-low.onnx")
+    assert command[command.index("--model") + 1] == str(tmp_path / PIPER_MODELS_DIR_NAME / "de_DE-ramona-low.onnx")
     assert command[command.index("--length_scale") + 1] == "0.5"
     assert recorder.calls[0]["input"] == b"Hallo"
 

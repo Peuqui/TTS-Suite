@@ -8,13 +8,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ...constants import PIPER_MODELS_DIR
+from ...constants import PIPER_MODELS_DIR_NAME, data_dir
 from ..base import TTSEngine, TTSFailure, validate_audio
 
 logger = logging.getLogger(__name__)
 
-# Display name → (ONNX model filename, language code). Models live in
-# ``PIPER_MODELS_DIR`` (``<suite root>/piper_models/<filename>``). Adding a new voice:
+# Display name → (ONNX model filename, language code). Models live in the data folder of the suite
+# (``data_dir() / PIPER_MODELS_DIR_NAME / <filename>``). Adding a new voice:
 # drop the .onnx file in that directory and add a line here.
 PIPER_VOICES: dict[str, tuple[str, str]] = {
     # Deutsch — männliche Stimmen
@@ -75,7 +75,7 @@ class PiperEngine(TTSEngine):
             # instead of nothing — visible in the log.
             model_filename, _lang = PIPER_VOICES[PIPER_STANDARD_VOICE]
             logger.warning("Piper: voice %r unknown — speaking with the standard voice %r", voice, PIPER_STANDARD_VOICE)
-        model_path = PIPER_MODELS_DIR / model_filename
+        model_path = data_dir() / PIPER_MODELS_DIR_NAME / model_filename
 
         # length_scale inverts speed: higher = slower (1.0 = normal,
         # 0.8 ≈ 1.25× faster, 0.5 = 2× faster).
