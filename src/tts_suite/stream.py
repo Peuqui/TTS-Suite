@@ -3,7 +3,8 @@
 Behaviour as in AIfred Intelligence (``speech_synthesis.py``): the first unit is generated at
 once and delivered, the others are generated meanwhile (in parallel, as far as the engine's
 slots allow) and delivered in speaking order. While a segment takes longer than the keep-alive
-interval, a piece of silence is delivered so that the connection of the client stays alive.
+interval, a keep-alive marker (a segment without audio) is delivered so that the client sees the stream
+is alive; what it does with the marker is its decision (a device channel plays its own silence).
 
 Which unit the text is cut by depends on the engine that speaks. That engine is chosen when
 the first text arrives (the choice may start a container), so the stream collects text until
@@ -24,33 +25,16 @@ is delivered first, as a segment of its own.
 from __future__ import annotations
 
 import asyncio
-import io
-import wave
 from types import MappingProxyType
 from typing import Any, AsyncIterator, Mapping
 
 from .api import AudioSegment, SpeakRequest, SpeakSummary
-from .constants import KEEPALIVE_SEC, KEEPALIVE_SILENCE_MS, MEDIA_TYPE_WAV
-from .escalation import EscalationEntry, Spoken, SpeechRun
+from .constants import KEEPALIVE_SEC
+from .escalation import EscalationEntry, SpeechRun, Spoken
 from .splitting import UnitCutter
 
-#: Sample value of silence in 8-bit WAV (unsigned); all wider samples are signed, silence is 0.
-SILENCE_8BIT = 0x80
-
-
-def silence_like(reference_wav: bytes, duration_ms: int) -> bytes:
-    """A WAV file of silence with the sample rate, channels and sample width of ``reference_wav``."""
-    with wave.open(io.BytesIO(reference_wav), "rb") as reference:
-        channels, width, rate = reference.getnchannels(), reference.getsampwidth(), reference.getframerate()
-    frames = rate * duration_ms // 1000
-    sample = bytes([SILENCE_8BIT]) if width == 1 else bytes(width)
-    buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as silence:
-        silence.setnchannels(channels)
-        silence.setsampwidth(width)
-        silence.setframerate(rate)
-        silence.writeframes(sample * (frames * channels))
-    return buffer.getvalue()
+#: Sent while a segment takes long: no audio, no format, no engine — the client decides what to do with it.
+KEEPALIVE_MARKER = AudioSegment(audio=b"", media_type="", engine="", keepalive=True)
 
 
 class Stream:
@@ -74,9 +58,9 @@ class Stream:
         self._sealed = False  # the end of the results is queued
         self._closed = False
         self._error: Exception | None = None
-        self._keepalive: AudioSegment | None = None
         self._window: asyncio.Semaphore = asyncio.Semaphore(0)  # replaced when the entry is chosen
         self._last_entry: EscalationEntry | None = None  # who spoke the segment delivered last
+        self._delivered_any = False  # the keep-alive starts after the first segment
 
     # ── Input ───────────────────────────────────────────────────────
 
@@ -178,11 +162,12 @@ class Stream:
             await self.aclose()
 
     async def _keep_alive_until_done(self, future: asyncio.Future[Any]) -> AsyncIterator[AudioSegment]:
-        """Wait for ``future``; every keep-alive interval without result yields a piece of silence."""
+        """Wait for ``future``; every keep-alive interval without result yields a keep-alive marker (not
+        before the first delivered segment: the client's connection is only at risk once audio has started)."""
         while not future.done() and not self._closed:
             await asyncio.wait({future}, timeout=self._keepalive_s)
-            if not future.done() and self._keepalive is not None:
-                yield self._keepalive
+            if not future.done() and self._delivered_any:
+                yield KEEPALIVE_MARKER
 
     async def _announce_voice_change(self, successor: EscalationEntry) -> AsyncIterator[AudioSegment]:
         """Nothing when ``successor`` speaks on after the entry of the last delivered segment (or no
@@ -204,17 +189,8 @@ class Stream:
         yield self._segment(task.result())
 
     def _segment(self, spoken: Spoken) -> AudioSegment:
-        segment = AudioSegment(spoken.audio, spoken.entry.engine.audio_media_type, spoken.entry.label)
-        self._remember_silence(segment)
-        return segment
-
-    def _remember_silence(self, segment: AudioSegment) -> None:
-        """The keep-alive silence has the format of the stream, known from its first segment.
-        Only a WAV stream can be filled with a WAV silence."""
-        if self._keepalive is None and segment.media_type == MEDIA_TYPE_WAV:
-            self._keepalive = AudioSegment(
-                silence_like(segment.audio, KEEPALIVE_SILENCE_MS), MEDIA_TYPE_WAV, "", keepalive=True,
-            )
+        self._delivered_any = True
+        return AudioSegment(spoken.audio, spoken.entry.engine.audio_media_type, spoken.entry.label)
 
     @property
     def summary(self) -> SpeakSummary:

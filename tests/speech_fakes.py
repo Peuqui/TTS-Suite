@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import io
 import wave
+from concurrent.futures import Executor, ThreadPoolExecutor
 from typing import Any, Coroutine, TypeVar
 
 from tts_suite.api import EngineDefaults, EngineStarting, Unit
@@ -13,6 +14,9 @@ from tts_suite.escalation import EngineSlotTable, EscalationEntry, Skip, SpeechR
 SAMPLE_RATE = 24000
 FRAMES_PER_CHARACTER = 10
 T = TypeVar("T")
+
+#: The pool the fakes' blocking syntheses would run in (a real one; the speaker owns the production pool).
+TEST_EXECUTOR = ThreadPoolExecutor(4)
 
 
 def run_async(scenario: Coroutine[Any, Any, T], timeout: float = 10) -> T:
@@ -75,7 +79,7 @@ class FakeEngine(TTSEngine):
         return {}
 
     async def generate_speech_async(
-        self, text: str, voice: str, language: str, speed: float = 1.0, pitch: float = 1.0,
+        self, text: str, voice: str, language: str, speed: float = 1.0, pitch: float = 1.0, *, executor: Executor,
     ) -> bytes:
         self.texts.append(text)
         calls = len(self.texts)
@@ -106,14 +110,14 @@ class GatedFailEngine(FakeEngine):
         self.fail_gates: dict[str, asyncio.Event] = {}
 
     async def generate_speech_async(
-        self, text: str, voice: str, language: str, speed: float = 1.0, pitch: float = 1.0,
+        self, text: str, voice: str, language: str, speed: float = 1.0, pitch: float = 1.0, *, executor: Executor,
     ) -> bytes:
         for marker, gate in self.fail_gates.items():
             if marker in text:
                 self.texts.append(text)
                 await gate.wait()
                 raise TTSFailure("unreachable", f"{self.key} broke on {marker}")
-        return await super().generate_speech_async(text, voice, language, speed, pitch)
+        return await super().generate_speech_async(text, voice, language, speed, pitch, executor=executor)
 
 
 class FakeLauncher:
@@ -156,5 +160,5 @@ def make_run(
     defaults: dict[str, EngineDefaults] | None = None,
 ) -> SpeechRun:
     defaults = defaults or {}
-    return SpeechRun(tuple(entries), launcher or FakeLauncher(), EngineSlotTable(defaults), defaults)
+    return SpeechRun(tuple(entries), launcher or FakeLauncher(), EngineSlotTable(defaults), defaults, TEST_EXECUTOR)
 

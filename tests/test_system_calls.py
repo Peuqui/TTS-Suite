@@ -6,14 +6,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from container_fakes import ARAGON
 
 from tts_suite import docker_ctl, host_ctl, placement, vram
 from tts_suite.api import Host
 from tts_suite.constants import DOCKER_COMPOSE_TIMEOUT_S, TTS_HOST_SSH_KEY_DEFAULT
-from tts_suite.engines import get_engine
 from tts_suite.engines import base as engines_base
+from tts_suite.engines import get_engine
 from tts_suite.vram import ComputeApp, engine_vram_mib, parse_compute_apps
 
 

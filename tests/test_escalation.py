@@ -5,8 +5,16 @@ import asyncio
 from pathlib import Path
 
 import pytest
-
-from speech_fakes import FakeEngine, FakeLauncher, GatedFailEngine, entry, frames_for, make_run, run_async, wav_info
+from speech_fakes import (
+    FakeEngine,
+    FakeLauncher,
+    GatedFailEngine,
+    entry,
+    frames_for,
+    make_run,
+    run_async,
+    wav_info,
+)
 
 from tts_suite import escalation
 from tts_suite.api import (
@@ -23,7 +31,13 @@ from tts_suite.api import (
     VoiceSettings,
 )
 from tts_suite.engines import get_engine
-from tts_suite.escalation import EngineSlots, RunTable, Skip, bind_entries, resolve_voice
+from tts_suite.escalation import (
+    EngineSlots,
+    RunTable,
+    Skip,
+    bind_entries,
+    resolve_voice,
+)
 
 ARAGON = Host("Aragon", "192.0.2.2")
 REQUEST = SpeakRequest(language="de")

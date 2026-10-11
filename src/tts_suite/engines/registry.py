@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Iterator, Mapping, Protocol
 
-from ..api import EngineDefaults, EntryConfig, UnknownEngine, Unit
+from ..api import EngineDefaults, EntryConfig, Unit, UnknownEngine
 from .base import SPEECH_UNITS, TTSEngine
 
 ENGINES_DIR = Path(__file__).parent

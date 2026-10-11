@@ -5,9 +5,12 @@ import asyncio
 import io
 import shutil
 import wave
+from concurrent.futures import Executor
 from typing import Any
 
 import pytest
+
+from speech_fakes import TEST_EXECUTOR
 
 from tts_suite import postprocess
 from tts_suite.engines import TTSEngine, TTSFailure, get_engine
@@ -120,7 +123,7 @@ class _Recorder:
     def __init__(self) -> None:
         self.calls: list[tuple[Any, ...]] = []
 
-    async def generate(self, text: str, voice: str, language: str, speed: float, pitch: float) -> bytes:
+    async def generate(self, text: str, voice: str, language: str, speed: float, pitch: float, *, executor: Executor) -> bytes:
         self.calls.append((text, voice, language, speed, pitch))
         return _wav(1.0)
 
@@ -129,7 +132,7 @@ def test_synthesize_strips_the_star_and_skips_ffmpeg_for_unchanged_audio(monkeyp
     engine = _engine("xtts")
     recorder = _Recorder()
     monkeypatch.setattr(engine, "generate_speech_async", recorder.generate)
-    audio = asyncio.run(synthesize(engine, "Hallo", "★ Codine", "de"))
+    audio = asyncio.run(synthesize(engine, "Hallo", "★ Codine", "de", executor=TEST_EXECUTOR))
     assert recorder.calls == [("Hallo", "Codine", "de", 1.0, 1.0)]
     assert _duration(audio) == pytest.approx(1.0)
 
@@ -139,7 +142,7 @@ def test_synthesize_post_processes_speed_for_engines_without_native_speed(monkey
     engine = _engine("xtts")
     monkeypatch.setattr(engine, "generate_speech_async", _Recorder().generate)
     monkeypatch.setattr(type(engine), "audio_media_type", "audio/wav")
-    audio = asyncio.run(synthesize(engine, "Hallo", "Codine", "de", speed=2.0))
+    audio = asyncio.run(synthesize(engine, "Hallo", "Codine", "de", speed=2.0, executor=TEST_EXECUTOR))
     assert _duration(audio) == pytest.approx(0.5, abs=0.1)
 
 
@@ -148,6 +151,6 @@ def test_synthesize_leaves_native_speed_to_the_engine(monkeypatch: pytest.Monkey
     engine = _engine("piper")
     recorder = _Recorder()
     monkeypatch.setattr(engine, "generate_speech_async", recorder.generate)
-    audio = asyncio.run(synthesize(engine, "Hallo", "Deutsch (Thorsten)", "de", speed=2.0))
+    audio = asyncio.run(synthesize(engine, "Hallo", "Deutsch (Thorsten)", "de", speed=2.0, executor=TEST_EXECUTOR))
     assert recorder.calls[0][3] == 2.0          # handed to the engine
     assert _duration(audio) == pytest.approx(1.0)  # and not applied a second time

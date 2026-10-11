@@ -5,8 +5,16 @@ import asyncio
 from pathlib import Path
 
 import pytest
-
-from speech_fakes import FakeEngine, FakeLauncher, GatedFailEngine, entry, frames_for, make_run, run_async, wav_info
+from speech_fakes import (
+    FakeEngine,
+    FakeLauncher,
+    GatedFailEngine,
+    entry,
+    frames_for,
+    make_run,
+    run_async,
+    wav_info,
+)
 
 from tts_suite.api import (
     AudioSegment,
@@ -19,8 +27,9 @@ from tts_suite.api import (
     SpeakRequest,
     SuiteConfig,
     UnknownEngine,
+    UnsupportedLanguage,
 )
-from tts_suite.constants import KEEPALIVE_SILENCE_MS, MEDIA_TYPE_WAV
+from tts_suite.constants import MEDIA_TYPE_MP3, MEDIA_TYPE_OGG, MEDIA_TYPE_WAV
 from tts_suite.speaker import Speaker
 from tts_suite.stream import Stream
 
@@ -190,8 +199,10 @@ def test_the_segments_of_a_long_text_still_all_come_when_the_consumer_reads_on()
 # ── Keep-alive ──────────────────────────────────────────────────────
 
 
-def test_a_slow_segment_is_bridged_by_silence_in_the_format_of_the_stream() -> None:
+@pytest.mark.parametrize("media_type", [MEDIA_TYPE_WAV, MEDIA_TYPE_OGG, MEDIA_TYPE_MP3])
+def test_a_slow_segment_is_bridged_by_a_marker_without_audio_in_every_format(media_type: str) -> None:
     engine = FakeEngine("a")
+    engine.audio_media_type = media_type
     engine.gates = {"zweite": asyncio.Event()}
     stream = Stream(REQUEST, make_run([entry(engine)]), keepalive_s=0.02)
 
@@ -200,16 +211,17 @@ def test_a_slow_segment_is_bridged_by_silence_in_the_format_of_the_stream() -> N
         await stream.finish()
         segments = stream.segments()
         got = [await anext(segments)]
-        got.append(await anext(segments))  # the second sentence hangs: silence instead
+        got.append(await anext(segments))  # the second sentence hangs: a marker instead
+        await asyncio.sleep(0.1)  # more intervals pass: more markers are due
+        got.append(await anext(segments))
         engine.gates["zweite"].set()
         got += [segment async for segment in segments]
         return got
 
     got = run_async(scenario())
-    assert got[0].keepalive is False
-    keepalive = got[1]
-    assert keepalive.keepalive and keepalive.engine == "" and keepalive.media_type == MEDIA_TYPE_WAV
-    assert wav_info(keepalive.audio) == (24000 * KEEPALIVE_SILENCE_MS // 1000, 24000)
+    assert got[0].keepalive is False and got[0].media_type == media_type
+    for marker in got[1:3]:
+        assert marker == AudioSegment(audio=b"", media_type="", engine="", keepalive=True)
     assert [s.keepalive for s in got if s.engine] == [False, False, False]
 
 
@@ -565,6 +577,34 @@ def test_a_broken_configuration_leaves_the_old_one_in_place(tmp_path: Path, monk
 
 async def _collect_text(speaker: Speaker) -> list[AudioSegment]:
     return await collect(speaker.speak(TEXT, REQUEST))
+
+
+@pytest.mark.parametrize("language", ["fr", "", "DE"])
+def test_a_language_without_suite_texts_is_refused_at_once_and_nothing_is_started(
+    language: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = FakeEngine("fake")
+    _install(monkeypatch, engine)
+    launcher = FakeLauncher({"fake": None})  # down: a reading would start it
+    speaker = Speaker(_config(tmp_path, ["fake"]), launcher)
+    request = SpeakRequest(language=language)
+    with pytest.raises(UnsupportedLanguage):
+        speaker.open_stream(request)
+    with pytest.raises(UnsupportedLanguage):
+        speaker.speak("Ein Satz kommt hier.", request)
+    assert launcher.asked == [] and launcher.starts == [] and engine.texts == []
+
+
+@pytest.mark.parametrize("language", ["de", "en"])
+def test_the_languages_of_the_suite_texts_are_spoken(
+    language: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, FakeEngine("fake"))
+    speaker = Speaker(_config(tmp_path, ["fake"]), FakeLauncher())
+    async def scenario() -> list[AudioSegment]:
+        return await collect(speaker.speak("Ein Satz kommt hier.", SpeakRequest(language=language)))
+
+    assert len(run_async(scenario())) == 1
 
 
 def _config(tmp_path: Path, keys: list[str]) -> SuiteConfig:

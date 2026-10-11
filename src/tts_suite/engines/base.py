@@ -8,6 +8,8 @@ import subprocess
 import sys
 import time
 from abc import ABC, abstractmethod
+from concurrent.futures import Executor
+from functools import partial
 from pathlib import Path
 from typing import Any, Iterator, Optional, Self, get_args
 
@@ -490,14 +492,19 @@ class TTSEngine(ABC):
         language: str,
         speed: float = 1.0,
         pitch: float = 1.0,
+        *,
+        executor: Executor,
     ) -> bytes:
         """Async wrapper around :meth:`generate_speech`. The default
-        offloads the sync method to a worker thread so blocking
-        HTTP / subprocess calls don't stall the event loop. Engines with
-        native async IO (Edge) override this and skip the sync method.
+        offloads the sync method to a thread of ``executor`` (the speaker's own pool for syntheses)
+        so blocking HTTP / subprocess calls don't stall the event loop and don't take threads
+        from the default executor. Engines with native async IO (Edge) override this, skip the
+        sync method and ignore ``executor``. Cancelling the coroutine does not stop a running thread.
         """
         import asyncio
-        return await asyncio.to_thread(self.generate_speech, text, voice, language, speed, pitch)
+        return await asyncio.get_running_loop().run_in_executor(
+            executor, partial(self.generate_speech, text, voice, language, speed, pitch),
+        )
 
     def _synthesize_via_http(self, path: str, payload: dict[str, Any]) -> bytes:
         """POST ``payload`` to ``<service_url><path>`` and return the audio of the answer.

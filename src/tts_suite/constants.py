@@ -98,14 +98,21 @@ DASHSCOPE_ENROLL_TIMEOUT_S = 90
 
 # ── Speaking (escalation, text cutting, stream) ─────────────────────
 
-#: A segment that takes longer than this many seconds is followed by a keep-alive piece of silence
-#: until it is there (the client's connection may time out on a quiet stream). Source: ``FREEECHO2_KEEPALIVE_SEC``.
+#: A segment that takes longer than this many seconds is followed by a keep-alive marker (a segment
+#: without audio) every interval until it is there (the client's connection may time out on a quiet
+#: stream). Source: ``FREEECHO2_KEEPALIVE_SEC``.
 KEEPALIVE_SEC = 10.0
-#: Length of one keep-alive piece. Source: ``KEEPALIVE_SILENCE_MS``.
-KEEPALIVE_SILENCE_MS = 20
 
 #: How long the state of a run (failed entries, voice-change announcement) is kept after its last use.
 RUN_TTL_S = 600
+
+#: Threads for the blocking syntheses (the container engines, Piper, eSpeak, DashScope run their HTTP
+#: or subprocess call in a thread), one pool owned by the speaker so that health checks, starts and
+#: heartbeats (they use the default executor) never queue behind syntheses. Live syntheses are capped
+#: by the engine slots (``max_parallel_requests``, 2 per engine and host: about 10 on a full list), but
+#: the thread of an aborted reading keeps running until its request ends (up to ``TTS_READ_TIMEOUT_S``):
+#: 64 leaves room for the aborted ones of a stretch of quick skips before the pool runs dry.
+SYNTHESIS_THREADS = 64
 
 #: Requests that may wait for a free slot of an engine, beyond ``max_parallel_requests``, before ``Overloaded``.
 ENGINE_QUEUE_DEFAULT = 8

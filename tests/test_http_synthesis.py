@@ -7,6 +7,8 @@ from typing import Any
 import pytest
 import requests
 
+from speech_fakes import TEST_EXECUTOR
+
 from tts_suite.constants import TTS_CONNECT_TIMEOUT_S, TTS_READ_TIMEOUT_S
 from tts_suite.engines import TTSFailure
 from tts_suite.engines.qwen3local.engine import Qwen3LocalEngine
@@ -122,4 +124,4 @@ def test_xtts_delivers_ogg(container: FakeContainer) -> None:
 
 def test_async_generation_runs_the_sync_call_off_the_event_loop(container: FakeContainer) -> None:
     import asyncio
-    assert asyncio.run(XTTSEngine().generate_speech_async("Hallo", "Alice", "de")) == AUDIO
+    assert asyncio.run(XTTSEngine().generate_speech_async("Hallo", "Alice", "de", executor=TEST_EXECUTOR)) == AUDIO

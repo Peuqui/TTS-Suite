@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from container_fakes import (
     CardList,
     ContainerEngine,

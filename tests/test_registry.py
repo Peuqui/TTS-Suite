@@ -20,12 +20,12 @@ from tts_suite.engines import (
     installed_gpu_engines,
     is_deactivated,
     parse_speed_factor,
+    registry,
     reload_engines,
     require_engine,
     speech_unit,
     voice_names,
 )
-from tts_suite.engines import registry
 
 LANGUAGES = ("de", "en")
 EXPECTED_ORDER = [

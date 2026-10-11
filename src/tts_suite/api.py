@@ -163,7 +163,7 @@ class SpeakRequest:
     """Header of one reading; the text itself is given whole to :meth:`TTSSuite.speak`
     or in pieces to the stream from :meth:`TTSSuite.open_stream`."""
 
-    language: str
+    language: str  # must be one the suite has texts in, else ``UnsupportedLanguage`` at ``speak`` / ``open_stream``
     voice: str | None = None  # default voice (valid for the container engines)
     speed: float | None = None
     pitch: float | None = None
@@ -178,9 +178,12 @@ class AudioSegment:
     """One piece of audio, delivered in speaking order as soon as it exists."""
 
     audio: bytes
-    media_type: str  # "audio/wav"
+    media_type: str  # "audio/wav", "audio/ogg", "audio/mpeg"; empty for a keep-alive
     engine: str  # who spoke it, ``engine@host``; empty for a keep-alive
-    keepalive: bool = False  # silence that only holds the stream open while a segment takes long
+    keepalive: bool = False
+    """Marker without audio (``audio`` empty); the client decides what to do with it, for example a
+    device channel plays its own silence. It comes only after the first delivered segment and only
+    while a segment takes longer than ``KEEPALIVE_SEC``, in every audio format."""
 
 
 @dataclass(frozen=True)
@@ -206,16 +209,19 @@ class SpeechStream(Protocol):
         """Audio in speaking order. A failure after the first segment ends the iteration
         with the :class:`SuiteError` that caused it (before the first segment the same
         error comes from the first step of the iteration), never silently. Exception: a request
-        that names an engine unknown to the suite or missing from the list fails at once in
-        ``speak`` / ``open_stream`` (:class:`UnknownEngine`, :class:`NoEngineAvailable`).
+        that names an engine unknown to the suite or missing from the list, or a language the suite
+        has no texts in, fails at once in ``speak`` / ``open_stream`` (:class:`UnknownEngine`,
+        :class:`NoEngineAvailable`, :class:`UnsupportedLanguage`).
         A voice change after a failure is announced in a segment of its own, in front of the
         first segment of the successor."""
         ...
 
     async def aclose(self) -> None:
-        """Abort: stops the segments still being generated, releases the engine slots
-        and the lock of the run. The caller calls it when its client is gone; calling it
-        after a normal end does nothing."""
+        """Abort: stops the generation of this stream's remaining segments and releases the engine
+        slots and the lock of the run. A request already sent to a container is not cancelled
+        there, the container finishes it (its thread and HTTP call run to the end, up to the read
+        timeout). The caller calls it when its client is gone; calling it after a normal end does
+        nothing."""
         ...
 
     @property
@@ -248,6 +254,13 @@ class UnknownEngine(SuiteError):
     pass
 
 
+class UnsupportedLanguage(SuiteError):
+    """The suite has no texts of its own (announcements, hints) in the language of the request.
+    Raised at once by ``speak`` / ``open_stream``, before anything is started (the service answers
+    HTTP 400); the languages it has are those of ``i18n.json`` (``de`` and ``en`` at present).
+    Whether an engine can speak a supported language is not checked here: the escalation decides."""
+
+
 class EngineInUse(SuiteError):
     """``stop`` for a container that a reading is using right now (HTTP 409)."""
 
@@ -270,8 +283,9 @@ class TTSSuite(Protocol):
     """The engine layer. The service wraps it; programs may embed it."""
 
     async def aclose(self) -> None:
-        """Release semaphores, HTTP sessions and the table of runs (the service calls
-        it in its lifespan)."""
+        """Release semaphores, HTTP sessions, the table of runs and the synthesis threads (the
+        service calls it in its lifespan): syntheses not yet started are dropped, running ones
+        end on their own."""
         ...
 
     async def config(self) -> SuiteConfig: ...
@@ -287,10 +301,14 @@ class TTSSuite(Protocol):
 
     def speak(self, text: str, request: SpeakRequest) -> SpeechStream:
         """The whole text at once. Same behaviour as :meth:`open_stream` with one ``feed``
-        and a ``finish``: the first segment is out as soon as it is generated."""
+        and a ``finish``: the first segment is out as soon as it is generated. Raises
+        :class:`UnsupportedLanguage` (language without suite texts), :class:`UnknownEngine` and
+        :class:`NoEngineAvailable` (named engine) at once, before anything is started."""
         ...
 
-    def open_stream(self, request: SpeakRequest) -> SpeechStream: ...
+    def open_stream(self, request: SpeakRequest) -> SpeechStream:
+        """Same early errors as :meth:`speak`."""
+        ...
 
     async def start(self, engine: str, host: str | None = None) -> None:
         """Start the container and wait until it serves. Forgets why an earlier start of this entry

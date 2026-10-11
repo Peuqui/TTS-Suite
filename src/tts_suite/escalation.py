@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from concurrent.futures import Executor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import AsyncIterator, Callable, Mapping, Protocol
@@ -276,8 +277,10 @@ class SpeechRun:
         launcher: EngineLauncher,
         slots: EngineSlotTable,
         defaults: Mapping[str, EngineDefaults],
+        executor: Executor,
     ) -> None:
         self._entries = entries
+        self._executor = executor
         self._launcher = launcher
         self._slots = slots
         self._defaults = defaults
@@ -414,7 +417,7 @@ class SpeechRun:
         try:
             voice, speed, pitch = resolve_voice(entry.engine, request, self._defaults)
             async with self._slots.for_engine(entry.engine).slot():
-                audio = await synthesize(entry.engine, text, voice, request.language, speed, pitch)
+                audio = await synthesize(entry.engine, text, voice, request.language, speed, pitch, executor=self._executor)
             return audio
         finally:
             self._busy[entry.label] -= 1

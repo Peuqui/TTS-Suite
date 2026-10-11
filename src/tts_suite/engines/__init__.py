@@ -12,7 +12,14 @@ instead of branching on the engine key — adding an engine is a new folder, not
         audio = await engine.generate_speech_async("Hallo", "Alice", "de")
 """
 
-from .base import SPEECH_UNITS, DeactivatedEngine, TTSEngine, TTSFailure, shared_voice_names, validate_audio
+from .base import (
+    SPEECH_UNITS,
+    DeactivatedEngine,
+    TTSEngine,
+    TTSFailure,
+    shared_voice_names,
+    validate_audio,
+)
 from .registry import (
     TTS_ENGINES,
     default_escalation,

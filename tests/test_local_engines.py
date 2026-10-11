@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 
+from speech_fakes import TEST_EXECUTOR
+
 from tts_suite.engines import TTSFailure, get_engine
 from tts_suite.engines.edge.engine import EDGE_STANDARD_VOICE
 from tts_suite.engines.espeak.engine import ESPEAK_STANDARD_VOICE
@@ -53,19 +55,19 @@ def edge(monkeypatch: pytest.MonkeyPatch) -> type[FakeCommunicate]:
 
 
 def test_edge_joins_the_audio_chunks_and_maps_voice_and_rate(edge: type[FakeCommunicate]) -> None:
-    audio = asyncio.run(_engine("edge").generate_speech_async("Hallo", "Deutsch (Conrad)", "de", speed=1.25))
+    audio = asyncio.run(_engine("edge").generate_speech_async("Hallo", "Deutsch (Conrad)", "de", speed=1.25, executor=TEST_EXECUTOR))
     assert audio == AUDIO
     assert edge.created == [("Hallo", "de-DE-ConradNeural", "+25%")]
 
 
 def test_edge_unknown_voice_speaks_with_the_standard_voice(edge: type[FakeCommunicate]) -> None:
-    asyncio.run(_engine("edge").generate_speech_async("Hallo", "Nobody", "de"))
+    asyncio.run(_engine("edge").generate_speech_async("Hallo", "Nobody", "de", executor=TEST_EXECUTOR))
     assert edge.created[0][1] == EDGE_STANDARD_VOICE
 
 
 def test_edge_empty_text_is_a_software_failure(edge: type[FakeCommunicate]) -> None:
     with pytest.raises(TTSFailure) as failure:
-        asyncio.run(_engine("edge").generate_speech_async("  ", "Deutsch (Katja)", "de"))
+        asyncio.run(_engine("edge").generate_speech_async("  ", "Deutsch (Katja)", "de", executor=TEST_EXECUTOR))
     assert failure.value.reason == "software"
 
 
@@ -73,14 +75,14 @@ def test_edge_service_error_is_an_engine_failure(edge: type[FakeCommunicate]) ->
     from edge_tts.exceptions import NoAudioReceived
     edge.error = NoAudioReceived("none")
     with pytest.raises(TTSFailure) as failure:
-        asyncio.run(_engine("edge").generate_speech_async("Hallo", "Deutsch (Katja)", "de"))
+        asyncio.run(_engine("edge").generate_speech_async("Hallo", "Deutsch (Katja)", "de", executor=TEST_EXECUTOR))
     assert failure.value.reason == "engine"
 
 
 def test_edge_network_error_is_unreachable(edge: type[FakeCommunicate]) -> None:
     edge.error = ConnectionResetError("reset")
     with pytest.raises(TTSFailure) as failure:
-        asyncio.run(_engine("edge").generate_speech_async("Hallo", "Deutsch (Katja)", "de"))
+        asyncio.run(_engine("edge").generate_speech_async("Hallo", "Deutsch (Katja)", "de", executor=TEST_EXECUTOR))
     assert failure.value.reason == "unreachable"
 
 

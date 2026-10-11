@@ -4,12 +4,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from container_fakes import ARAGON, ContainerEngine, FakeManagedLauncher, install, make_config
+from container_fakes import (
+    ARAGON,
+    ContainerEngine,
+    FakeManagedLauncher,
+    install,
+    make_config,
+)
 from speech_fakes import FakeEngine, run_async
 
-from tts_suite import escalation, suite as suite_module
-from tts_suite.engines import registry
+from tts_suite import escalation
+from tts_suite import suite as suite_module
 from tts_suite.api import (
     ConfigInvalid,
     EngineControlFailed,
@@ -22,6 +27,7 @@ from tts_suite.api import (
     UnknownEngine,
     VoiceInfo,
 )
+from tts_suite.engines import registry
 from tts_suite.escalation import Skip
 from tts_suite.suite import Suite, create_suite
 

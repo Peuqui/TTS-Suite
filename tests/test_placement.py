@@ -4,11 +4,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from container_fakes import ContainerEngine
 
 from tts_suite.api import EngineDefaults, GpuRule, SuiteConfig
-from tts_suite.placement import GpuInfo, PlacementRefused, choose_gpu, parse_gpus, vram_budget_mib
+from tts_suite.placement import (
+    GpuInfo,
+    PlacementRefused,
+    choose_gpu,
+    parse_gpus,
+    vram_budget_mib,
+)
 
 CARDS = [GpuInfo(0, "GPU-a", 5000, 24000), GpuInfo(1, "GPU-b", 9000, 24000), GpuInfo(2, "GPU-c", 7000, 24000)]
 

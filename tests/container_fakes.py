@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from speech_fakes import FakeEngine, FakeLauncher
 
 from tts_suite.api import EngineDefaults, EntryConfig, EntryStatus, Host, SuiteConfig

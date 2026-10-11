@@ -1,49 +1,69 @@
-"""``docker/tts/_vram_limit/sitecustomize.py`` — run against a fake ``torch``, never the real one."""
+"""``docker/tts/_vram_limit/sitecustomize.py`` — run the way Python runs it: imported at interpreter start-up
+from ``PYTHONPATH``, in a subprocess, against a stub ``torch`` package (never the real one)."""
 from __future__ import annotations
 
+import json
+import os
 import py_compile
-import runpy
+import shutil
+import subprocess
 import sys
-import types
 from pathlib import Path
-from typing import Any, Callable
 
 import pytest
 
 from tts_suite.constants import DOCKER_TTS_DIR
 
 SCRIPT = DOCKER_TTS_DIR / "_vram_limit" / "sitecustomize.py"
-MIB = 1024 * 1024
+BUDGET_ENV = "TTS_VRAM_BUDGET_MIB"
+CARD_TOTAL_MIB = 16000
+
+# The stub records into the file named by STUB_LOG: that it was imported, that the callback was handed
+# to ``_lazy_call``, and what the callback then asked of the card.
+STUB_TORCH = f"""
+import json, os
+
+def _log(event):
+    with open(os.environ["STUB_LOG"], "a") as log:
+        log.write(json.dumps(event) + "\\n")
+
+def _lazy_call(callback):
+    _log(["lazy_call"])
+    callback()
+
+def get_device_properties(device):
+    _log(["get_device_properties", device])
+    class Properties:
+        total_memory = {CARD_TOTAL_MIB} * 1024 * 1024
+    return Properties()
+
+def set_per_process_memory_fraction(fraction, device):
+    _log(["set_fraction", fraction, device])
+
+class cuda:
+    _lazy_call = staticmethod(_lazy_call)
+    get_device_properties = staticmethod(get_device_properties)
+    set_per_process_memory_fraction = staticmethod(set_per_process_memory_fraction)
+
+_log(["imported"])
+"""
 
 
-class FakeTorch(types.ModuleType):
-    """Records what the script does: ``_lazy_call`` queues, ``set_per_process_memory_fraction`` is the cap."""
-
-    def __init__(self, total_mib: int) -> None:
-        super().__init__("torch")
-        self.queued: list[Callable[[], None]] = []
-        self.caps: list[tuple[float, int]] = []
-        self.device_queries: list[int] = []
-        torch = self
-
-        def get_device_properties(device: int) -> Any:
-            torch.device_queries.append(device)
-            return types.SimpleNamespace(total_memory=total_mib * MIB)
-
-        self.cuda = types.SimpleNamespace(
-            _lazy_call=self.queued.append,
-            get_device_properties=get_device_properties,
-            set_per_process_memory_fraction=lambda fraction, device: torch.caps.append((fraction, device)),
-        )
-
-
-def _run(monkeypatch: pytest.MonkeyPatch, torch: FakeTorch, budget: str | None) -> None:
-    monkeypatch.setitem(sys.modules, "torch", torch)
-    if budget is None:
-        monkeypatch.delenv("TTS_VRAM_BUDGET_MIB", raising=False)
-    else:
-        monkeypatch.setenv("TTS_VRAM_BUDGET_MIB", budget)
-    runpy.run_path(str(SCRIPT))
+def _start_interpreter(tmp_path: Path, budget: str | None) -> tuple[subprocess.CompletedProcess[str], list[list[object]]]:
+    startup = tmp_path / "startup"
+    (startup / "torch").mkdir(parents=True)
+    shutil.copy(SCRIPT, startup / "sitecustomize.py")
+    (startup / "torch" / "__init__.py").write_text(STUB_TORCH, encoding="utf-8")
+    log = tmp_path / "stub.log"
+    environment = {key: value for key, value in os.environ.items() if key != BUDGET_ENV}
+    environment |= {"PYTHONPATH": str(startup), "STUB_LOG": str(log)}
+    if budget is not None:
+        environment[BUDGET_ENV] = budget
+    result = subprocess.run(
+        [sys.executable, "-c", "print('program ran')"], env=environment, capture_output=True, text=True, timeout=60,
+    )
+    events = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    return result, events
 
 
 def test_the_script_compiles(tmp_path: Path) -> None:
@@ -51,24 +71,27 @@ def test_the_script_compiles(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("budget", [None, ""])
-def test_without_a_budget_nothing_happens(budget: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
-    torch = FakeTorch(total_mib=16384)
-    _run(monkeypatch, torch, budget)
-    assert torch.queued == [] and torch.caps == [] and torch.device_queries == []
+def test_without_a_budget_nothing_happens(budget: str | None, tmp_path: Path) -> None:
+    result, events = _start_interpreter(tmp_path, budget)
+    assert result.returncode == 0 and "program ran" in result.stdout
+    assert events == []  # torch was not even imported
 
 
-def test_the_cap_is_applied_only_when_cuda_is_first_used_and_as_a_share_of_the_card(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+def test_the_cap_is_registered_for_the_first_use_of_cuda_as_a_share_of_the_card(tmp_path: Path) -> None:
+    result, events = _start_interpreter(tmp_path, "4000")
+    assert result.returncode == 0 and "program ran" in result.stdout
+    assert events == [
+        ["imported"], ["lazy_call"], ["get_device_properties", 0], ["set_fraction", 4000 / CARD_TOTAL_MIB, 0],
+    ]
+    assert "[sitecustomize] VRAM cap 4000 MiB" in result.stdout
+
+
+@pytest.mark.parametrize("budget", ["lots", "0", "-5", "1.5", " "])
+def test_an_invalid_budget_stops_the_interpreter_instead_of_running_without_the_cap(
+    budget: str, tmp_path: Path,
 ) -> None:
-    torch = FakeTorch(total_mib=16000)
-    _run(monkeypatch, torch, "4000")
-    # Registered through _lazy_call, not applied: the server master must not initialise CUDA before the fork.
-    assert len(torch.queued) == 1 and torch.caps == [] and torch.device_queries == []
-    torch.queued[0]()  # CUDA initialises
-    assert torch.caps == [(0.25, 0)] and torch.device_queries == [0]
-    assert "[sitecustomize] VRAM cap 4000 MiB" in capsys.readouterr().out
-
-
-def test_a_budget_that_is_not_a_number_is_an_error_not_silence(monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(ValueError):
-        _run(monkeypatch, FakeTorch(total_mib=16000), "lots")
+    result, events = _start_interpreter(tmp_path, budget)
+    assert result.returncode != 0
+    assert "program ran" not in result.stdout
+    assert BUDGET_ENV in result.stderr and "VRAM cap" in result.stderr
+    assert events == []

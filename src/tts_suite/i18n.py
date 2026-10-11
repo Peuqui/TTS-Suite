@@ -1,4 +1,4 @@
-"""Texts the suite speaks itself (voice-change announcements), German and English.
+"""Texts the suite speaks itself (voice-change announcements, hints), German and English.
 
 The texts live in ``i18n.json`` (``{key: {language: text}}``), not in the code.
 """
@@ -9,12 +9,8 @@ import json
 from functools import cache
 from pathlib import Path
 
-from .api import SuiteError
+from .api import UnsupportedLanguage
 from .constants import I18N_FILE_NAME
-
-
-class UnsupportedLanguage(SuiteError):
-    """The suite has no text for the requested language."""
 
 
 @cache
@@ -23,6 +19,12 @@ def _texts() -> dict[str, dict[str, str]]:
         (Path(__file__).parent / I18N_FILE_NAME).read_text(encoding="utf-8")
     )
     return texts
+
+
+def supported_languages() -> frozenset[str]:
+    """The languages the suite has ALL its own texts in (announcements, hints): the one list of
+    languages a reading may ask for, read from ``i18n.json``."""
+    return frozenset.intersection(*(frozenset(by_language) for by_language in _texts().values()))
 
 
 def translate(key: str, language: str, **values: str) -> str:

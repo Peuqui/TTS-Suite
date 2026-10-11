@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import Executor
 
 from ...constants import MEDIA_TYPE_MP3
 from ..base import TTSEngine, TTSFailure, validate_audio
@@ -62,8 +63,10 @@ class EdgeEngine(TTSEngine):
         language: str,
         speed: float = 1.0,
         pitch: float = 1.0,
+        *,
+        executor: Executor,
     ) -> bytes:
-        """Edge TTS — native async via edge-tts library. ``voice`` here
+        """Edge TTS — native async via edge-tts library (``executor`` stays unused). ``voice`` here
         is the display name; we map it through ``voices_fallback`` to
         the Microsoft voice id (``de-DE-KatjaNeural`` etc.). Speed is
         applied natively via the rate string (``+25%`` = 25% faster);

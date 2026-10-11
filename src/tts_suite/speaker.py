@@ -7,13 +7,28 @@ opens the streams. ``TTSSuite`` (api) wraps it together with the engine manageme
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Any, Callable
 
-from .api import NoEngineAvailable, SpeakRequest, SuiteConfig, UnknownEngine
-from .constants import KEEPALIVE_SEC, RUN_TTL_S
+from .api import (
+    NoEngineAvailable,
+    SpeakRequest,
+    SuiteConfig,
+    UnknownEngine,
+    UnsupportedLanguage,
+)
+from .constants import KEEPALIVE_SEC, RUN_TTL_S, SYNTHESIS_THREADS
 from .engines.registry import get_engine
-from .escalation import EngineLauncher, EngineSlotTable, EscalationEntry, RunTable, SpeechRun, bind_entries
+from .escalation import (
+    EngineLauncher,
+    EngineSlotTable,
+    EscalationEntry,
+    RunTable,
+    SpeechRun,
+    bind_entries,
+)
+from .i18n import supported_languages
 from .stream import Stream
 
 
@@ -51,6 +66,8 @@ class Speaker:
         self._keepalive_s = keepalive_s
         self._runs = RunTable(run_ttl_s, clock)
         self._slots = EngineSlotTable(config.engines)
+        # Blocking syntheses only; health checks and starts keep the default executor to themselves.
+        self._executor = ThreadPoolExecutor(SYNTHESIS_THREADS, thread_name_prefix="tts-synthesis")
         self.set_config(config)
 
     def set_config(self, config: SuiteConfig) -> None:
@@ -70,6 +87,7 @@ class Speaker:
         return self._entries
 
     def open_stream(self, request: SpeakRequest) -> Stream:
+        self._require_supported_language(request)
         entries = self._entries_for(request)
         run = self._run_for(request, entries)
         return AttachedStream(
@@ -86,6 +104,16 @@ class Speaker:
 
     async def aclose(self) -> None:
         self._runs.clear()
+        # Not waiting: a thread inside a container request cannot be stopped and ends on its own.
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
+    @staticmethod
+    def _require_supported_language(request: SpeakRequest) -> None:
+        languages = supported_languages()
+        if request.language not in languages:
+            raise UnsupportedLanguage(
+                f"the suite has no texts in language {request.language!r} (have {sorted(languages)})"
+            )
 
     def _entries_for(self, request: SpeakRequest) -> tuple[EscalationEntry, ...]:
         """The list, or — for a request that names an engine — only that engine's entries."""
@@ -104,7 +132,7 @@ class Speaker:
 
     def _run_for(self, request: SpeakRequest, entries: tuple[EscalationEntry, ...]) -> SpeechRun:
         def create() -> SpeechRun:
-            return SpeechRun(entries, self._launcher, self._slots, self._config.engines)
+            return SpeechRun(entries, self._launcher, self._slots, self._config.engines, self._executor)
 
         if request.run is None:
             return create()
