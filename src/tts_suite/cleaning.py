@@ -94,11 +94,11 @@ _BLANK_LINES = re.compile(r"\n{3,}")
 
 
 def _compile_pronunciations(pronunciations: Mapping[str, str]) -> re.Pattern[str] | None:
-    """One pattern for all words (whole words, case as given; the longest first)."""
+    """One pattern for all words (whole words, whatever their case; the longest first)."""
     if not pronunciations:
         return None
     words = sorted(pronunciations, key=len, reverse=True)
-    return re.compile(r"(?<!\w)(?:" + "|".join(re.escape(word) for word in words) + r")(?!\w)")
+    return re.compile(r"(?<!\w)(?:" + "|".join(re.escape(word) for word in words) + r")(?!\w)", re.IGNORECASE)
 
 
 class TextCleaner:
@@ -108,7 +108,8 @@ class TextCleaner:
 
     def __init__(self, language: str, pronunciations: Mapping[str, str]) -> None:
         self._language = language
-        self._pronunciations = pronunciations
+        # Looked up by the lower-case word: the pattern ignores the case of the text.
+        self._pronunciations = {word.casefold(): spoken for word, spoken in pronunciations.items()}
         self._pronunciation_pattern = _compile_pronunciations(pronunciations)
         self._announced: set[str] = set()
         self._list_items = 0  # consecutive list items seen (a unit is one item)
@@ -169,7 +170,7 @@ class TextCleaner:
     def _pronounce(self, text: str) -> str:
         if self._pronunciation_pattern is None:
             return text
-        return self._pronunciation_pattern.sub(lambda match: self._pronunciations[match.group(0)], text)
+        return self._pronunciation_pattern.sub(lambda match: self._pronunciations[match.group(0).casefold()], text)
 
     def _replace_code_blocks(self, text: str) -> str:
         """Code becomes one spoken hint. A fence may open in one unit and close in a later one: the

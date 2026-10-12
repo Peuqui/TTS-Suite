@@ -137,9 +137,13 @@ def _check_defaults(config: SuiteConfig) -> None:
 
 
 def _check_pronunciations(config: SuiteConfig) -> None:
+    seen: set[str] = set()
     for word in config.pronunciations:
         if not word.strip():
             raise ConfigInvalid("pronunciations: a word must not be empty")
+        if word.casefold() in seen:
+            raise ConfigInvalid(f"pronunciations: {word!r} is there twice (the case does not count)")
+        seen.add(word.casefold())
 
 
 def _check_gpus(config: SuiteConfig) -> None:

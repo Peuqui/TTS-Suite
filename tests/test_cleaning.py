@@ -117,10 +117,10 @@ def test_two_readings_do_not_influence_each_other() -> None:
     assert second.clean("Ein ganz normaler Satz.") == "Ein ganz normaler Satz."
 
 
-def test_pronunciations_replace_whole_words_with_the_case_as_given() -> None:
-    text_cleaner = cleaner(AIfred="Alfred", **{"z. B.": "zum Beispiel"})
-    assert text_cleaner.clean("AIfred sagt: AIfredo bleibt, aifred auch, z. B. so.") == (
-        "Alfred sagt: AIfredo bleibt, aifred auch, zum Beispiel so."
+def test_pronunciations_replace_whole_words_in_any_case() -> None:
+    text_cleaner = cleaner(aifred="Alfred", **{"z. B.": "zum Beispiel"})
+    assert text_cleaner.clean("AIfred sagt: AIfredo bleibt, aifred auch, AIFRED ebenso, z. B. so.") == (
+        "Alfred sagt: AIfredo bleibt, Alfred auch, Alfred ebenso, zum Beispiel so."
     )
 
 

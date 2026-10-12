@@ -100,8 +100,8 @@ class SuiteConfig:
     used (and kept for the next switch to ``list``). No card fits: the entry is skipped with
     ``no_vram`` (not remembered: the next request chooses again).
 
-    ``pronunciations`` maps a word to the form that is spoken instead (whole words, case as
-    written; for example "AIfred" -> "Alfred"). The text cleaning of every unit applies it; it is
+    ``pronunciations`` maps a word to the form that is spoken instead (whole words, in any
+    case; for example "AIfred" -> "Alfred"). The text cleaning of every unit applies it; it is
     the one program-specific part of the cleaning that is configuration.
     """
 
