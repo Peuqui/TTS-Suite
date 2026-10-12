@@ -183,8 +183,8 @@ the post-processing, the announcement texts (ten languages) and engine labels (G
 the tests of escalation, reload, completeness and the DashScope engine. The engines are the ones that exist in the suite (no MOSS, no Fish-Speech). The container and project names
 (and the volume `xtts_voices`) are pinned in the compose files (`name:`), so Docker does not recreate running
 containers. The suite keeps its own data (Piper models, the DashScope voice mapping) in one data folder, `~/.local/share/tts-suite`
-or the folder `TTS_SUITE_DATA_DIR` names. The voices folder holds the user's own data: it is not in the public repository, its path is a
-setting, and both the suite and AIfred (agent bundles) use that one place. The hosts, today in AIfred's
+or the folder `TTS_SUITE_DATA_DIR` names. The voices (`voices/`) and their source recordings (`voice-sources/`) are part of the repository; the path
+of the voices folder is a setting (`voices_dir`), and both the suite and AIfred (agent bundles) use that one place. The hosts, today in AIfred's
 `settings.json`, move to `/config` as the one place; the lists of engines stay with the clients (AIfred keeps
 his, Agent-Orc its own): each request brings its list. AIfred reads and writes the hosts over HTTP through a
 thin client, with a one-time migration and no parallel operation. Stays with AIfred: `resolve_voice` and the
