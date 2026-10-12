@@ -1,0 +1,25 @@
+{
+  "voices_dir": "/path/to/voices",
+  "hosts": [
+    {
+      "name": "Aragon",
+      "address": "192.0.2.10",
+      "ssh_port": 22,
+      "ssh_user": "user"
+    }
+  ],
+  "engines": {},
+  "gpu_mode": "auto",
+  "gpus": [],
+  "headroom_mib": 512,
+  "pronunciations": {
+    "AIfred": "Alfred",
+    "AIfreds": "Alfreds",
+    "Aifred": "Alfred",
+    "Aifreds": "Alfreds",
+    "aifred": "Alfred",
+    "aifreds": "Alfreds",
+    "AIFRED": "Alfred",
+    "AIFREDS": "Alfreds"
+  }
+}

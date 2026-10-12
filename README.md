@@ -38,6 +38,8 @@ tts-suite serve --voices-dir ~/voices           # http://127.0.0.1:5090, configu
 curl http://127.0.0.1:5090/health
 ```
 
+Examples of the configuration and of the private file with the keys: `deploy/config.example.json` and `deploy/env.example`.
+
 Piper (local, without a GPU) runs the `piper` program of the package `piper-tts`, which is installed with the
 service (large: it brings onnxruntime). Cloud engines need their keys in the environment, never in the configuration: put them into
 `~/.config/tts-suite/env` (`DASHSCOPE_API_KEY=...`, readable for you alone, `chmod 600`); the service
