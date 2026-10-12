@@ -399,6 +399,7 @@ def test_the_page_of_the_service_is_served_without_a_token_with_a_strict_policy(
     assert page.status_code == 200 and "TTS-Suite" in page.text
     assert "default-src 'self'" in page.headers["content-security-policy"]
     assert page.headers["x-content-type-options"] == "nosniff"
+    assert page.headers["cache-control"] == "no-cache"
     script = client.get("/ui/app.js")
     assert script.status_code == 200 and "javascript" in script.headers["content-type"]
     assert client.get("/ui/frames.js").status_code == 200

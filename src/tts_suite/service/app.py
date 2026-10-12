@@ -42,6 +42,9 @@ UI_PREFIX = "/ui"
 UI_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
     "X-Content-Type-Options": "nosniff",
+    # Without it a browser keeps an old script for hours and a fixed page does not arrive; with it
+    # the ETag decides, and an unchanged file costs one short answer.
+    "Cache-Control": "no-cache",
 }
 
 # A client that is told to wait for a container to start asks again after this long.
