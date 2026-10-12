@@ -70,7 +70,7 @@ code, .hint { font-family: ui-monospace, monospace; font-size: 13px; background:
   table.cards thead { display: none; }
   table.cards, table.cards tbody, table.cards tr, table.cards td { display: block; }
   table.cards tr { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; }
-  table.cards td { display: flex; justify-content: space-between; gap: 12px; border-bottom: 0; padding: 4px 0; }
+  table.cards td { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 0; padding: 4px 0; }
   table.cards td::before { content: attr(data-label); color: var(--muted); flex: 0 0 38%; }
   table.cards td:empty { display: none; }
   table.cards td input, table.cards td select { flex: 1; min-width: 0; }
