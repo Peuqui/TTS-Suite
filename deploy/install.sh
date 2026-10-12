@@ -2,8 +2,9 @@
 # Install the TTS-Suite service for the current user: its own venv with the code of this clone
 # (editable: the compose files and scripts of the engines live in the clone and are found from the
 # code), the command `tts-suite` in ~/.local/bin, and a systemd user service that runs it.
-# The first `tts-suite serve` writes the configuration (~/.config/tts-suite/config.json) with the voices
-# folder of this clone (`voices/`); `--voices-dir <folder>` names another one.
+# Also makes the token (readable for you alone) and, if there is none yet, a first configuration
+# (~/.config/tts-suite/config.json: the voices folder of this clone, `voices/`, and the pronunciation of
+# AIfred as Alfred); the hosts and the defaults per engine are set later on the page of the service.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -21,6 +22,19 @@ mkdir -p "$BIN" "$UNITS"
 ln -sfn "$VENV/bin/tts-suite" "$BIN/tts-suite"
 cp "$REPO/deploy/tts-suite.service" "$UNITS/tts-suite.service"
 systemctl --user daemon-reload
+"$BIN/tts-suite" token
+CONFIG_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/tts-suite/config.json
+if [ ! -e "$CONFIG_FILE" ]; then
+    python3 - "$REPO" "$CONFIG_FILE" <<'PY'
+import json, os, sys
+repo, target = sys.argv[1:]
+os.makedirs(os.path.dirname(target), exist_ok=True)
+config = json.load(open(f"{repo}/deploy/config.example.json", encoding="utf-8"))
+config["voices_dir"] = f"{repo}/voices"
+config["hosts"] = []
+json.dump(config, open(target, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PY
+    chmod 600 "$CONFIG_FILE"
+fi
 echo "Installed $REPO to $VENV."
-echo "Next: tts-suite token; tts-suite serve once to write the configuration (stop it again); then"
-echo "systemctl --user enable --now tts-suite"
+echo "Next: systemctl --user enable --now tts-suite   (or, for AIfred: sudo $REPO/deploy/switch-to-system-unit.sh)"
