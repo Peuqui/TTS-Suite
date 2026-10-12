@@ -141,8 +141,10 @@ def test_bad_engine_defaults_are_refused(tmp_path: Path, engines: dict[str, Engi
 # ── Voice ───────────────────────────────────────────────────────────
 
 
-def _voice(engine: FakeEngine, head: SpeakRequest, defaults: dict[str, EngineDefaults]) -> tuple[str, float, float]:
-    return resolve_voice(engine, head, defaults)
+def _voice(
+    engine: FakeEngine, head: SpeakRequest, defaults: dict[str, EngineDefaults], host: Host | None = None,
+) -> tuple[str, float, float]:
+    return resolve_voice(escalation.EscalationEntry(engine, host, "sentence"), head, defaults)
 
 
 def test_the_voice_comes_from_the_engine_setting_then_the_request_then_the_defaults_then_the_engine() -> None:
@@ -168,6 +170,17 @@ def test_the_tuning_of_the_voice_sits_between_the_request_and_the_defaults_of_th
     assert _voice(engine, own, defaults) == ("Conrad", 1.3, 0.8)                              # tuning of the voice that speaks
     other = request("x", voices={"x": VoiceSettings(voice="Nobody")})
     assert _voice(engine, other, defaults) == ("Nobody", 1.1, 1.2)                            # no tuning: the engine's
+
+
+def test_a_voice_for_one_row_of_an_engine_beats_the_voice_for_all_its_rows() -> None:
+    engine = FakeEngine("x")
+    head = request("x", voices={
+        "x": VoiceSettings(voice="All"), "x@": VoiceSettings(voice="Here"), "x@Aragon": VoiceSettings(voice="There"),
+    })
+    assert _voice(engine, head, {})[0] == "Here"                  # this machine: engine@
+    assert _voice(engine, head, {}, ARAGON)[0] == "There"           # engine@Aragon
+    assert _voice(engine, head, {}, Host("Other", "192.0.2.3"))[0] == "All"
+    assert _voice(engine, request("x", voices={"x@Aragon": VoiceSettings(voice="There")}), {})[0] == "V"
 
 
 def test_the_request_voice_is_not_offered_to_engines_that_are_not_containers() -> None:

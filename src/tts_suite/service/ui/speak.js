@@ -14,7 +14,7 @@ export function speakView({ show, fail }) {
   let rows = []       // the catalog rows, in the order of this list
   let use = {}        // "engine@host" -> bool
   let units = {}      // "engine@host" -> unit
-  let voices = {}     // engine -> chosen voice
+  let voices = {}     // "engine@host" -> chosen voice: every row has its own
   let voiceLists = {} // engine -> [{name, label}]
   let text = 'Hallo Welt. Das ist ein Test der Sprachausgabe.'
   let language = 'de'
@@ -25,6 +25,7 @@ export function speakView({ show, fail }) {
   let speaking = null // the AbortController of a reading in progress
   let summary = null
 
+  // "engine@host", or "engine@" for this machine: the key of a row here and in the request's `voices`.
   const place = (row) => `${row.engine}@${row.host ?? ''}`
 
   // What Save keeps on the server (the same on every device): the first time this tab is opened it is
@@ -52,10 +53,9 @@ export function speakView({ show, fail }) {
       else rows = [...rows.filter((row) => catalog.some((candidate) => place(candidate) === place(row))), ...catalog.filter((row) => !known.has(place(row)))]
       for (const row of rows) { use[place(row)] ??= false; units[place(row)] ??= row.unit_default }
       await Promise.all([...new Set(rows.map((row) => row.engine))].map(async (engine) => {
-        if (voiceLists[engine]) return
-        voiceLists[engine] = await service.voices(engine)
-        voices[engine] ??= voiceLists[engine][0]?.name ?? ''
+        if (!voiceLists[engine]) voiceLists[engine] = await service.voices(engine)
       }))
+      for (const row of rows) voices[place(row)] ??= voiceLists[row.engine][0]?.name ?? ''
       render()
     } catch (error) { fail(error) }
   }
@@ -86,7 +86,7 @@ export function speakView({ show, fail }) {
     const head = {
       text, language, paragraph_pause_ms: pauseMs,
       engines: chosen.map((row) => ({ engine: row.engine, unit: units[place(row)], host: row.host })),
-      voices: Object.fromEntries([...new Set(chosen.map((row) => row.engine))].filter((engine) => voices[engine]).map((engine) => [engine, { voice: voices[engine] }])),
+      voices: Object.fromEntries(chosen.filter((row) => voices[place(row)]).map((row) => [place(row), { voice: voices[place(row)] }])),
     }
     const controller = new AbortController()
     speaking = controller
@@ -125,8 +125,8 @@ export function speakView({ show, fail }) {
         hostLabel(row),
         h('select', { onchange: (event) => (units[place(row)] = event.target.value) },
           UNITS.map((unit) => h('option', { value: unit, selected: units[place(row)] === unit }, t(UNIT_KEYS[unit])))),
-        (voiceLists[row.engine]?.length ?? 0) === 0 ? '' : h('select', { onchange: (event) => { voices[row.engine] = event.target.value; render() } },
-          voiceLists[row.engine].map((voice) => h('option', { value: voice.name, selected: voices[row.engine] === voice.name }, voice.label)))])),
+        (voiceLists[row.engine]?.length ?? 0) === 0 ? '' : h('select', { onchange: (event) => (voices[place(row)] = event.target.value) },
+          voiceLists[row.engine].map((voice) => h('option', { value: voice.name, selected: voices[place(row)] === voice.name }, voice.label)))])),
       h('div', { class: 'row' }, h('label', {}, t('language2') + ' ',
         h('select', { onchange: (event) => (language = event.target.value) }, ['de', 'en'].map((code) => h('option', { value: code, selected: code === language }, code)))),
         h('label', {}, t('pause') + ' ',

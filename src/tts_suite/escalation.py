@@ -244,15 +244,18 @@ class EngineSlotTable:
 
 
 def resolve_voice(
-    engine: TTSEngine, request: SpeakRequest, defaults: Mapping[str, EngineDefaults],
+    entry: EscalationEntry, request: SpeakRequest, defaults: Mapping[str, EngineDefaults],
 ) -> tuple[str, float, float]:
     """Voice, speed and pitch of one entry. Each value comes from the first of: the request's
-    setting for this engine (``request.voices``), the request's own fields, the configured
+    setting for this entry (``request.voices``: ``engine@host``, ``engine@`` for this machine, then
+    ``engine`` for every row of the engine), the request's own fields, the configured
     tuning of the voice that speaks, the configured defaults of the engine, the engine's own
     default (speed and pitch: neutral). The request's
     ``voice`` is a voice of the container engines and is not offered to the others.
     No voice at all: :class:`TTSFailure` ``software`` — this entry fails, the list goes on."""
-    own = request.voices.get(engine.key, VoiceSettings())
+    engine = entry.engine
+    place = f"{engine.key}@{entry.host.name if entry.host else ''}"
+    own = request.voices.get(place, request.voices.get(engine.key, VoiceSettings()))
     configured = defaults[engine.key].voice if engine.key in defaults else VoiceSettings()
     voice = next(
         (name for name in (
@@ -382,7 +385,7 @@ class SpeechRun:
                 if entry.label in self._failed:
                     continue
                 try:
-                    resolve_voice(entry.engine, request, self._defaults())
+                    resolve_voice(entry, request, self._defaults())
                 except TTSFailure as failure:
                     self._fail(entry, failure.reason, failure.detail)
                     continue
@@ -433,7 +436,7 @@ class SpeechRun:
     async def _synthesize(self, entry: EscalationEntry, text: str, request: SpeakRequest) -> bytes:
         self._busy[entry.label] = self._busy.get(entry.label, 0) + 1
         try:
-            voice, speed, pitch = resolve_voice(entry.engine, request, self._defaults())
+            voice, speed, pitch = resolve_voice(entry, request, self._defaults())
             async with self._slots.for_engine(entry.engine).slot():
                 audio = await synthesize(entry.engine, text, voice, request.language, speed, pitch, executor=self._executor)
             return audio

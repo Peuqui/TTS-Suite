@@ -101,6 +101,8 @@ with `no_vram` (not remembered: the next request chooses again).
 - **A voice belongs to an engine.** `voices` names voice, speed and pitch per engine key (a folder of the shared
   directory for the container engines, names of their own for Edge, Piper and cloud voices); `voice`, `speed`
   and `pitch` of the head are the defaults for engines `voices` does not name, then those of `/config`.
+  The key may also name one row: `engine` = every row of the engine, `engine@` = only the one on this machine,
+  `engine@host` = only that host; the more specific key wins.
 - The first entry that can speak does. If it fails, the next one takes over.
 - **`run`** (optional, an ID the client makes up for one reading): the service keeps per run which entries
   failed and whether something was spoken already, for about five minutes after the last piece. Entries that failed stay out for

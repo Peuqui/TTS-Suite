@@ -103,7 +103,8 @@ Anfrage wählt neu).
 - **Eine Stimme gehört zu einer Engine.** `voices` nennt Stimme, Tempo und Tonhöhe je Engine-Schlüssel (ein
   Ordner des gemeinsamen Verzeichnisses bei den Container-Engines, eigene Namen bei Edge, Piper und
   Cloud-Stimmen); `voice`, `speed` und `pitch` des Kopfes sind die Vorgaben für Engines, die `voices` nicht
-  nennt, danach die aus `/config`.
+  nennt, danach die aus `/config`. Der Schlüssel kann auch eine Zeile benennen: `engine` = jede Zeile der Engine,
+  `engine@` = nur die auf diesem Rechner, `engine@host` = nur dieser Host; der genauere Schlüssel gewinnt.
 - Der erste Eintrag, der sprechen kann, spricht. Scheitert er, übernimmt der nächste.
 - **`run`** (optional, eine ID, die der Client für ein Vorlesen ausdenkt): der Dienst merkt sich je Lauf etwa
   fünf Minuten nach dem letzten Stück, welche Einträge ausfielen und ob schon gesprochen wurde. Ausgefallene Einträge bleiben für

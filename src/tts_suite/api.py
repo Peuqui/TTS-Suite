@@ -227,7 +227,7 @@ class SpeakRequest:
     voice: str | None = None  # default voice (valid for the container engines)
     speed: float | None = None
     pitch: float | None = None
-    voices: Mapping[str, VoiceSettings] = field(default_factory=dict)  # per engine key
+    voices: Mapping[str, VoiceSettings] = field(default_factory=dict)  # "engine@host", "engine@" (this machine) or "engine" (all rows)
     run: str | None = None  # client-made ID of one reading; state is kept ~5 min
     wait: bool = True  # False: ``EngineStarting`` instead of waiting for a cold start
 
