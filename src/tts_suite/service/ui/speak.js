@@ -54,6 +54,12 @@ export function speakView({ show, fail }) {
     render()
   }
 
+  // The text field is as high as its text (at least its CSS minimum).
+  function grow(area) {
+    area.style.height = 'auto'
+    area.style.height = `${area.scrollHeight}px`
+  }
+
   function save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ text, language, pauseMs, order: rows.map(place), use, units, voices }))
     show(t('saved'))
@@ -110,13 +116,15 @@ export function speakView({ show, fail }) {
         h('select', { onchange: (event) => (language = event.target.value) }, ['de', 'en'].map((code) => h('option', { value: code, selected: code === language }, code)))),
         h('label', {}, t('pause') + ' ',
           h('input', { type: 'number', min: '0', step: '50', value: String(pauseMs), oninput: (event) => (pauseMs = Math.max(0, Number(event.target.value) || 0)) }))),
-      h('textarea', { oninput: (event) => (text = event.target.value) }, text),
+      h('textarea', { oninput: (event) => { text = event.target.value; grow(event.target) } }, text),
       h('div', { class: 'actions' },
         h('button', { onclick: save }, t('save')),
         h('button', { class: 'primary', onclick: run, disabled: speaking !== null }, speaking === null ? t('speak') : t('speaking')),
         speaking === null ? null : h('button', { onclick: cancel }, t('stopPlaying'))),
       traceTable(),
     )
+    const area = root.querySelector('textarea')
+    if (area) grow(area)
   }
 
   return { root, load, render }
