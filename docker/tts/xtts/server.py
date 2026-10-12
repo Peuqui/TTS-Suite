@@ -98,8 +98,8 @@ MAX_CHUNK_CHARS = int(os.environ.get("XTTS_MAX_CHUNK_CHARS", "250"))
 # Higher repetition_penalty = prevents repeating
 # Lower top_k/top_p = more deterministic output
 
-XTTS_TEMPERATURE = float(os.environ.get("XTTS_TEMPERATURE", "0.65"))
-XTTS_REPETITION_PENALTY = float(os.environ.get("XTTS_REPETITION_PENALTY", "15.0"))
+XTTS_TEMPERATURE = float(os.environ.get("XTTS_TEMPERATURE", "0.5"))
+XTTS_REPETITION_PENALTY = float(os.environ.get("XTTS_REPETITION_PENALTY", "20.0"))
 XTTS_LENGTH_PENALTY = float(os.environ.get("XTTS_LENGTH_PENALTY", "1.0"))
 XTTS_TOP_K = int(os.environ.get("XTTS_TOP_K", "30"))
 XTTS_TOP_P = float(os.environ.get("XTTS_TOP_P", "0.75"))

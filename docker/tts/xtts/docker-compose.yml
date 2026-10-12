@@ -28,9 +28,9 @@ services:
       # ============================================================
       # See: https://github.com/coqui-ai/TTS/discussions/4146
       # Lower temperature = more stable, less creative (default: 0.75)
-      - XTTS_TEMPERATURE=0.65
+      - XTTS_TEMPERATURE=0.5
       # Higher repetition_penalty = prevents repeating (default: 10.0)
-      - XTTS_REPETITION_PENALTY=15.0
+      - XTTS_REPETITION_PENALTY=20.0
       # Length penalty for longer sentences (default: 1.0)
       - XTTS_LENGTH_PENALTY=1.0
       # Lower top_k = more deterministic (default: 50)

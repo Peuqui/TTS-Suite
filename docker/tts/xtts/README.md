@@ -264,8 +264,8 @@ Basierend auf Erfahrungen der Coqui TTS Community:
 
 | Variable | Default | Beschreibung |
 |----------|---------|--------------|
-| `XTTS_TEMPERATURE` | `0.65` | Niedrigere Werte = stabiler, weniger kreativ |
-| `XTTS_REPETITION_PENALTY` | `15.0` | Höhere Werte = weniger Wiederholungen |
+| `XTTS_TEMPERATURE` | `0.5` | Niedrigere Werte = stabiler, weniger kreativ |
+| `XTTS_REPETITION_PENALTY` | `20.0` | Höhere Werte = weniger Wiederholungen |
 | `XTTS_TOP_K` | `30` | Niedrigere Werte = deterministischer |
 | `XTTS_TOP_P` | `0.75` | Niedrigere Werte = weniger Variation |
 | `XTTS_LENGTH_PENALTY` | `1.0` | Beeinflusst Output-Länge |
