@@ -134,8 +134,11 @@ DASHSCOPE_ENROLL_TIMEOUT_S = 90
 #: stream). Source: ``FREEECHO2_KEEPALIVE_SEC``.
 KEEPALIVE_SEC = 10.0
 
-#: How long the state of a run (failed entries, voice-change announcement) is kept after its last use.
-RUN_TTL_S = 600
+#: How long the state of a run (failed entries, voice-change announcement) is kept after its last use: the
+#: longest pause between two pieces of one reading that still counts as the same reading. Longer, a failed
+#: entry stays out too long after it has recovered; shorter, a reading with a long pause (an agent that
+#: works on something between two sentences) is taken for a new one and tries the failed entry again.
+RUN_TTL_S = 300
 
 #: Threads for the blocking syntheses (the container engines, Piper, eSpeak, DashScope run their HTTP
 #: or subprocess call in a thread), one pool owned by the speaker so that health checks, starts and

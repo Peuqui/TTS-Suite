@@ -106,7 +106,7 @@ Anfrage wählt neu).
   nennt, danach die aus `/config`.
 - Der erste Eintrag, der sprechen kann, spricht. Scheitert er, übernimmt der nächste.
 - **`run`** (optional, eine ID, die der Client für ein Vorlesen ausdenkt): der Dienst merkt sich je Lauf etwa
-  zehn Minuten, welche Einträge ausfielen und ob schon gesprochen wurde. Ausgefallene Einträge bleiben für
+  fünf Minuten nach dem letzten Stück, welche Einträge ausfielen und ob schon gesprochen wurde. Ausgefallene Einträge bleiben für
   den Rest des Laufs draußen. Fällt ein Eintrag nach dem ersten Ton aus, spricht der Nachfolger zuerst eine
   Ansage (zum Beispiel „Stimmwechsel zu X wegen Y“, deutsch oder englisch nach `language`; die Texte liegen
   in der Suite), **ein eigenes Segment vor dem ersten des Nachfolgers**, und dann das unfertige Stück. Auswahl

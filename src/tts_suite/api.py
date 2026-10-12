@@ -228,7 +228,7 @@ class SpeakRequest:
     speed: float | None = None
     pitch: float | None = None
     voices: Mapping[str, VoiceSettings] = field(default_factory=dict)  # per engine key
-    run: str | None = None  # client-made ID of one reading; state is kept ~10 min
+    run: str | None = None  # client-made ID of one reading; state is kept ~5 min
     wait: bool = True  # False: ``EngineStarting`` instead of waiting for a cold start
 
 

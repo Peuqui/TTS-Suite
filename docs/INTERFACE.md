@@ -103,7 +103,7 @@ with `no_vram` (not remembered: the next request chooses again).
   and `pitch` of the head are the defaults for engines `voices` does not name, then those of `/config`.
 - The first entry that can speak does. If it fails, the next one takes over.
 - **`run`** (optional, an ID the client makes up for one reading): the service keeps per run which entries
-  failed and whether something was spoken already, for about ten minutes. Entries that failed stay out for
+  failed and whether something was spoken already, for about five minutes after the last piece. Entries that failed stay out for
   the rest of the run. If an entry fails after the first sound, the successor first speaks an announcement
   (for example "Voice change to X because of Y", German or English by `language`; the texts live in the
   suite), **a segment of its own in front of the successor's first one**, and then the unfinished piece. The
