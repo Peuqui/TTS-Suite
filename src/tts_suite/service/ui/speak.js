@@ -5,32 +5,45 @@ import { Player } from './player.js'
 
 const UNITS = ['sentence', 'paragraph', 'whole']
 const UNIT_KEYS = { sentence: 'unitSentence', paragraph: 'unitParagraph', whole: 'unitWhole' }
-// What the Save button keeps in this browser: the text and every choice made on this tab.
-const STORAGE_KEY = 'tts-suite-speak'
 
 // Trying a reading: a text and a list of {engine, host, unit} put together here, played as it arrives, and
 // the course of the reading afterwards (who spoke, who failed or was passed over, and why).
 export function speakView({ show, fail }) {
   const root = h('div')
   const player = new Player()
-  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')
   let rows = []       // the catalog rows, in the order of this list
-  let use = saved.use ?? {}        // "engine@host" -> bool
-  let units = saved.units ?? {}    // "engine@host" -> unit
-  let voices = saved.voices ?? {}  // engine -> chosen voice
+  let use = {}        // "engine@host" -> bool
+  let units = {}      // "engine@host" -> unit
+  let voices = {}     // engine -> chosen voice
   let voiceLists = {} // engine -> [{name, label}]
-  let text = saved.text ?? 'Hallo Welt. Das ist ein Test der Sprachausgabe.'
-  let language = saved.language ?? 'de'
+  let text = 'Hallo Welt. Das ist ein Test der Sprachausgabe.'
+  let language = 'de'
   // The service requires the pause; this page starts with a usual one.
-  let pauseMs = saved.pauseMs ?? 700
-  const savedOrder = saved.order ?? []
+  let pauseMs = 700
+  let savedOrder = [] // the order kept on the server: it counts the first time the list is built
+  let restored = false
   let speaking = null // the AbortController of a reading in progress
   let summary = null
 
   const place = (row) => `${row.engine}@${row.host ?? ''}`
 
+  // What Save keeps on the server (the same on every device): the first time this tab is opened it is
+  // read; after that what is on the page counts until Save.
+  async function restore() {
+    const saved = await service.speakTest()
+    restored = true
+    if (saved.text === undefined) return
+    ;({ text, language } = saved)
+    pauseMs = saved.pause_ms
+    use = saved.use
+    units = saved.units
+    voices = saved.voices
+    savedOrder = saved.order
+  }
+
   async function load() {
     try {
+      if (!restored) await restore()
       const catalog = (await service.engines()).filter((row) => !row.browser)
       // Keep the order and the choices made so far; new rows join at the end. The first time, the saved order counts.
       const known = new Set(rows.map(place))
@@ -60,9 +73,11 @@ export function speakView({ show, fail }) {
     area.style.height = `${area.scrollHeight}px`
   }
 
-  function save() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ text, language, pauseMs, order: rows.map(place), use, units, voices }))
-    show(t('saved'))
+  async function save() {
+    try {
+      await service.saveSpeakTest({ text, language, pause_ms: pauseMs, order: rows.map(place), use, units, voices })
+      show(t('saved'))
+    } catch (error) { fail(error) }
   }
 
   async function run() {

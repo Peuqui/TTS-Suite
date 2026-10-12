@@ -109,6 +109,32 @@ def test_on_a_network_everything_needs_the_token(tmp_path: Path) -> None:
     assert client.post("/speak", json={"text": "Hi", "language": "en", "engines": ENGINES, "paragraph_pause_ms": 0}).status_code == 401
 
 
+SPEAK_TEST = {
+    "text": "Hallo Welt.", "language": "de", "pause_ms": 700, "order": ["edge@", "xtts@Aragon"],
+    "use": {"edge@": True, "xtts@Aragon": False}, "units": {"edge@": "sentence", "xtts@Aragon": "whole"},
+    "voices": {"edge": "Deutsch (Katja)"},
+}
+
+
+def test_the_test_reading_of_the_page_is_kept_on_the_server_for_every_device(tmp_path: Path) -> None:
+    client, _, store = build(tmp_path)
+    assert client.get("/speak-test").json() == {}                                       # nothing saved yet
+    assert client.put("/speak-test", json=SPEAK_TEST).status_code == 401                # a change needs the token
+    assert client.put("/speak-test", json=SPEAK_TEST, headers=TOKEN_HEADERS).json() == SPEAK_TEST
+    assert client.get("/speak-test").json() == SPEAK_TEST                                # another device reads it
+    again, _, _ = build(tmp_path)                                                       # and it survives a restart
+    assert again.get("/speak-test").json() == SPEAK_TEST
+    assert (store.path.parent / "speak-test.json").is_file()
+
+
+def test_a_test_reading_that_is_no_valid_state_is_refused(tmp_path: Path) -> None:
+    client, _, _ = build(tmp_path)
+    for wrong in ({**SPEAK_TEST, "pause_ms": "much"}, {**SPEAK_TEST, "units": {"edge@": "line"}}, {"text": "x"}):
+        answer = client.put("/speak-test", json=wrong, headers=TOKEN_HEADERS)
+        assert answer.status_code == 400 and answer.json()["error"] == "bad_request"
+    assert client.get("/speak-test").json() == {}
+
+
 def test_a_new_configuration_is_set_and_kept(tmp_path: Path) -> None:
     client, suite, store = build(tmp_path)
     wanted = {

@@ -34,6 +34,7 @@ agents (which agent has which voice). The service gets text and answers with aud
 | `GET /health` | `200` with `{"status": "ok"}` while the service runs. |
 | `GET /ui/` | The page of the service (plain HTML, CSS and JavaScript, light or dark, German or English): the catalog with start and stop, the configuration, the voices with sync, and trying a reading with a list of its own and its course. It holds no data and needs no token; what it asks for follows the rules below (the token is entered once and kept in `localStorage` of the browser). |
 | `GET /engines` | The catalog: every engine on every machine it can run on; fields below. |
+| `GET /speak-test`, `PUT /speak-test` | What the page keeps of the test reading (text, language, pause, order and choices per engine), on the server, so that every device sees the same (`speak-test.json` next to the configuration). `PUT` needs the token. |
 | `GET /voices?engine=<key>` | The voices of one engine: for each `name` and `label`. Without `engine`: the folders of the shared voices directory. |
 | `POST /voices/sync?engine=<key>` | Has a cloud engine that clones voices (DashScope) upload the voices of the shared directory. Answers with the voices now known. |
 | `POST /speak` | Door 1: the whole text; the answer is the stream of frames (below). |

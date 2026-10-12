@@ -19,7 +19,7 @@ from pydantic import ValidationError
 
 from ..api import SpeakRequest, SuiteError, TTSSuite
 from .auth import Access
-from .config_store import ConfigStore
+from .config_store import ConfigStore, SpeakTestStore
 from .errors import ServiceError, bad_request, text_too_long
 from .frames import FRAMES_MEDIA_TYPE, audio_frame, error_frame, summary_frame
 from .wire import (
@@ -84,6 +84,7 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
         await suite.aclose()
 
     app = FastAPI(title="TTS-Suite", lifespan=lifespan)
+    speak_test = SpeakTestStore(store.path.with_name("speak-test.json"))
 
     @app.exception_handler(ServiceError)
     async def service_error(_: Request, error: ServiceError) -> JSONResponse:
@@ -147,6 +148,19 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
         await suite.set_config(config)
         store.save(config)
         return config_to_json(config)
+
+    @app.get("/speak-test")
+    async def get_speak_test(request: Request) -> Any:
+        check(request, False)
+        return speak_test.load()
+
+    @app.put("/speak-test")
+    async def put_speak_test(request: Request) -> Any:
+        check(request, True)
+        try:
+            return speak_test.save(await _json_body(request))
+        except ValidationError as error:
+            raise bad_request(str(error)) from error
 
     @app.post("/engines/reload")
     async def reload_engines(request: Request) -> dict[str, list[str]]:
