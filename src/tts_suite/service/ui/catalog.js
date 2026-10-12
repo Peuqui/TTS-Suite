@@ -32,28 +32,39 @@ export function catalogView({ show, fail }) {
     } catch (error) { fail(error) }
   }
 
+  function columns(visible) {
+    const hasHint = visible.some((row) => row.start_hint)
+    return [
+      { key: 'engine', cell: (row) => [row.label[document.documentElement.lang] ?? row.label.en,
+        row.cloud ? h('span', { class: 'tag' }, t('cloud')) : null,
+        row.needs_gpu ? h('span', { class: 'tag' }, t('needsGpu')) : null,
+        h('div', { class: 'muted' }, h('code', {}, row.engine))] },
+      { key: 'host', cell: (row) => row.host ?? t('thisMachine') },
+      { key: 'status', cell: (row) => h('span', { class: `status ${row.status}`, title: t(`state${row.status[0].toUpperCase()}${row.status.slice(1)}`) }, t(`status${row.status[0].toUpperCase()}${row.status.slice(1)}`)) },
+      { key: 'installed', cell: (row) => (row.installed ? t('yes') : t('no')) },
+      // Likewise the memory: only when some row holds any.
+      ...(visible.some((row) => memory(row.vram_mib) !== '') ? [{ key: 'gpuMemory', cell: (row) => memory(row.vram_mib) }] : []),
+      // The column of the hints only when some row has one.
+      ...(hasHint ? [{ key: 'hint', cell: (row) => (row.start_hint ? h('span', { class: 'hint' }, row.start_hint) : '') }] : []),
+      { key: '', cell: (row) => (row.cloud ? '' : h('div', { class: 'buttons' },
+        h('button', { class: 'small', onclick: () => control('start', row), disabled: row.status === 'running' }, t('start')),
+        h('button', { class: 'small', onclick: () => control('stop', row), disabled: row.status === 'stopped' }, t('stop')),
+        h('button', { class: 'small', onclick: () => release([{ engine: row.engine, host: row.host }]), disabled: row.status === 'stopped' }, t('release')))) },
+    ]
+  }
+
   function render() {
-    replaceChildren(root, 
+    const visible = rows.filter((row) => !row.browser)
+    const shown = columns(visible)
+    replaceChildren(root,
       h('h2', {}, t('tabCatalog')),
       h('p', { class: 'muted' }, t('catalogHint')),
       h('div', { class: 'row' }, h('button', { onclick: load }, t('reload')), h('button', { onclick: () => release('all') }, t('releaseAll'))),
-      h('div', { class: 'table-scroll' }, h('table', {},
-        h('thead', {}, h('tr', {}, ...['engine', 'host', 'status', 'installed', 'gpuMemory', 'hint', ''].map((key) => h('th', {}, key ? t(key) : '')))),
-        h('tbody', {}, rows.filter((row) => !row.browser).map((row) => h('tr', {},
-          h('td', {}, row.label[document.documentElement.lang] ?? row.label.en,
-            row.cloud ? h('span', { class: 'tag' }, t('cloud')) : null,
-            row.needs_gpu ? h('span', { class: 'tag' }, t('needsGpu')) : null,
-            h('div', { class: 'muted' }, h('code', {}, row.engine))),
-          h('td', {}, row.host ?? t('thisMachine')),
-          h('td', {}, h('span', { class: `status ${row.status}`, title: t(`state${row.status[0].toUpperCase()}${row.status.slice(1)}`) }, row.status)),
-          h('td', {}, row.installed ? t('yes') : t('no')),
-          h('td', {}, memory(row.vram_mib)),
-          h('td', {}, row.start_hint ? h('span', { class: 'hint' }, row.start_hint) : ''),
-          h('td', {}, row.cloud ? '' : h('div', { class: 'row' },
-            h('button', { class: 'small', onclick: () => control('start', row), disabled: row.status === 'running' }, t('start')),
-            h('button', { class: 'small', onclick: () => control('stop', row), disabled: row.status === 'stopped' }, t('stop')),
-            h('button', { class: 'small', onclick: () => release([{ engine: row.engine, host: row.host }]), disabled: row.status === 'stopped' }, t('release'))))))),
-      )),
+      h('div', { class: 'table-scroll' }, h('table', { class: 'cards' },
+        h('thead', {}, h('tr', {}, ...shown.map((column) => h('th', {}, column.key ? t(column.key) : '')))),
+        h('tbody', {}, visible.map((row) => h('tr', {},
+          ...shown.map((column) => h('td', { 'data-label': column.key ? t(column.key) : null }, column.cell(row))))))),
+      ),
     )
   }
 
