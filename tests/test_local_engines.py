@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 import pytest
 from speech_fakes import TEST_EXECUTOR
 
-from tts_suite.constants import DATA_DIR_DEFAULT, DATA_DIR_ENV, PIPER_MODELS_DIR_NAME, data_dir
+from tts_suite.constants import DATA_DIR_DEFAULT, DATA_DIR_ENV, EDGE_HANDSHAKE_RETRIES, PIPER_MODELS_DIR_NAME, data_dir
 from tts_suite.engines import TTSFailure, get_engine
 from tts_suite.engines.edge import engine as edge_engine
 from tts_suite.engines.edge.engine import EDGE_STANDARD_VOICE
@@ -87,16 +87,17 @@ def _handshake_refused(status: int = 403) -> Exception:
 
 
 def test_edge_repeats_a_refused_handshake(edge: type[FakeCommunicate]) -> None:
-    edge.refusals = [_handshake_refused(), _handshake_refused(), _handshake_refused()]
+    edge.refusals = [_handshake_refused() for _ in range(EDGE_HANDSHAKE_RETRIES)]
     audio = asyncio.run(_engine("edge").generate_speech_async("Hallo", "Deutsch (Katja)", "de", executor=TEST_EXECUTOR))
-    assert audio == AUDIO and len(edge.created) == 4  # three refusals, the fourth attempt speaks
+    assert audio == AUDIO and len(edge.created) == EDGE_HANDSHAKE_RETRIES + 1  # all refusals, then the last attempt speaks
 
 
 def test_edge_gives_up_after_the_last_attempt(edge: type[FakeCommunicate]) -> None:
-    edge.refusals = [_handshake_refused() for _ in range(4)]
-    with pytest.raises(TTSFailure, match="in all 4 attempts") as raised:
+    attempts = EDGE_HANDSHAKE_RETRIES + 1
+    edge.refusals = [_handshake_refused() for _ in range(attempts)]
+    with pytest.raises(TTSFailure, match=f"in all {attempts} attempts") as raised:
         asyncio.run(_engine("edge").generate_speech_async("Hallo", "Deutsch (Katja)", "de", executor=TEST_EXECUTOR))
-    assert raised.value.reason == "engine" and len(edge.created) == 4
+    assert raised.value.reason == "engine" and len(edge.created) == attempts
 
 
 def test_edge_does_not_repeat_other_handshake_errors(edge: type[FakeCommunicate]) -> None:
