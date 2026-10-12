@@ -1,5 +1,5 @@
 import { service } from './api.js'
-import { h, replaceChildren } from './dom.js'
+import { cardTable, h, replaceChildren } from './dom.js'
 import { t } from './i18n.js'
 import { Player } from './player.js'
 
@@ -97,18 +97,15 @@ export function speakView({ show, fail }) {
     replaceChildren(root, 
       h('h2', {}, t('tabSpeak')),
       h('p', { class: 'muted' }, t('speakHint')),
-      h('div', { class: 'table-scroll' }, h('table', {},
-        h('thead', {}, h('tr', {}, ...['use', 'order', 'engine', 'host', 'unit', 'voice'].map((key) => h('th', {}, t(key))))),
-        h('tbody', {}, rows.map((row, index) => h('tr', {},
-          h('td', {}, h('input', { type: 'checkbox', checked: use[place(row)], onchange: (event) => (use[place(row)] = event.target.checked) })),
-          h('td', {}, h('div', { class: 'row' }, h('button', { class: 'small', onclick: () => move(index, -1) }, '↑'), h('button', { class: 'small', onclick: () => move(index, 1) }, '↓'))),
-          h('td', {}, h('code', {}, row.engine)),
-          h('td', {}, row.host ?? t('thisMachine')),
-          h('td', {}, h('select', { onchange: (event) => (units[place(row)] = event.target.value) },
-            UNITS.map((unit) => h('option', { value: unit, selected: units[place(row)] === unit }, t(UNIT_KEYS[unit]))))),
-          h('td', {}, (voiceLists[row.engine]?.length ?? 0) === 0 ? '' : h('select', { onchange: (event) => (voices[row.engine] = event.target.value) },
-            voiceLists[row.engine].map((voice) => h('option', { value: voice.name, selected: voices[row.engine] === voice.name }, voice.label))))))),
-      )),
+      cardTable(['engine', 'use', 'order', 'host', 'unit', 'voice'].map((key) => t(key)), rows.map((row, index) => [
+        h('code', {}, row.engine),
+        h('input', { type: 'checkbox', checked: use[place(row)], onchange: (event) => (use[place(row)] = event.target.checked) }),
+        h('div', { class: 'row' }, h('button', { class: 'small', onclick: () => move(index, -1) }, '↑'), h('button', { class: 'small', onclick: () => move(index, 1) }, '↓')),
+        row.host ?? t('thisMachine'),
+        h('select', { onchange: (event) => (units[place(row)] = event.target.value) },
+          UNITS.map((unit) => h('option', { value: unit, selected: units[place(row)] === unit }, t(UNIT_KEYS[unit])))),
+        (voiceLists[row.engine]?.length ?? 0) === 0 ? '' : h('select', { onchange: (event) => (voices[row.engine] = event.target.value) },
+          voiceLists[row.engine].map((voice) => h('option', { value: voice.name, selected: voices[row.engine] === voice.name }, voice.label)))])),
       h('div', { class: 'row' }, h('label', {}, t('language2') + ' ',
         h('select', { onchange: (event) => (language = event.target.value) }, ['de', 'en'].map((code) => h('option', { value: code, selected: code === language }, code)))),
         h('label', {}, t('pause') + ' ',

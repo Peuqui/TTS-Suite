@@ -1,5 +1,5 @@
 import { service } from './api.js'
-import { h, replaceChildren } from './dom.js'
+import { cardTable, h, replaceChildren } from './dom.js'
 import { t } from './i18n.js'
 
 // The catalog: every engine on every machine, with its state and a start and stop for each row.
@@ -60,11 +60,7 @@ export function catalogView({ show, fail }) {
       h('h2', {}, t('tabCatalog')),
       h('p', { class: 'muted' }, t('catalogHint')),
       h('div', { class: 'row' }, h('button', { onclick: load }, t('reload')), h('button', { onclick: () => release('all') }, t('releaseAll'))),
-      h('div', { class: 'table-scroll' }, h('table', { class: 'cards' },
-        h('thead', {}, h('tr', {}, ...shown.map((column) => h('th', {}, column.key ? t(column.key) : '')))),
-        h('tbody', {}, visible.map((row) => h('tr', {},
-          ...shown.map((column) => h('td', { 'data-label': column.key ? t(column.key) : null }, column.cell(row))))))),
-      ),
+      cardTable(shown.map((column) => (column.key ? t(column.key) : '')), visible.map((row) => shown.map((column) => column.cell(row)))),
     )
   }
 

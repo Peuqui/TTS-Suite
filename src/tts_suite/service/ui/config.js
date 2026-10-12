@@ -1,5 +1,5 @@
 import { service } from './api.js'
-import { h, replaceChildren } from './dom.js'
+import { cardTable, h, replaceChildren } from './dom.js'
 import { t } from './i18n.js'
 
 // Everything /config knows: the voices folder, the machines, the GPU rules, the margin, the defaults per
@@ -37,13 +37,12 @@ export function configView({ show, fail }) {
 
   function hostsTable() {
     return h('div', {}, h('h3', {}, t('hosts')),
-      h('table', {}, h('thead', {}, h('tr', {}, ...['hostName', 'hostAddress', 'sshUser', 'sshPort', ''].map((key) => h('th', {}, key ? t(key) : '')))),
-        h('tbody', {}, config.hosts.map((host, index) => h('tr', {},
-          h('td', {}, textInput(host.name, (value) => (host.name = value))),
-          h('td', {}, textInput(host.address, (value) => (host.address = value))),
-          h('td', {}, textInput(host.ssh_user, (value) => (host.ssh_user = value))),
-          h('td', {}, numberInput(host.ssh_port, (value) => (host.ssh_port = value ?? 22))),
-          h('td', {}, h('button', { class: 'small', onclick: () => { config.hosts.splice(index, 1); render() } }, t('remove'))))))),
+      cardTable(['hostName', 'hostAddress', 'sshUser', 'sshPort', ''].map((key) => (key ? t(key) : '')), config.hosts.map((host, index) => [
+        textInput(host.name, (value) => (host.name = value)),
+        textInput(host.address, (value) => (host.address = value)),
+        textInput(host.ssh_user, (value) => (host.ssh_user = value)),
+        numberInput(host.ssh_port, (value) => (host.ssh_port = value ?? 22)),
+        h('button', { class: 'small', onclick: () => { config.hosts.splice(index, 1); render() } }, t('remove'))])),
       h('div', { class: 'actions' }, h('button', { class: 'small', onclick: () => { config.hosts.push({ name: '', address: '', ssh_port: 22, ssh_user: '' }); render() } }, t('add'))))
   }
 
@@ -51,39 +50,35 @@ export function configView({ show, fail }) {
     const mode = h('select', { onchange: (event) => { config.gpu_mode = event.target.value; render() } },
       ['auto', 'list'].map((value) => h('option', { value, selected: config.gpu_mode === value }, t(value === 'auto' ? 'gpuModeAuto' : 'gpuModeList'))))
     // The list is only used in the mode "list"; it stays in the configuration while the mode is "auto".
-    return h('div', {}, h('h3', {}, t('gpus')), h('p', { class: 'muted' }, t('gpuModeHint')), mode,
-      config.gpu_mode === 'auto' ? null : h('table', {}, h('thead', {}, h('tr', {}, ...['gpu', 'reserve', ''].map((key) => h('th', {}, key ? t(key) : '')))),
-        h('tbody', {}, config.gpus.map((rule, index) => h('tr', {},
-          h('td', {}, textInput(rule.gpu, (value) => (rule.gpu = value))),
-          h('td', {}, numberInput(rule.reserve_mib, (value) => (rule.reserve_mib = value ?? 0))),
-          h('td', {}, h('div', { class: 'row' },
-            h('button', { class: 'small', onclick: () => move(config.gpus, index, -1) }, '↑'),
-            h('button', { class: 'small', onclick: () => move(config.gpus, index, 1) }, '↓'),
-            h('button', { class: 'small', onclick: () => { config.gpus.splice(index, 1); render() } }, t('remove'))))))),
-      ),
-      config.gpu_mode === 'auto' ? null : h('div', { class: 'actions' }, h('button', { class: 'small', onclick: () => { config.gpus.push({ gpu: '', reserve_mib: 0 }); render() } }, t('add'))))
+    const list = config.gpu_mode === 'auto' ? [] : [
+      cardTable(['gpu', 'reserve', ''].map((key) => (key ? t(key) : '')), config.gpus.map((rule, index) => [
+        textInput(rule.gpu, (value) => (rule.gpu = value)),
+        numberInput(rule.reserve_mib, (value) => (rule.reserve_mib = value ?? 0)),
+        h('div', { class: 'row' },
+          h('button', { class: 'small', onclick: () => move(config.gpus, index, -1) }, '↑'),
+          h('button', { class: 'small', onclick: () => move(config.gpus, index, 1) }, '↓'),
+          h('button', { class: 'small', onclick: () => { config.gpus.splice(index, 1); render() } }, t('remove')))])),
+      h('div', { class: 'actions' }, h('button', { class: 'small', onclick: () => { config.gpus.push({ gpu: '', reserve_mib: 0 }); render() } }, t('add'))),
+    ]
+    return h('div', {}, h('h3', {}, t('gpus')), h('p', { class: 'muted' }, t('gpuModeHint')), mode, list)
   }
 
   function defaultsTable() {
     const keys = [...new Set(catalog.filter((row) => !row.browser).map((row) => row.engine))]
     const defaultsOf = (engine) => (config.engines[engine] ??= {})
+    const limit = (engine, name) => numberInput(config.engines[engine]?.[name], (value) => (defaultsOf(engine)[name] = value), t('emptyMeansDefault'))
     return h('div', {}, h('h3', {}, t('engineDefaults')),
-      h('table', {}, h('thead', {}, h('tr', {}, ...['engine', 'vramBudget', 'maxParallel', 'maxQueue'].map((key) => h('th', {}, t(key))))),
-        h('tbody', {}, keys.map((engine) => h('tr', {},
-          h('td', {}, h('code', {}, engine)),
-          h('td', {}, numberInput(config.engines[engine]?.vram_budget_mib, (value) => (defaultsOf(engine).vram_budget_mib = value), t('emptyMeansDefault'))),
-          h('td', {}, numberInput(config.engines[engine]?.max_parallel, (value) => (defaultsOf(engine).max_parallel = value), t('emptyMeansDefault'))),
-          h('td', {}, numberInput(config.engines[engine]?.max_queue, (value) => (defaultsOf(engine).max_queue = value), t('emptyMeansDefault'))))))))
+      cardTable(['engine', 'vramBudget', 'maxParallel', 'maxQueue'].map((key) => t(key)), keys.map((engine) => [
+        h('code', {}, engine), limit(engine, 'vram_budget_mib'), limit(engine, 'max_parallel'), limit(engine, 'max_queue')])))
   }
 
   function pronunciationsTable() {
     const words = Object.entries(config.pronunciations)
     return h('div', {}, h('h3', {}, t('pronunciations')),
-      h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, t('word')), h('th', {}, t('spoken')), h('th', {}))),
-        h('tbody', {}, words.map(([word, spoken]) => h('tr', {},
-          h('td', {}, textInput(word, (value) => { delete config.pronunciations[word]; if (value) config.pronunciations[value] = spoken; render() })),
-          h('td', {}, textInput(spoken, (value) => (config.pronunciations[word] = value))),
-          h('td', {}, h('button', { class: 'small', onclick: () => { delete config.pronunciations[word]; render() } }, t('remove'))))))),
+      cardTable([t('word'), t('spoken'), ''], words.map(([word, spoken]) => [
+        textInput(word, (value) => { delete config.pronunciations[word]; if (value) config.pronunciations[value] = spoken; render() }),
+        textInput(spoken, (value) => (config.pronunciations[word] = value)),
+        h('button', { class: 'small', onclick: () => { delete config.pronunciations[word]; render() } }, t('remove'))])),
       h('div', { class: 'actions' }, h('button', { class: 'small', onclick: () => { config.pronunciations[''] = ''; render() } }, t('add'))))
   }
 

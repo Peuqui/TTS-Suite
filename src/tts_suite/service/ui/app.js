@@ -36,6 +36,8 @@ for (const [name, view] of Object.entries(views)) document.getElementById(`view-
 
 function select(name) {
   current = name
+  // The tab is in the address: a reload or a bookmark comes back to it.
+  history.replaceState(null, '', `#${name}`)
   message.hidden = true
   for (const key of Object.keys(views)) document.getElementById(`view-${key}`).hidden = key !== name
   drawTabs()
@@ -79,4 +81,4 @@ tokenField.addEventListener('change', () => {
 })
 onLanguageChange(translateStatic)
 translateStatic()
-select('catalog')
+select(location.hash.slice(1) in views ? location.hash.slice(1) : 'catalog')

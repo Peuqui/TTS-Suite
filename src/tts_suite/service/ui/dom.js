@@ -17,3 +17,11 @@ export function h(tag, attributes = {}, ...children) {
 export function replaceChildren(parent, ...children) {
   parent.replaceChildren(...children.flat().filter((child) => child !== null && child !== undefined && child !== false))
 }
+
+// A table whose rows turn into cards on a narrow screen: every cell carries its heading in data-label
+// (style.css). `headings` are the texts of the header cells ('' = none), `rows` arrays of cell content.
+export function cardTable(headings, rows) {
+  return h('div', { class: 'table-scroll' }, h('table', { class: 'cards' },
+    h('thead', {}, h('tr', {}, headings.map((heading) => h('th', {}, heading)))),
+    h('tbody', {}, rows.map((cells) => h('tr', {}, cells.map((cell, index) => h('td', { 'data-label': headings[index] || null }, cell)))))))
+}
