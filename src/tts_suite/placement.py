@@ -1,7 +1,8 @@
 """Card choice for a local GPU engine: the rules of ``SuiteConfig`` applied to what ``nvidia-smi`` says.
 
 Ported from AIfred Intelligence (``place_local_gpu_engine``), with the rules in the configuration
-instead of a callback: ``gpus`` (order = preference, ``reserve_mib`` stays free for other programs),
+instead of a callback: ``gpu_mode`` (``auto`` = best fit over every card, ``list`` = only the cards of
+``gpus``: order = preference, ``reserve_mib`` stays free for other programs),
 ``headroom_mib`` (margin on top of the budget) and the budget of the engine.
 """
 
@@ -75,7 +76,7 @@ def vram_budget_mib(engine: TTSEngine, config: SuiteConfig) -> int | None:
 
 def _candidates(cards: list[GpuInfo], config: SuiteConfig) -> list[tuple[GpuInfo, int]]:
     """The cards in the order they are tried, each with the VRAM left after its reserve."""
-    if not config.gpus:
+    if config.gpu_mode == "auto":
         return [(card, card.free_mib) for card in sorted(cards, key=lambda card: -card.free_mib)]
     candidates = []
     for rule in config.gpus:
@@ -86,7 +87,7 @@ def _candidates(cards: list[GpuInfo], config: SuiteConfig) -> list[tuple[GpuInfo
 
 
 def choose_gpu(cards: list[GpuInfo], engine: TTSEngine, config: SuiteConfig) -> Placement:
-    """The first card (in the order of ``config.gpus``, else the one with the most free VRAM first)
+    """The first card (in the order of ``config.gpus`` in list mode, else the one with the most free VRAM first)
     whose free VRAM minus reserve covers the budget plus headroom. :class:`PlacementRefused` when
     none does or the budget is unknown."""
     budget = vram_budget_mib(engine, config)

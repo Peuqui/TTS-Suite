@@ -68,13 +68,14 @@ Ein Objekt: `voices_dir`; `hosts` (optional, die Rechner, auf die Anfragen mit N
 was nicht funktionieren kann, ist `400` mit dem Grund. Es gibt keine Liste von Einträgen: Wer spricht, in
 welcher Reihenfolge, ist Sache der Anfrage. Cloud-Schlüssel gehören nicht dazu (unten).
 
-**Die Platzierung auf der GPU ist ein Regelsatz**, kein Rückruf an ein Programm: Eine Engine startet auf der
-ersten Karte aus `gpus` (`gpu` = Index wie `nvidia-smi` ihn nennt, oder UUID; `reserve_mib` = VRAM, der für
+**Die Platzierung auf der GPU ist ein Regelsatz**, kein Rückruf an ein Programm. `gpu_mode` `auto` (Vorgabe) stellt
+eine Engine auf die Karte mit dem meisten freien VRAM, auf die sie passt (Best Fit); `list` nur auf die erste passende
+Karte aus `gpus` (`gpu` = Index wie `nvidia-smi` ihn nennt, oder UUID; `reserve_mib` = VRAM, der für
 andere Programme frei bleibt), deren freier VRAM abzüglich der Reserve das `vram_budget_mib` der Engine plus `headroom_mib` deckt (ein
 Aufschlag, damit keine Karte bis auf das letzte MiB gefüllt wird). Der Container bekommt das Budget als Kappe;
 die Suite beobachtet den Verbrauch nicht und stoppt keine Engine deswegen (`GET /engines` meldet, was eine
-Engine belegt, als `vram_mib`, nur zur Anzeige). Leeres `gpus` heißt alle Karten, die mit dem meisten freien
-VRAM zuerst. Passt keine Karte, wird der Eintrag mit `no_vram` übersprungen (nicht gemerkt: die nächste
+Engine belegt, als `vram_mib`, nur zur Anzeige). `gpus` gilt nur im Modus `list` (im Modus `auto` bleibt
+es für den nächsten Wechsel erhalten; `list` braucht mindestens eine Karte). Passt keine Karte, wird der Eintrag mit `no_vram` übersprungen (nicht gemerkt: die nächste
 Anfrage wählt neu).
 
 ### Die Anfrage: der Kopf eines Vorlesens

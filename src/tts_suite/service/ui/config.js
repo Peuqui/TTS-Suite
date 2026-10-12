@@ -48,8 +48,11 @@ export function configView({ show, fail }) {
   }
 
   function gpusTable() {
-    return h('div', {}, h('h3', {}, t('gpus')),
-      h('table', {}, h('thead', {}, h('tr', {}, ...['gpu', 'reserve', ''].map((key) => h('th', {}, key ? t(key) : '')))),
+    const mode = h('select', { onchange: (event) => { config.gpu_mode = event.target.value; render() } },
+      ['auto', 'list'].map((value) => h('option', { value, selected: config.gpu_mode === value }, t(value === 'auto' ? 'gpuModeAuto' : 'gpuModeList'))))
+    // The list is only used in the mode "list"; it stays in the configuration while the mode is "auto".
+    return h('div', {}, h('h3', {}, t('gpus')), h('p', { class: 'muted' }, t('gpuModeHint')), mode,
+      config.gpu_mode === 'auto' ? null : h('table', {}, h('thead', {}, h('tr', {}, ...['gpu', 'reserve', ''].map((key) => h('th', {}, key ? t(key) : '')))),
         h('tbody', {}, config.gpus.map((rule, index) => h('tr', {},
           h('td', {}, textInput(rule.gpu, (value) => (rule.gpu = value))),
           h('td', {}, numberInput(rule.reserve_mib, (value) => (rule.reserve_mib = value ?? 0))),
@@ -58,7 +61,7 @@ export function configView({ show, fail }) {
             h('button', { class: 'small', onclick: () => move(config.gpus, index, 1) }, '↓'),
             h('button', { class: 'small', onclick: () => { config.gpus.splice(index, 1); render() } }, t('remove'))))))),
       ),
-      h('div', { class: 'actions' }, h('button', { class: 'small', onclick: () => { config.gpus.push({ gpu: '', reserve_mib: 0 }); render() } }, t('add'))))
+      config.gpu_mode === 'auto' ? null : h('div', { class: 'actions' }, h('button', { class: 'small', onclick: () => { config.gpus.push({ gpu: '', reserve_mib: 0 }); render() } }, t('add'))))
   }
 
   function defaultsTable() {

@@ -19,7 +19,7 @@ CARDS = [GpuInfo(0, "GPU-a", 5000, 24000), GpuInfo(1, "GPU-b", 9000, 24000), Gpu
 
 
 def _config(tmp_path: Path, *rules: GpuRule, headroom_mib: int = 500, **engines: EngineDefaults) -> SuiteConfig:
-    return SuiteConfig(voices_dir=tmp_path, gpus=rules, headroom_mib=headroom_mib, engines=engines)
+    return SuiteConfig(voices_dir=tmp_path, gpu_mode="list" if rules else "auto", gpus=rules, headroom_mib=headroom_mib, engines=engines)
 
 
 def test_the_nvidia_smi_lines_are_read() -> None:
@@ -48,6 +48,11 @@ def test_the_headroom_is_added_to_the_budget(tmp_path: Path) -> None:
 
 def test_an_empty_list_means_every_card_the_one_with_the_most_free_vram_first(tmp_path: Path) -> None:
     assert choose_gpu(CARDS, ContainerEngine("x"), _config(tmp_path)).gpu.uuid == "GPU-b"
+
+
+def test_auto_mode_ignores_the_list_and_picks_the_best_fit(tmp_path: Path) -> None:
+    config = SuiteConfig(voices_dir=tmp_path, gpu_mode="auto", gpus=(GpuRule("0"),), headroom_mib=500)
+    assert choose_gpu(CARDS, ContainerEngine("x"), config).gpu.uuid == "GPU-b"  # card 0 is listed but card 1 has the most free
 
 
 def test_a_listed_card_that_is_not_there_is_not_an_option(tmp_path: Path) -> None:

@@ -67,12 +67,13 @@ One object: `voices_dir`; `hosts` (optional, the machines requests refer to by n
 what cannot work is `400` with the reason. There is no list of entries: who speaks, in which order, is the
 request's business. Cloud keys are not part of it (below).
 
-**GPU placement is a rule set**, no callback to a program: an engine starts on the first card of `gpus`
+**GPU placement is a rule set**, no callback to a program. `gpu_mode` `auto` (the default) puts an engine on the
+card with the most free VRAM that fits (best fit); `list` only on the first card of `gpus` that fits
 (`gpu` = index as `nvidia-smi` lists it, or UUID; `reserve_mib` = VRAM that stays free for other programs)
 whose free VRAM minus the reserve covers the engine's `vram_budget_mib` plus `headroom_mib` (a margin so a
 card is not filled to the last MiB). The container gets the budget as its cap; the suite does not watch the
 use or stop an engine for it (`GET /engines` reports what an engine holds as `vram_mib`, for display). An
-empty `gpus` means every card, the one with the most free VRAM first. No card fits: the entry is skipped
+`gpus` is not used in `auto` mode (it is kept for the next switch to `list`; `list` needs at least one card). No card fits: the entry is skipped
 with `no_vram` (not remembered: the next request chooses again).
 
 ### The request: the head of a reading

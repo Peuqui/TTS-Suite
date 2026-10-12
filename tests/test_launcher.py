@@ -49,7 +49,7 @@ def _launcher(
 def test_a_local_gpu_engine_starts_on_the_chosen_card_with_its_budget(tmp_path: Path) -> None:
     engine = ContainerEngine("a")
     cards = CardList(3000, 9000, 20000)
-    launcher = _launcher(tmp_path, cards, config=SuiteConfig(voices_dir=tmp_path, gpus=(GpuRule("1"), GpuRule("2"))))
+    launcher = _launcher(tmp_path, cards, config=SuiteConfig(voices_dir=tmp_path, gpu_mode="list", gpus=(GpuRule("1"), GpuRule("2"))))
 
     async def scenario() -> None:
         assert not await launcher.is_serving(local_entry(engine))

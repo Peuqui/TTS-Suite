@@ -22,6 +22,7 @@ from typing import Literal, Protocol
 Unit = Literal["sentence", "paragraph", "whole"]
 """How much text an engine takes at once. The client cuts the text by it."""
 
+GpuMode = Literal["auto", "list"]
 EntryStatus = Literal["running", "stopped", "starting", "unreachable"]
 """``running`` = speaks; ``starting`` = a start is under way; ``stopped`` = nothing runs, the host (if any)
 is up, so it can be started; ``unreachable`` = the host does not answer, or a cloud engine has no access."""
@@ -89,13 +90,14 @@ class SuiteConfig:
     GPU placement is a rule set, not a callback: the suite owns the cards' use for all
     programs that talk to it. The suite offers every engine it knows (the catalog,
     :meth:`TTSSuite.engines`); it keeps NO escalation list: each request brings its own, so no
-    program owns a list the others share. An engine starts on the first card of ``gpus`` whose free
-    VRAM (``nvidia-smi``) minus ``reserve_mib`` covers the engine's ``vram_budget_mib``
+    program owns a list the others share. ``gpu_mode`` ``auto`` puts an engine on the card with the most
+    free VRAM that fits (best fit, the default); ``list`` only on the cards of ``gpus``, the first
+    one whose free VRAM (``nvidia-smi``) minus ``reserve_mib`` covers the engine's ``vram_budget_mib``
     plus ``headroom_mib``. The container gets the budget itself as its cap; the headroom
     only keeps a card from being filled to the last MiB. The cap counts PyTorch memory only,
     so it is an outlier guard, not an exact limit; the suite does not watch the use or stop an
-    engine for it (``EngineInfo.vram_mib`` only reports it). An empty ``gpus`` means every
-    card, the one with the most free VRAM first. No card fits: the entry is skipped with
+    engine for it (``EngineInfo.vram_mib`` only reports it). In ``auto`` mode ``gpus`` is not
+    used (and kept for the next switch to ``list``). No card fits: the entry is skipped with
     ``no_vram`` (not remembered: the next request chooses again).
 
     ``pronunciations`` maps a word to the form that is spoken instead (whole words, case as
@@ -106,6 +108,7 @@ class SuiteConfig:
     voices_dir: Path
     hosts: tuple[Host, ...] = ()  # optional other machines (SSH keys are the service's); empty = this machine only
     engines: Mapping[str, EngineDefaults] = field(default_factory=dict)
+    gpu_mode: GpuMode = "auto"
     gpus: tuple[GpuRule, ...] = ()
     headroom_mib: int = HEADROOM_MIB_DEFAULT
     pronunciations: Mapping[str, str] = field(default_factory=dict)

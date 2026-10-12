@@ -113,6 +113,7 @@ def test_a_new_configuration_is_set_and_kept(tmp_path: Path) -> None:
     client, suite, store = build(tmp_path)
     wanted = {
         "voices_dir": str(tmp_path / "other"),
+        "gpu_mode": "list",
         "gpus": [{"gpu": "0", "reserve_mib": 2048}],
         "pronunciations": {"AIfred": "Alfred"},
     }

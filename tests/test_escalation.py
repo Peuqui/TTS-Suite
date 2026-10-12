@@ -23,6 +23,7 @@ from tts_suite.api import (
     EngineDefaults,
     EngineRef,
     EngineStarting,
+    GpuRule,
     Host,
     InvalidRequest,
     NoEngineAvailable,
@@ -109,6 +110,12 @@ def test_a_bad_host_is_refused(tmp_path: Path, hosts: tuple[Host, ...], message:
 def test_an_empty_pronunciation_word_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigInvalid, match="pronunciations"):
         check_config(_config(tmp_path, pronunciations={" ": "x"}))
+
+
+def test_the_list_mode_needs_a_card(tmp_path: Path) -> None:
+    with pytest.raises(ConfigInvalid, match="gpu_mode list"):
+        check_config(_config(tmp_path, gpu_mode="list"))
+    check_config(_config(tmp_path, gpu_mode="list", gpus=(GpuRule("0"),)))
 
 
 def test_a_missing_voices_dir_is_refused(tmp_path: Path) -> None:
