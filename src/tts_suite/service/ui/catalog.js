@@ -6,6 +6,10 @@ import { hostLabel, t } from './i18n.js'
 export function catalogView({ show, fail }) {
   const root = h('div')
   let rows = []
+  // The rows with a command under way: place -> the command. Its buttons stay off until it is done, so a
+  // slow start is not pressed twice.
+  const busy = new Map()
+  const place = (row) => `${row.engine}@${row.host ?? ''}`
 
   async function load() {
     try {
@@ -14,22 +18,28 @@ export function catalogView({ show, fail }) {
     } catch (error) { fail(error) }
   }
 
-  async function control(action, row) {
-    try {
-      await service[action](row.engine, row.host)
-      show(t(action === 'start' ? 'started' : 'stopped'))
-      await load()
-    } catch (error) { fail(error) }
+  // Runs one command for some rows with their buttons off meanwhile; the page shows what is going on.
+  async function working(command, targets, run) {
+    for (const row of targets) busy.set(place(row), command)
+    render()
+    try { await run() } catch (error) { fail(error) }
+    for (const row of targets) busy.delete(place(row))
+    await load()
   }
+
+  const control = (action, row) => working(action, [row], async () => {
+    await service[action](row.engine, row.host)
+    show(t(action === 'start' ? 'started' : 'stopped'))
+  })
 
   // Takes the containers down so their GPU memory is free: the targets, or "all" rows. A reading that
   // holds one keeps it; the answer says what became of each.
-  async function release(targets) {
-    try {
+  function release(targets) {
+    const affected = targets === 'all' ? rows.filter((row) => !row.browser && !row.cloud) : rows.filter((row) => targets.some((target) => target.engine === row.engine && (target.host ?? null) === (row.host ?? null)))
+    return working('release', affected, async () => {
       const results = await service.release(targets)
       show(results.map((result) => `${result.engine}${result.host ? `@${result.host}` : ''}: ${t(`release${result.outcome[0].toUpperCase()}${result.outcome.slice(1)}`)}${result.detail ? ` (${result.detail})` : ''}`).join(' · '))
-      await load()
-    } catch (error) { fail(error) }
+    })
   }
 
   function columns(visible) {
@@ -40,16 +50,16 @@ export function catalogView({ show, fail }) {
         row.needs_gpu ? h('span', { class: 'tag' }, t('needsGpu')) : null,
         h('div', { class: 'muted' }, h('code', {}, row.engine))] },
       { key: 'host', cell: hostLabel },
-      { key: 'status', cell: (row) => h('span', { class: `status ${row.status}`, title: t(`state${row.status[0].toUpperCase()}${row.status.slice(1)}`) }, t(`status${row.status[0].toUpperCase()}${row.status.slice(1)}`)) },
+      { key: 'status', cell: (row) => busy.has(place(row)) ? h('span', { class: 'status starting' }, t({ start: 'busyStart', stop: 'busyStop', release: 'busyRelease' }[busy.get(place(row))])) : h('span', { class: `status ${row.status}`, title: t(`state${row.status[0].toUpperCase()}${row.status.slice(1)}`) }, t(`status${row.status[0].toUpperCase()}${row.status.slice(1)}`)) },
       { key: 'installed', cell: (row) => (row.installed ? t('yes') : t('no')) },
       // Likewise the memory: only when some row holds any.
       ...(visible.some((row) => memory(row.vram_mib) !== '') ? [{ key: 'gpuMemory', cell: (row) => memory(row.vram_mib) }] : []),
       // The column of the hints only when some row has one.
       ...(hasHint ? [{ key: 'hint', cell: (row) => (row.start_hint ? h('span', { class: 'hint' }, row.start_hint) : '') }] : []),
       { key: '', cell: (row) => (row.cloud ? '' : h('div', { class: 'buttons' },
-        h('button', { class: 'small', onclick: () => control('start', row), disabled: row.status === 'running' }, t('start')),
-        h('button', { class: 'small', onclick: () => control('stop', row), disabled: row.status === 'stopped' }, t('stop')),
-        h('button', { class: 'small', onclick: () => release([{ engine: row.engine, host: row.host }]), disabled: row.status === 'stopped' }, t('release')))) },
+        h('button', { class: 'small', onclick: () => control('start', row), disabled: busy.has(place(row)) || row.status === 'running' }, t('start')),
+        h('button', { class: 'small', onclick: () => control('stop', row), disabled: busy.has(place(row)) || row.status === 'stopped' }, t('stop')),
+        h('button', { class: 'small', onclick: () => release([{ engine: row.engine, host: row.host }]), disabled: busy.has(place(row)) || row.status === 'stopped' }, t('release')))) },
     ]
   }
 
@@ -59,7 +69,7 @@ export function catalogView({ show, fail }) {
     replaceChildren(root,
       h('h2', {}, t('tabCatalog')),
       h('p', { class: 'muted' }, t('catalogHint')),
-      h('div', { class: 'row' }, h('button', { onclick: load }, t('reload')), h('button', { onclick: () => release('all') }, t('releaseAll'))),
+      h('div', { class: 'row' }, h('button', { onclick: load }, t('reload')), h('button', { onclick: () => release('all'), disabled: busy.size > 0 }, t('releaseAll'))),
       cardTable(shown.map((column) => (column.key ? t(column.key) : '')), visible.map((row) => shown.map((column) => column.cell(row)))),
     )
   }
