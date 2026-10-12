@@ -73,6 +73,8 @@ document.getElementById('theme').addEventListener('click', () => {
   localStorage.setItem('tts-suite-theme', THEMES[(THEMES.indexOf(now) + 1) % THEMES.length])
   applyTheme()
 })
+// The token form is never sent: the field only keeps the token (below).
+document.getElementById('token-form').addEventListener('submit', (event) => event.preventDefault())
 const tokenField = document.getElementById('token')
 tokenField.value = token.get()
 tokenField.addEventListener('change', () => {

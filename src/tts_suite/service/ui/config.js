@@ -21,11 +21,11 @@ export function configView({ show, fail }) {
   function field(label, input) { return h('label', { class: 'row' }, h('span', { class: 'muted' }, label), input) }
 
   function textInput(value, onchange, placeholder = '') {
-    return h('input', { type: 'text', value: value ?? '', placeholder, onchange: (event) => onchange(event.target.value) })
+    return h('input', { type: 'text', autocomplete: 'off', value: value ?? '', placeholder, onchange: (event) => onchange(event.target.value) })
   }
 
   function numberInput(value, onchange, placeholder = '') {
-    return h('input', { type: 'number', min: 0, value: value ?? '', placeholder, onchange: (event) => onchange(numberOrNull(event.target.value)) })
+    return h('input', { type: 'number', min: 0, autocomplete: 'off', value: value ?? '', placeholder, onchange: (event) => onchange(numberOrNull(event.target.value)) })
   }
 
   function move(list, index, delta) {
