@@ -125,7 +125,7 @@ export function speakView({ show, fail }) {
         hostLabel(row),
         h('select', { onchange: (event) => (units[place(row)] = event.target.value) },
           UNITS.map((unit) => h('option', { value: unit, selected: units[place(row)] === unit }, t(UNIT_KEYS[unit])))),
-        (voiceLists[row.engine]?.length ?? 0) === 0 ? '' : h('select', { onchange: (event) => (voices[row.engine] = event.target.value) },
+        (voiceLists[row.engine]?.length ?? 0) === 0 ? '' : h('select', { onchange: (event) => { voices[row.engine] = event.target.value; render() } },
           voiceLists[row.engine].map((voice) => h('option', { value: voice.name, selected: voices[row.engine] === voice.name }, voice.label)))])),
       h('div', { class: 'row' }, h('label', {}, t('language2') + ' ',
         h('select', { onchange: (event) => (language = event.target.value) }, ['de', 'en'].map((code) => h('option', { value: code, selected: code === language }, code)))),
