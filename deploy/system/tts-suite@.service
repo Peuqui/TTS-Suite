@@ -1,0 +1,19 @@
+# TTS-Suite as a system service for one user: systemctl enable --now tts-suite@<user>
+# The user's groups come with User= (docker: the engines are containers), and the user's own
+# files are used: ~/.local/share/tts-suite (venv, data), ~/.config/tts-suite (config, token, keys).
+[Unit]
+Description=TTS-Suite text to speech service for %i
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+# The keys of cloud engines (DASHSCOPE_API_KEY=...), in a file readable for the user alone (chmod 600).
+EnvironmentFile=-/home/%i/.config/tts-suite/env
+ExecStart=/home/%i/.local/share/tts-suite/venv/bin/tts-suite serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
