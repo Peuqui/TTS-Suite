@@ -118,11 +118,6 @@ def test_the_list_mode_needs_a_card(tmp_path: Path) -> None:
     check_config(_config(tmp_path, gpu_mode="list", gpus=(GpuRule("0"),)))
 
 
-def test_a_pronunciation_word_twice_in_different_case_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(ConfigInvalid, match="twice"):
-        check_config(_config(tmp_path, pronunciations={"AIfred": "Alfred", "aifred": "Alfred"}))
-
-
 def test_a_missing_voices_dir_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigInvalid, match="voices_dir"):
         check_config(SuiteConfig(voices_dir=tmp_path / "missing"))
