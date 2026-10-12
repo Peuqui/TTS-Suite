@@ -11,8 +11,8 @@ from tts_suite.splitting import CutUnit, UnitCutter, split_text
 UNITS: tuple[Unit, ...] = ("sentence", "paragraph", "whole")
 
 TEXTS = [
-    "Dr. Müller kam um 3.5 Uhr an. Er sagte z.B. nichts! Ok.\n\nEine Überschrift\n\nDas ist ein weiterer Satz mit Inhalt: "
-    "Hier die Liste.\n\n| a | b. |\nSiehe http://x.de/a.b für mehr. Ende dieses Textes hier.",
+    ("Dr. Müller kam um 3.5 Uhr an. Er sagte z.B. nichts! Ok.\n\nEine Überschrift\n\nDas ist ein weiterer Satz mit Inhalt: "
+    "Hier die Liste.\n\n| a | b. |\nSiehe http://x.de/a.b für mehr. Ende dieses Textes hier."),
     "Hallo Welt. Wie geht es dir heute? Mir geht es gut, danke der Nachfrage! Und dir?",
     "Er sagte: \"Das ist wirklich ein guter Plan.\" Dann ging er (ohne ein Wort zu sagen) nach Hause. Fertig und aus.",
     "Wait... Was war das? Nichts weiter. Ja.",

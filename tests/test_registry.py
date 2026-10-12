@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import pytest
 
@@ -56,7 +56,7 @@ def test_container_engine_matches_its_compose_file(engine: TTSEngine) -> None:
     compose_path = engine.docker_compose_path
     assert compose_path is not None and compose_path.exists()
     compose = compose_path.read_text(encoding="utf-8")
-    assert re.search(rf"^\s*image:\s*{re.escape(engine.image_name or '')}\s*$", compose, re.M)
+    assert re.search(rf"^\s*image:\s*{re.escape(engine.image_name or '')}\s*$", compose, re.MULTILINE)
     assert re.search(rf'-\s*"{engine.default_port}:\d+"', compose), "host port"
     assert engine.startup_timeout_s > 0
 

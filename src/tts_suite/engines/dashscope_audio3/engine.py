@@ -15,8 +15,9 @@ import os
 import socket
 import struct
 import wave
+from collections.abc import Iterator
 from http import HTTPStatus
-from typing import Iterator
+from typing import ClassVar
 
 import requests
 
@@ -88,7 +89,7 @@ class DashScopeAudio3Engine(TTSEngine):
     sample_rate_hz: int = 24000
 
     # ISO short code → DashScope language_type.
-    language_map_dashscope: dict[str, str] = {
+    language_map_dashscope: ClassVar[dict[str, str]] = {
         "de": "German",   "en": "English", "fr": "French",   "es": "Spanish",
         "it": "Italian",  "pt": "Portuguese", "ru": "Russian",
         "ja": "Japanese", "ko": "Korean", "zh": "Chinese",
@@ -169,7 +170,7 @@ class DashScopeAudio3Engine(TTSEngine):
             audio = requests.get(audio_url.replace("http://", "https://", 1), timeout=self.request_timeout_s)
             audio.raise_for_status()
             return self._with_gain(audio.content)
-        except Exception as e:  # noqa: BLE001 — _failure sorts it into a TTSFailure
+        except Exception as e:
             raise self._failure(e) from e
 
     def _with_gain(self, wav_bytes: bytes) -> bytes:

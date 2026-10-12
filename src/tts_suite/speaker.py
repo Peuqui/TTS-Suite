@@ -8,9 +8,10 @@ opens the streams. It keeps no escalation list: every request brings its own, bo
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from typing import Any, Callable
+from typing import Any
 
 from .api import (
     Host,

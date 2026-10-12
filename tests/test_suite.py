@@ -22,8 +22,8 @@ from tts_suite.api import (
     ConfigInvalid,
     EngineControlFailed,
     EngineDefaults,
-    EngineInUse,
     EngineInfo,
+    EngineInUse,
     EngineTarget,
     Host,
     InvalidRequest,
@@ -151,7 +151,7 @@ def test_the_catalog_tells_a_host_that_is_off_from_a_host_whose_container_is_off
     engine.reach_by_address = {"localhost": "refused", "192.0.2.2": "unreachable", "192.0.2.3": "refused"}
     install(monkeypatch, engine)
     config = make_config(tmp_path, hosts=(ARAGON, Host("Basti", "192.0.2.3")))
-    suite, _ = _suite(config, SuiteLauncher(config, gpus=lambda: [], host_command=FakeSsh()))  # type: ignore[arg-type]
+    suite, _ = _suite(config, SuiteLauncher(config, gpus=list, host_command=FakeSsh()))  # type: ignore[arg-type]
     rows = _rows(run_async(suite.engines()))
     assert rows[("hostfake", "Aragon")].status == "unreachable"
     assert rows[("hostfake", "Basti")].status == "stopped"  # up, the container is off
@@ -373,7 +373,7 @@ def test_release_leaves_a_held_container_alone_with_the_real_launcher(tmp_path: 
     install(monkeypatch, held, remote)
     ssh = FakeSsh()
     config = make_config(tmp_path, hosts=(ARAGON,))
-    launcher = SuiteLauncher(config, gpus=lambda: [], host_command=ssh)  # type: ignore[arg-type]
+    launcher = SuiteLauncher(config, gpus=list, host_command=ssh)  # type: ignore[arg-type]
     suite, _ = _suite(config, launcher)  # type: ignore[arg-type]
 
     async def scenario() -> tuple[ReleaseResult, ...]:
@@ -393,7 +393,7 @@ def test_release_stops_a_host_container_over_ssh(tmp_path: Path, monkeypatch: py
     install(monkeypatch, remote)
     ssh = FakeSsh()
     config = make_config(tmp_path, hosts=(ARAGON,))
-    suite, _ = _suite(config, SuiteLauncher(config, gpus=lambda: [], host_command=ssh))  # type: ignore[arg-type]
+    suite, _ = _suite(config, SuiteLauncher(config, gpus=list, host_command=ssh))  # type: ignore[arg-type]
     results = run_async(suite.release((EngineTarget("re", "Aragon"),)))
     assert results[0].outcome == "stopped" and [c[:2] for c in ssh.commands] == [("Aragon", "stop")]
 

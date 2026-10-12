@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import Executor
+from typing import ClassVar
 
 from ...constants import MEDIA_TYPE_MP3
 from ..base import TTSEngine, TTSFailure, validate_audio
@@ -26,7 +27,7 @@ class EdgeEngine(TTSEngine):
 
     # display name → Microsoft Neural Voice id. Static catalogue —
     # Edge has no live discovery endpoint we use.
-    _VOICES: dict[str, str] = {
+    _VOICES: ClassVar[dict[str, str]] = {
         # Deutschland (de-DE)
         "Deutsch (Katja)":       "de-DE-KatjaNeural",
         "Deutsch (Amala)":       "de-DE-AmalaNeural",

@@ -14,7 +14,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Callable, Protocol
+from collections.abc import Callable
+from typing import Protocol
 
 from .api import (
     EngineControlFailed,
@@ -127,7 +128,7 @@ class SuiteLauncher:
         try:
             # shield: a waiter that goes away or runs out of patience does not cancel the start
             return await asyncio.wait_for(asyncio.shield(task), limit_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return Skip("stopped", f"start did not finish within {limit_s} s")
 
     def hold(self, entry: EscalationEntry) -> None:

@@ -375,7 +375,7 @@ def test_the_slot_limits_come_from_the_configuration_else_from_the_engine() -> N
 def test_a_run_lives_for_ttl_seconds_after_its_last_use() -> None:
     now = [0.0]
     table = RunTable(ttl_s=600, clock=lambda: now[0])
-    create = lambda: make_run([entry(FakeEngine("a"))])  # noqa: E731
+    create = lambda: make_run([entry(FakeEngine("a"))])
     run = table.get_or_create(("r1", None), create)
     now[0] = 500
     assert table.get_or_create(("r1", None), create) is run     # used again: the time starts anew
@@ -389,7 +389,7 @@ def test_a_run_lives_for_ttl_seconds_after_its_last_use() -> None:
 def test_a_run_that_speaks_longer_than_the_ttl_stays_in_the_table() -> None:
     now = [0.0]
     table = RunTable(ttl_s=600, clock=lambda: now[0])
-    create = lambda: make_run([entry(FakeEngine("a"))])  # noqa: E731
+    create = lambda: make_run([entry(FakeEngine("a"))])
     run = table.get_or_create(("r1", None), create)
     run.attach()                                                 # a stream is speaking it
     now[0] = 1500
@@ -412,7 +412,7 @@ def test_the_slot_table_keeps_the_slots_of_engines_whose_limits_did_not_change()
 
 def test_runs_are_told_apart_by_their_id_and_the_named_engine() -> None:
     table = RunTable()
-    create = lambda: make_run([entry(FakeEngine("a"))])  # noqa: E731
+    create = lambda: make_run([entry(FakeEngine("a"))])
     assert table.get_or_create(("r1", None), create) is not table.get_or_create(("r2", None), create)
     assert table.get_or_create(("r1", None), create) is not table.get_or_create(("r1", "a"), create)
     table.clear()

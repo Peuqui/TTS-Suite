@@ -9,10 +9,11 @@ import subprocess
 import sys
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from concurrent.futures import Executor
 from functools import partial
 from pathlib import Path
-from typing import Any, Iterator, Literal, Optional, Self, get_args
+from typing import Any, Literal, Self, get_args
 
 from ..api import FailureReason, SuiteError, Unit
 from ..constants import (
@@ -21,8 +22,8 @@ from ..constants import (
     COMPOSE_FILE_NAME,
     DOCKER_INSPECT_TIMEOUT_S,
     DOCKER_TTS_DIR,
-    HOST_UNREACHABLE_ERRNOS,
     ENGINE_QUEUE_DEFAULT,
+    HOST_UNREACHABLE_ERRNOS,
     MEDIA_TYPE_WAV,
     TTS_CONNECT_TIMEOUT_S,
     TTS_HEALTH_TIMEOUT_S,
@@ -138,7 +139,7 @@ class TTSEngine(ABC):
     #: VRAM budget in MiB a GPU engine starts with — the peak of its stress burn-in.
     #: ``None`` = no secured value; whoever ran the burn-in sets it in the configuration
     #: (``EngineDefaults.vram_budget_mib``).
-    default_vram_budget_mib: Optional[int] = None
+    default_vram_budget_mib: int | None = None
 
     #: Whether this engine ignores the speed parameter on its own and
     #: requires ffmpeg post-processing to rate-shift the audio.
@@ -167,12 +168,12 @@ class TTSEngine(ABC):
     #: Local Docker image name (without tag). None for lightweight
     #: engines. Used by :meth:`is_installed` to check provisioning —
     #: the image is the source of truth, the compose file is the recipe.
-    image_name: Optional[str] = None
+    image_name: str | None = None
 
     #: Subdirectory under ``docker/tts/`` containing the build recipe.
     #: Default = engine key; override only when the dir name differs
     #: (Qwen3 key="qwen3local" but dir="qwen3-tts").
-    compose_subdir: Optional[str] = None
+    compose_subdir: str | None = None
 
     #: How many syntheses this engine (per host) may run at once. Measured on
     #: a 3090 Ti: XTTS serves two in parallel without loss, Qwen3-TTS slows
@@ -198,7 +199,7 @@ class TTSEngine(ABC):
     #: Port of the engine's REST API — set by engines that run as an HTTP
     #: service (the containers). None = no REST API (cloud/CLI engines);
     #: such engines can only run on this machine or in the cloud.
-    default_port: Optional[int] = None
+    default_port: int | None = None
 
     #: True for the entry that stands for the client's own voice (Web Speech API in a
     #: browser): the suite lists it but never speaks with it.
@@ -206,15 +207,15 @@ class TTSEngine(ABC):
 
     #: Voice used when neither the request nor the configuration names one
     #: (None = such a request cannot be spoken on this engine).
-    default_voice: Optional[str] = None
+    default_voice: str | None = None
 
     def __init__(
         self,
         address: str = LOCALHOST,
-        port: Optional[int] = None,
+        port: int | None = None,
         gpu_uuid: str = "",
-        voices_dir: Optional[Path] = None,
-        vram_budget_mib: Optional[int] = None,
+        voices_dir: Path | None = None,
+        vram_budget_mib: int | None = None,
     ) -> None:
         """``address``/``port`` of the REST API. The registry instances run on
         this machine (``localhost``); :meth:`at_host` binds the same engine to
@@ -236,12 +237,12 @@ class TTSEngine(ABC):
         }
         return type(self)(**(bindings | changes))
 
-    def on_gpu(self, gpu_uuid: str, vram_budget_mib: Optional[int] = None) -> Self:
+    def on_gpu(self, gpu_uuid: str, vram_budget_mib: int | None = None) -> Self:
         """The same local engine, started on another card with a VRAM limit (``None`` = none)."""
         self._require_local("place")
         return self._bound(gpu_uuid=gpu_uuid, vram_budget_mib=vram_budget_mib)
 
-    def at_host(self, address: str, port: Optional[int] = None) -> Self:
+    def at_host(self, address: str, port: int | None = None) -> Self:
         """The same engine, bound to a remote host. Raises ``ValueError`` for
         engines without a REST API — they cannot run on another machine."""
         if self.default_port is None:
@@ -280,7 +281,7 @@ class TTSEngine(ABC):
 
     # ── Locations ──────────────────────────────────────────────────
     @property
-    def service_url(self) -> Optional[str]:
+    def service_url(self) -> str | None:
         """HTTP base URL of the engine's REST API. None for engines that
         don't run as an HTTP service."""
         if self.port is None:
@@ -288,7 +289,7 @@ class TTSEngine(ABC):
         return f"http://{self.address}:{self.port}"
 
     @property
-    def docker_compose_path(self) -> Optional[Path]:
+    def docker_compose_path(self) -> Path | None:
         """docker-compose.yml path. The compose file is a *build recipe*
         — present in the repo, used to (re)build the image. NOT used to
         decide whether the engine is installed (the image is).
@@ -326,7 +327,7 @@ class TTSEngine(ABC):
         back to :attr:`voices_fallback` in that case.
         """
 
-    def _fetch_voices_json(self) -> Optional[dict[str, Any]]:
+    def _fetch_voices_json(self) -> dict[str, Any] | None:
         """GET ``<service_url>/voices`` of a container engine. A stopped
         container (connection refused) is the normal case and stays
         silent; only a container that answers wrongly is worth a warning.
@@ -371,7 +372,7 @@ class TTSEngine(ABC):
             result = subprocess.run(
                 ["docker", "image", "inspect", self.image_name],
                 capture_output=True,
-                timeout=DOCKER_INSPECT_TIMEOUT_S,
+                check=False, timeout=DOCKER_INSPECT_TIMEOUT_S,
             )
             return result.returncode == 0
         except (FileNotFoundError, subprocess.TimeoutExpired):

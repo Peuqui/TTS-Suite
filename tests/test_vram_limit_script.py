@@ -60,7 +60,7 @@ def _start_interpreter(tmp_path: Path, budget: str | None) -> tuple[subprocess.C
     if budget is not None:
         environment[BUDGET_ENV] = budget
     result = subprocess.run(
-        [sys.executable, "-c", "print('program ran')"], env=environment, capture_output=True, text=True, timeout=60,
+        [sys.executable, "-c", "print('program ran')"], env=environment, capture_output=True, text=True, check=False, timeout=60,
     )
     events = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
     return result, events

@@ -5,10 +5,9 @@ import asyncio
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
-
 from speech_fakes import TEST_EXECUTOR
 
 from tts_suite.constants import DATA_DIR_DEFAULT, DATA_DIR_ENV, PIPER_MODELS_DIR_NAME, data_dir
@@ -29,8 +28,8 @@ def _engine(key: str) -> Any:
 # ── Edge ───────────────────────────────────────────────────────────
 
 class FakeCommunicate:
-    created: list[tuple[str, str, str]] = []
-    chunks: list[dict[str, Any]] = []
+    created: ClassVar[list[tuple[str, str, str]]] = []
+    chunks: ClassVar[list[dict[str, Any]]] = []
     error: Exception | None = None
 
     def __init__(self, text: str, voice: str, rate: str) -> None:

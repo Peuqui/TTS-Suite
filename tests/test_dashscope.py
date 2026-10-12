@@ -160,7 +160,7 @@ def test_cloned_voices_come_first_and_use_the_flash_model(cloud: FakeCloud, engi
     (data_folder / DASHSCOPE_MAPPING_FILE_NAME).write_text(
         json.dumps({"Codine": {"voice_id": "qwen-audio-3.0-tts-flash-codine-1"}}), encoding="utf-8",
     )
-    assert list(engine.get_voices())[0] == "★ Codine"
+    assert next(iter(engine.get_voices())) == "★ Codine"
     # With and without the ★ prefix (it may be stripped before the engine sees it).
     for voice in ("★ Codine", "Codine"):
         engine.generate_speech("Hallo", voice, "de")

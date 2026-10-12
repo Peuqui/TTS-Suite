@@ -5,7 +5,7 @@ import errno
 import socket
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 import requests
@@ -282,7 +282,7 @@ def test_the_kind_of_connection_error_tells_whether_the_host_is_there(
 def test_an_http_answer_that_is_not_ready_means_the_host_is_there(monkeypatch: pytest.MonkeyPatch) -> None:
     class Answer:
         ok = False
-        headers: dict[str, str] = {}
+        headers: ClassVar[dict[str, str]] = {}
 
     monkeypatch.setattr(requests, "get", lambda *args, **kwargs: Answer())
     engine = XTTSEngine().at_host("192.0.2.2")

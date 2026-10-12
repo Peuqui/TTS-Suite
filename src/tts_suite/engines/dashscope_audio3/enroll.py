@@ -19,8 +19,9 @@ import hashlib
 import json
 import logging
 import wave
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any
 
 from ...constants import DASHSCOPE_ENROLL_TIMEOUT_S, DASHSCOPE_MAPPING_FILE_NAME, data_dir
 from .engine import DashScopeAudio3Engine
@@ -67,7 +68,7 @@ def save_mapping(mapping: Mapping) -> None:
     path.write_text(json.dumps(mapping, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _enroll_one(name: str, wav_path: Path, api_key: str) -> Optional[dict[str, Any]]:
+def _enroll_one(name: str, wav_path: Path, api_key: str) -> dict[str, Any] | None:
     """Clone one reference voice via base64 enrollment. Returns the mapping
     entry or None on failure (no fallback — the caller surfaces it and the
     voice stays unavailable). Detailed HTTP/network errors are logged here."""

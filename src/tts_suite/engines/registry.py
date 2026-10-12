@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator, Protocol
+from typing import Protocol
 
 from ..api import UnknownEngine
 from .base import TTSEngine

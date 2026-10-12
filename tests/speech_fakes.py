@@ -4,8 +4,9 @@ from __future__ import annotations
 import asyncio
 import io
 import wave
+from collections.abc import Coroutine
 from concurrent.futures import Executor, ThreadPoolExecutor
-from typing import Any, Coroutine, TypeVar
+from typing import Any, TypeVar
 
 from tts_suite.api import AudioSegment, EngineDefaults, EngineRef, EngineStarting, SpeakRequest, Unit
 from tts_suite.engines.base import TTSEngine, TTSFailure
@@ -20,7 +21,7 @@ T = TypeVar("T")
 TEST_EXECUTOR = ThreadPoolExecutor(4)
 
 
-def run_async(scenario: Coroutine[Any, Any, T], timeout: float = 10) -> T:
+def run_async[T](scenario: Coroutine[Any, Any, T], timeout: float = 10) -> T:
     """Run a test scenario in its own event loop; a hang becomes a failure."""
     async def guarded() -> T:
         return await asyncio.wait_for(scenario, timeout)

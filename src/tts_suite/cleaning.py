@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 import string
-from typing import Mapping
+from collections.abc import Mapping
 
 from .constants import (
     BRACKET_MAX_CHARS,
@@ -82,7 +82,7 @@ _HEADING_MARK = re.compile(r"#+\s")
 _BULLET = re.compile(r"^[-*+]\s+", re.MULTILINE)
 _NUMBERED = re.compile(r"^\d+\.\s+", re.MULTILINE)
 _URL = re.compile(r"https?://\S+|www\.\S+")
-_ZERO_WIDTH = re.compile("[​‌‍⁠﻿]")
+_ZERO_WIDTH = re.compile("[\u200b‌‍⁠﻿]")
 #: Dashes mark a pause: a comma keeps it ("Text – mehr Text" must not run together).
 _DASHES = str.maketrans({"–": ",", "—": ",", "‒": ",", "―": ",", " ": " "})
 #: Everything else (arrows, math symbols, ...) makes "quirks" in the engines. Kept: letters, digits,

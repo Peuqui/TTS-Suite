@@ -5,6 +5,8 @@ import asyncio
 
 import pytest
 from speech_fakes import (
+    SENTENCES,
+    TEXT,
     FakeEngine,
     FakeLauncher,
     GatedFailEngine,
@@ -15,8 +17,6 @@ from speech_fakes import (
     make_run,
     request,
     run_async,
-    SENTENCES,
-    TEXT,
     wav_info,
 )
 

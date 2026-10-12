@@ -88,6 +88,7 @@ class PiperEngine(TTSEngine):
                  "--length_scale", str(length_scale)],
                 input=text.encode("utf-8"),
                 capture_output=True,
+                check=False,
             )
             if result.returncode != 0 or not output_file.exists():
                 raise TTSFailure("engine", f"Piper exit {result.returncode}: {result.stderr.decode()[:200]}")

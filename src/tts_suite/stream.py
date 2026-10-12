@@ -28,8 +28,9 @@ is delivered first, as a segment of its own.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Mapping
 from types import MappingProxyType
-from typing import Any, AsyncIterator, Mapping
+from typing import Any
 
 from .api import AudioSegment, SpeakRequest, SpeakSummary
 from .constants import KEEPALIVE_SEC

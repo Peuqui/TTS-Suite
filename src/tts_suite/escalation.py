@@ -21,11 +21,12 @@ import asyncio
 import logging
 import re
 import time
+from collections.abc import AsyncIterator, Callable, Mapping
 from concurrent.futures import Executor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncIterator, Callable, Mapping, Protocol
+from typing import Protocol
 
 from .api import (
     ConfigInvalid,
@@ -248,8 +249,8 @@ def resolve_voice(
         ) if name),
         None,
     )
-    speed = next((v for v in (own.speed, request.speed, configured.speed, SPEED_DEFAULT) if v is not None))
-    pitch = next((v for v in (own.pitch, request.pitch, configured.pitch, PITCH_DEFAULT) if v is not None))
+    speed = next(v for v in (own.speed, request.speed, configured.speed, SPEED_DEFAULT) if v is not None)
+    pitch = next(v for v in (own.pitch, request.pitch, configured.pitch, PITCH_DEFAULT) if v is not None)
     if voice is None:
         raise TTSFailure("software", f"no voice configured for {engine.key}")
     if speed <= 0 or pitch <= 0:
@@ -322,9 +323,12 @@ class SpeechRun:
     def _unhold_if_idle(self, entry: EscalationEntry) -> None:
         """A failed entry lets go of its container once no sentence of this run runs on it any more
         (a stop in the middle of their requests would tear them down)."""
-        if entry.label in self._failed and not self._busy.get(entry.label):
-            if self._held.pop(entry.label, None) is not None:
-                self._launcher.release(entry)
+        if (
+            entry.label in self._failed
+            and not self._busy.get(entry.label)
+            and self._held.pop(entry.label, None) is not None
+        ):
+            self._launcher.release(entry)
 
     @property
     def trace(self) -> tuple[TraceStep, ...]:

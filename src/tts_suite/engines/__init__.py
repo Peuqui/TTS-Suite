@@ -35,10 +35,10 @@ from .registry import (
 
 __all__ = [
     "SPEECH_UNITS",
+    "TTS_ENGINES",
     "DeactivatedEngine",
     "TTSEngine",
     "TTSFailure",
-    "TTS_ENGINES",
     "get_engine",
     "gpu_engine_keys",
     "gpu_engines",

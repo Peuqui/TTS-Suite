@@ -9,7 +9,6 @@ from concurrent.futures import Executor
 from typing import Any
 
 import pytest
-
 from speech_fakes import TEST_EXECUTOR
 
 from tts_suite import postprocess

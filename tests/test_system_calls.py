@@ -78,7 +78,7 @@ def test_nothing_is_measured_for_an_engine_without_a_container_or_when_no_proces
 
     monkeypatch.setattr(vram, "compute_apps", fail)
     assert engine_vram_mib(get_engine("edge")) == {}  # type: ignore[arg-type]
-    monkeypatch.setattr(vram, "compute_apps", lambda: [])
+    monkeypatch.setattr(vram, "compute_apps", list)
     monkeypatch.setattr(vram, "container_host_pids", fail)
     assert engine_vram_mib(get_engine("xtts")) == {}  # type: ignore[arg-type]
 

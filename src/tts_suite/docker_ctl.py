@@ -70,7 +70,7 @@ def docker_compose_action(
     try:
         result = subprocess.run(
             command, capture_output=True, text=True, cwd=str(compose_file.parent), env=environment,
-            timeout=DOCKER_COMPOSE_TIMEOUT_S,
+            check=False, timeout=DOCKER_COMPOSE_TIMEOUT_S,
         )
     except subprocess.TimeoutExpired:
         return False, f"docker compose {action} timed out"

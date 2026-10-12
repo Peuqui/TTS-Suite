@@ -49,7 +49,7 @@ def _detect_available_voices() -> dict[str, tuple[str, str]]:
     mbrola_available: set[str] = set()
     try:
         result = subprocess.run(
-            ["espeak-ng", "--voices=mb"], capture_output=True, text=True, timeout=ESPEAK_VOICE_LIST_TIMEOUT_S,
+            ["espeak-ng", "--voices=mb"], capture_output=True, text=True, check=False, timeout=ESPEAK_VOICE_LIST_TIMEOUT_S,
         )
         if result.returncode == 0:
             for line in result.stdout.split("\n")[1:]:
@@ -121,6 +121,7 @@ class EspeakEngine(TTSEngine):
             result = subprocess.run(
                 ["espeak-ng", "-v", voice_id, "-s", str(wpm), "--stdout", text],
                 capture_output=True,
+                check=False,
             )
         except FileNotFoundError as exc:
             raise TTSFailure("engine", "espeak-ng not installed (sudo apt install espeak-ng)") from exc

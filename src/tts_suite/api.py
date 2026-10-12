@@ -12,9 +12,10 @@ no imports from a client program.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AsyncIterator, Literal, Mapping, Protocol, Sequence
+from typing import Literal, Protocol
 
 # ── Vocabulary ──────────────────────────────────────────────────────
 

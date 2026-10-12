@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from .api import Host, SuiteError
 from .constants import (

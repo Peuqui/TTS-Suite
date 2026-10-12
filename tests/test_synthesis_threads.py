@@ -9,7 +9,6 @@ from concurrent.futures import Executor
 from pathlib import Path
 
 import pytest
-
 from container_fakes import CardList, ContainerEngine, FakeSsh, install, local_entry, make_config
 from speech_fakes import FakeEngine, FakeLauncher, frames_for, request, run_async, wav_bytes
 

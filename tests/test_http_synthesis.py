@@ -6,7 +6,6 @@ from typing import Any
 
 import pytest
 import requests
-
 from speech_fakes import TEST_EXECUTOR
 
 from tts_suite.constants import TTS_CONNECT_TIMEOUT_S, TTS_READ_TIMEOUT_S
