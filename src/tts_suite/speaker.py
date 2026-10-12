@@ -170,7 +170,7 @@ class Speaker:
 
     def _run_for(self, request: SpeakRequest, entries: tuple[EscalationEntry, ...]) -> SpeechRun:
         def create() -> SpeechRun:
-            return SpeechRun(entries, self._launcher, self._slots, self._config.engines, self._executor)
+            return SpeechRun(entries, self._launcher, self._slots, lambda: self._config.engines, self._executor)
 
         if request.run is None:
             return create()

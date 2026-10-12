@@ -183,6 +183,16 @@ def test_no_voice_fails_the_entry_not_silently() -> None:
     assert run.trace[0] == TraceStep("x", "failed", "software", "no voice configured for x")
 
 
+def test_a_changed_configuration_counts_from_the_next_sentence_even_in_a_run_that_lives_on() -> None:
+    engine = FakeEngine("x")
+    defaults: dict[str, EngineDefaults] = {"x": EngineDefaults(voice=VoiceSettings(speed=1.0))}
+    run = make_run([entry(engine)], defaults=defaults)
+    run_async(run.speak("Erster Satz hier.", REQUEST))
+    defaults["x"] = EngineDefaults(voice=VoiceSettings(speed=1.3))          # the user changes the speed meanwhile
+    run_async(run.speak("Zweiter Satz hier.", REQUEST))                     # the same run, the next sentence
+    assert [speed for _, speed, _ in engine.settings] == [1.0, 1.3]
+
+
 # ── Selection and skips ─────────────────────────────────────────────
 
 

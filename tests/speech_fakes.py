@@ -82,6 +82,7 @@ class FakeEngine(TTSEngine):
         self.fail = fail
         self.fail_after = fail_after
         self.texts: list[str] = []
+        self.settings: list[tuple[str, float, float]] = []  # voice, speed, pitch of each synthesis
         self.gates: dict[str, asyncio.Event] = {}
         self.running = 0
         self.peak = 0
@@ -97,6 +98,7 @@ class FakeEngine(TTSEngine):
         self, text: str, voice: str, language: str, speed: float = 1.0, pitch: float = 1.0, *, executor: Executor,
     ) -> bytes:
         self.texts.append(text)
+        self.settings.append((voice, speed, pitch))
         calls = len(self.texts)
         if self.fail and (self.fail_after is None or calls > self.fail_after):
             raise TTSFailure(self.fail, f"{self.key} broke")
@@ -185,6 +187,7 @@ def make_run(
     entries: list[EscalationEntry], launcher: FakeLauncher | None = None,
     defaults: dict[str, EngineDefaults] | None = None,
 ) -> SpeechRun:
-    defaults = defaults or {}
-    return SpeechRun(tuple(entries), launcher or FakeLauncher(), EngineSlotTable(defaults), defaults, TEST_EXECUTOR)
+    """`defaults` is looked at again at every sentence: a test may change the dict while the run lives."""
+    defaults = {} if defaults is None else defaults
+    return SpeechRun(tuple(entries), launcher or FakeLauncher(), EngineSlotTable(defaults), lambda: defaults, TEST_EXECUTOR)
 

@@ -289,13 +289,15 @@ class SpeechRun:
         entries: tuple[EscalationEntry, ...],
         launcher: EngineLauncher,
         slots: EngineSlotTable,
-        defaults: Mapping[str, EngineDefaults],
+        defaults: Callable[[], Mapping[str, EngineDefaults]],
         executor: Executor,
     ) -> None:
         self._entries = entries
         self._executor = executor
         self._launcher = launcher
         self._slots = slots
+        # Asked at every sentence: a configuration changed meanwhile counts from the next one, and
+        # a reading that lives on (a client's run ID) holds no settings of its own.
         self._defaults = defaults
         self._lock = asyncio.Lock()
         self._current: EscalationEntry | None = None
@@ -380,7 +382,7 @@ class SpeechRun:
                 if entry.label in self._failed:
                     continue
                 try:
-                    resolve_voice(entry.engine, request, self._defaults)
+                    resolve_voice(entry.engine, request, self._defaults())
                 except TTSFailure as failure:
                     self._fail(entry, failure.reason, failure.detail)
                     continue
@@ -431,7 +433,7 @@ class SpeechRun:
     async def _synthesize(self, entry: EscalationEntry, text: str, request: SpeakRequest) -> bytes:
         self._busy[entry.label] = self._busy.get(entry.label, 0) + 1
         try:
-            voice, speed, pitch = resolve_voice(entry.engine, request, self._defaults)
+            voice, speed, pitch = resolve_voice(entry.engine, request, self._defaults())
             async with self._slots.for_engine(entry.engine).slot():
                 audio = await synthesize(entry.engine, text, voice, request.language, speed, pitch, executor=self._executor)
             return audio

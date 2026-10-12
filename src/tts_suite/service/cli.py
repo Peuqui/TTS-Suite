@@ -4,6 +4,7 @@ change something."""
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
@@ -52,6 +53,9 @@ def first_configuration(voices_dir: Path | None, config_path: Path) -> SuiteConf
 
 
 def serve(arguments: argparse.Namespace) -> None:
+    # What the suite does is in the log (which engine speaks with which voice, speed and pitch), at INFO.
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s %(message)s")
+    logging.getLogger("tts_suite").setLevel(logging.INFO)
     store = ConfigStore(arguments.config)
     config = store.load() or first_configuration(arguments.voices_dir, arguments.config)
     try:
