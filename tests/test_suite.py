@@ -490,3 +490,49 @@ def test_closing_the_suite_closes_the_launcher(tmp_path: Path) -> None:
     suite, launcher = _suite(make_config(tmp_path))
     run_async(suite.aclose())
     assert launcher.closed
+
+
+# ── The voices folder: new path releases the containers, push to the hosts ──
+
+
+def test_a_new_voices_folder_releases_the_running_containers_and_the_same_one_does_not(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    other = tmp_path / "other"
+    other.mkdir()
+    run_async(suite.set_config(make_config(tmp_path, hosts=(ARAGON,), headroom_mib=100)))
+    assert launcher.stopped == []  # same voices_dir: nothing is released
+    run_async(suite.set_config(make_config(other, hosts=(ARAGON,))))
+    assert {"lo", "re", "re@Aragon"} <= set(launcher.stopped)
+
+
+def test_a_container_a_reading_holds_keeps_the_old_voices_folder_and_it_is_logged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    launcher.stop_errors["lo"] = EngineInUse("lo is in use by a reading")
+    other = tmp_path / "other"
+    other.mkdir()
+    run_async(suite.set_config(make_config(other, hosts=(ARAGON,))))
+    assert "lo keeps the old voices folder (in_use)" in caplog.text
+
+
+def test_the_voices_go_to_every_host_as_a_tar_of_the_folder(tmp_path: Path) -> None:
+    import io
+    import tarfile
+
+    (tmp_path / "Alice").mkdir()
+    (tmp_path / "Alice" / "Alice.wav").write_bytes(b"wav")
+    ssh = FakeSsh()
+    config = make_config(tmp_path, hosts=(ARAGON, Host("Basti", "192.0.2.3")))
+    suite, _ = _suite(config, SuiteLauncher(config, gpus=list, host_command=ssh))  # type: ignore[arg-type]
+    assert run_async(suite.push_voices()) == ["Aragon", "Basti"]
+    assert ssh.commands == [("Aragon", "receive-voices"), ("Basti", "receive-voices")]
+    with tarfile.open(fileobj=io.BytesIO(ssh.inputs[0])) as archive:
+        assert "./Alice/Alice.wav" in archive.getnames()
+
+
+def test_a_host_that_refuses_the_voices_is_an_engine_control_failure(tmp_path: Path) -> None:
+    config = make_config(tmp_path, hosts=(ARAGON,))
+    suite, _ = _suite(config, SuiteLauncher(config, gpus=list, host_command=FakeSsh(fail="no route")))  # type: ignore[arg-type]
+    with pytest.raises(EngineControlFailed, match="no route"):
+        run_async(suite.push_voices())

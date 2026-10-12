@@ -54,8 +54,20 @@ class Suite:
         return self._speaker.config
 
     async def set_config(self, config: SuiteConfig) -> None:
+        voices_changed = config.voices_dir != self._speaker.config.voices_dir
         self._speaker.set_config(config)  # the one check; ConfigInvalid leaves everything as it was
         self._launcher.set_config(config)
+        if voices_changed:
+            await self._release_for_new_voices()
+
+    async def _release_for_new_voices(self) -> None:
+        """A running container keeps the voices folder it was started with: release them all, the next
+        request starts them with the new one. One a reading holds stays as it is (and is logged)."""
+        for result in await self.release("all"):
+            if result.outcome in ("in_use", "failed"):
+                logger.warning(
+                    "TTS: %s keeps the old voices folder (%s): %s", result.engine, result.outcome, result.detail,
+                )
 
     async def engines(self) -> list[EngineInfo]:
         # One task per row, so a host that does not answer delays only its own rows by the health timeout
@@ -116,6 +128,9 @@ class Suite:
         bound = require_engine(engine).with_voices_dir(voices_dir)
         names = await asyncio.to_thread(voice_names, bound)  # a container engine answers live, else its catalog
         return [VoiceInfo(name, name) for name in names]
+
+    async def push_voices(self) -> list[str]:
+        return await self._launcher.push_voices()
 
     async def sync_voices(self, engine: str) -> list[VoiceInfo]:
         bound = require_engine(engine).with_voices_dir(self._speaker.config.voices_dir)

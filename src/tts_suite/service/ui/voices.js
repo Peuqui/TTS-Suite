@@ -7,7 +7,7 @@ import { t } from './i18n.js'
 const NEUTRAL_FACTOR = 1
 
 // The voices of an engine, the speed and pitch each one is tuned to (a click on a voice opens them), and the
-// sync that uploads the shared folder's voices to a cloud engine.
+// sync that uploads the shared folder's voices to a cloud engine, and the push of the folder to the hosts.
 export function voicesView({ show, fail }) {
   const root = h('div')
   let engines = []
@@ -74,6 +74,13 @@ export function voicesView({ show, fail }) {
     } catch (error) { fail(error) }
   }
 
+  async function push() {
+    try {
+      const { hosts } = await service.pushVoices()
+      show(hosts.length === 0 ? t('pushedNone') : t('pushed', { hosts: hosts.join(', ') }))
+    } catch (error) { fail(error) }
+  }
+
   function render() {
     replaceChildren(root, 
       h('h2', {}, t('tabVoices')),
@@ -82,7 +89,8 @@ export function voicesView({ show, fail }) {
         h('select', { onchange: async (event) => { chosen = event.target.value; try { await loadVoices() } catch (error) { fail(error) } } },
           engines.map((engine) => h('option', { value: engine, selected: engine === chosen }, engine))),
         h('button', { onclick: loadVoices }, t('reload')),
-        h('button', { onclick: sync, disabled: chosen === null }, t('sync'))),
+        h('button', { onclick: sync, disabled: chosen === null }, t('sync')),
+        h('button', { onclick: push }, t('push'))),
       voices.length === 0 ? h('p', { class: 'muted' }, t('noVoices')) :
         cardTable([t('voice'), t('defaultSpeed'), t('defaultPitch')], voices.map((voice) => [
           h('button', { class: 'link', 'aria-pressed': selected === voice.name ? 'true' : 'false', onclick: () => { selected = voice.name; render() } },

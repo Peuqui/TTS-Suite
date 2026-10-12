@@ -133,6 +133,11 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
         check(request, True)
         return voices_to_json(await suite.sync_voices(engine))
 
+    @app.post("/voices/push")
+    async def push_voices(request: Request) -> dict[str, list[str]]:
+        check(request, True)
+        return {"hosts": await suite.push_voices()}
+
     @app.get("/config")
     async def get_config(request: Request) -> Any:
         check(request, False)

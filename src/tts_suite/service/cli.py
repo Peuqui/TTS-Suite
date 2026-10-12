@@ -12,6 +12,7 @@ from pathlib import Path
 import uvicorn
 
 from ..api import SuiteConfig
+from ..constants import DEFAULT_VOICES_DIR
 from ..suite import create_suite
 from .app import create_app
 from .auth import access_for, create_token, read_token
@@ -40,16 +41,10 @@ def parser() -> argparse.ArgumentParser:
     serve.add_argument("--config", type=Path, default=config_dir() / CONFIG_FILE_NAME)
     serve.add_argument("--token-file", type=Path, default=config_dir() / TOKEN_FILE_NAME)
     serve.add_argument("--max-text-chars", type=int, default=DEFAULT_MAX_TEXT_CHARS)
-    serve.add_argument("--voices-dir", type=Path, help="the shared voices folder, for the first start")
+    serve.add_argument("--voices-dir", type=Path, default=DEFAULT_VOICES_DIR, help="the shared voices folder, for the first start")
     token = commands.add_parser("token", help="make the token file if there is none")
     token.add_argument("--token-file", type=Path, default=config_dir() / TOKEN_FILE_NAME)
     return main
-
-
-def first_configuration(voices_dir: Path | None, config_path: Path) -> SuiteConfig:
-    if voices_dir is None:
-        sys.exit(f"No configuration at {config_path} yet: name the shared voices folder with --voices-dir.")
-    return SuiteConfig(voices_dir=voices_dir)
 
 
 def serve(arguments: argparse.Namespace) -> None:
@@ -57,7 +52,7 @@ def serve(arguments: argparse.Namespace) -> None:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s %(message)s")
     logging.getLogger("tts_suite").setLevel(logging.INFO)
     store = ConfigStore(arguments.config)
-    config = store.load() or first_configuration(arguments.voices_dir, arguments.config)
+    config = store.load() or SuiteConfig(voices_dir=arguments.voices_dir)
     try:
         access = access_for(arguments.host, read_token(arguments.token_file))
     except ValueError as error:

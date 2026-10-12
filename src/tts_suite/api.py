@@ -413,3 +413,8 @@ class TTSSuite(Protocol):
     async def sync_voices(self, engine: str) -> list[VoiceInfo]:
         """Have a cloud engine that clones voices upload the shared voices."""
         ...
+
+    async def push_voices(self) -> list[str]:
+        """Hand the voices folder to every configured host, which adds and overwrites and deletes nothing.
+        Returns the names of the hosts that took it; :class:`EngineControlFailed` at the first that did not."""
+        ...

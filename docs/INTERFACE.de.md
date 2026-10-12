@@ -36,6 +36,7 @@ Agenten kennt (welcher Agent welche Stimme hat). Der Dienst bekommt Text und ant
 | `GET /engines` | Der Katalog: jede Engine auf jedem Rechner, auf dem sie laufen kann; Felder unten. |
 | `GET /speak-test`, `PUT /speak-test` | Was die Seite vom Probesprechen behält (Text, Sprache, Pause, Reihenfolge und Auswahl je Engine), auf dem Server, damit jedes Gerät dasselbe sieht (`speak-test.json` neben der Konfiguration). `PUT` braucht das Token. |
 | `GET /voices?engine=<key>` | Die Stimmen einer Engine: je `name` und `label`. Ohne `engine`: die Ordner des gemeinsamen Stimmenverzeichnisses. |
+| `POST /voices/push` | Gibt das Stimmenverzeichnis an jeden eingetragenen Host weiter (`receive-voices` in `scripts/tts-host-ctl.sh`; der Host ergänzt und überschreibt, löscht nichts). Braucht das Token. Antwortet `{"hosts": [Namen]}`; ein Host, der es nicht annimmt, ist ein Fehler mit seinem Namen. |
 | `POST /voices/sync?engine=<key>` | Lässt eine Cloud-Engine, die Stimmen klont (DashScope), die Stimmen des gemeinsamen Verzeichnisses hochladen. Antwortet mit den nun bekannten Stimmen. |
 | `POST /speak` | Tür 1: der ganze Text; die Antwort ist der Strom von Frames (unten). |
 | `WS /speak/stream` | Tür 2: der Text kommt in Stücken (ein Sprachmodell schreibt noch); die Frames laufen zurück, sobald sie existieren. |
@@ -67,7 +68,7 @@ Ein Objekt: `voices_dir`; `hosts` (optional, die Rechner, auf die Anfragen mit N
 `pitch`; `voice_tuning`, Tempo und Tonhöhe je Stimmenname, gelten immer, wenn diese Stimme spricht, nach den Werten der
 Anfrage und vor den Vorgaben der Engine; `vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` und `headroom_mib` (siehe unten);
 `pronunciations` (ein Wort zur Form, die stattdessen gesprochen wird). `POST` prüft einmal, im Engine-Paket;
-was nicht funktionieren kann, ist `400` mit dem Grund. Es gibt keine Liste von Einträgen: Wer spricht, in
+was nicht funktionieren kann, ist `400` mit dem Grund. Ein geändertes `voices_dir` gibt die laufenden Container frei (einer, den eine Lesung hält, wird ins Log geschrieben und behält den alten Ordner); die nächste Anfrage startet sie mit dem neuen. Es gibt keine Liste von Einträgen: Wer spricht, in
 welcher Reihenfolge, ist Sache der Anfrage. Cloud-Schlüssel gehören nicht dazu (unten).
 
 **Die Platzierung auf der GPU ist ein Regelsatz**, kein Rückruf an ein Programm. `gpu_mode` `auto` (Vorgabe) stellt
@@ -166,7 +167,7 @@ gesprochen. Die Frames kommen als Binärnachrichten zurück; nach dem `summary`-
 ## Regeln gemeinsam mit STT-Suite
 
 - **Zugang:** Solange der Dienst nur auf `127.0.0.1` lauscht, verlangen Sprechen und die `GET`-Endpunkte
-  nichts. Befehle, die etwas ändern (`POST /config`, `/engines/*/start|stop|reload`, `/voices/sync`: Rechner
+  nichts. Befehle, die etwas ändern (`POST /config`, `/engines/*/start|stop|reload`, `/voices/sync|push`: Rechner
   und SSH-Ziele, GPU-Container, Cloud-Schlüssel), brauchen immer das Token, auch lokal, da jedes Programm auf
   dem Rechner localhost erreicht. Lauscht der Dienst auf einer anderen Adresse, verlangt alles ein Token
   (`X-TTS-Suite-Token: <token>`; der WebSocket nimmt es ebenfalls in dieser Kopfzeile), und er startet ohne
@@ -181,13 +182,13 @@ gesprochen. Die Frames kommen als Binärnachrichten zurück; nach dem `summary`-
 ## Herauslösen aus AIfred Intelligence
 
 Zieht mit in die Suite: die Engine-Ordner und ihre Container, Eskalation, Engine-Verwaltung und Rechner
-(samt `scripts/tts-host-ctl.sh` und dem Compose-Aufruf, der `TTS_GPU_UUID` setzt), die Bereinigung und Zerlegung des Textes
+(samt `scripts/tts-host-ctl.sh`, das den Stimmenordner daneben einbindet und gesendete Stimmen auspackt, und dem Compose-Aufruf, der `TTS_GPU_UUID` setzt), die Bereinigung und Zerlegung des Textes
 nach Einheit, die Nachbearbeitung, die Ansagetexte und Engine-Namen (deutsch und englisch), die
 Konfiguration und die Tests von Eskalation, Reload, Vollständigkeit und der DashScope-Engine. Die Engines sind die, die es in der Suite gibt (kein
 MOSS, kein Fish-Speech). Container- und Projektnamen (und das Volume `xtts_voices`) werden in den Compose-Dateien gepinnt (`name:`), damit Docker
 laufende Container nicht neu anlegt. Die Suite hält ihre eigenen Daten (Piper-Modelle, die Zuordnung der DashScope-Stimmen) in einem Datenordner,
-`~/.local/share/tts-suite` oder dem Ordner, den `TTS_SUITE_DATA_DIR` nennt. Der Stimmenordner enthält Nutzerdaten: Er liegt nicht im öffentlichen
-Repository, sein Pfad ist eine Einstellung, und Suite wie AIfred (Agent-Bündel) nutzen diesen einen Ort. Die
+`~/.local/share/tts-suite` oder dem Ordner, den `TTS_SUITE_DATA_DIR` nennt. Die Stimmen (`voices/`) und ihre Quellaufnahmen (`voice-sources/`) gehören zum Repository; der Pfad
+des Stimmenordners ist eine Einstellung (`voices_dir`), und Suite wie AIfred (Agent-Bündel) nutzen diesen einen Ort. Die
 Rechner, heute in AIfreds `settings.json`, ziehen nach `/config` als den einen Ort; die Listen der Engines bleiben
 bei den Clients (AIfred behält seine, Agent-Orc hat eine eigene): Jede Anfrage bringt ihre Liste. AIfred liest und
 schreibt die Rechner über HTTP mit einem dünnen Client, mit einmaliger Migration und ohne Parallelbetrieb.

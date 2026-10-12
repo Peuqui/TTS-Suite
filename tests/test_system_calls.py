@@ -23,11 +23,13 @@ class _Run:
         self.stdout, self.returncode, self.stderr, self.raises = stdout, returncode, stderr, raises
         self.calls: list[dict[str, Any]] = []
 
-    def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
         self.calls.append({"command": command, **kwargs})
         if self.raises:
             raise self.raises
-        return subprocess.CompletedProcess(command, self.returncode, self.stdout, self.stderr)
+        if kwargs.get("text"):
+            return subprocess.CompletedProcess(command, self.returncode, self.stdout, self.stderr)
+        return subprocess.CompletedProcess(command, self.returncode, self.stdout.encode(), self.stderr.encode())
 
 
 # ── nvidia-smi: cards ───────────────────────────────────────────────
@@ -193,6 +195,13 @@ def test_the_ssh_command_pins_key_port_and_target(monkeypatch: pytest.MonkeyPatc
     assert command[:3] == ["ssh", "-i", "/keys/suite"]
     assert command[command.index("-p") + 1] == "2222" and command[-4:] == ["--", "tts@192.0.2.2", "start", "xtts"]
     assert "BatchMode=yes" in command and "IdentitiesOnly=yes" in command
+
+
+def test_the_ssh_command_hands_its_input_to_the_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    run = _Run()
+    monkeypatch.setattr(subprocess, "run", run)
+    host_ctl.run_host_command(ARAGON, "receive-voices", stdin=b"tar-bytes")
+    assert run.calls[0]["input"] == b"tar-bytes"
 
 
 def test_without_a_user_the_target_is_the_address_and_without_the_variable_the_default_key_applies(monkeypatch: pytest.MonkeyPatch) -> None:

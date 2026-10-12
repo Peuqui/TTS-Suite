@@ -37,6 +37,7 @@ agents (which agent has which voice). The service gets text and answers with aud
 | `GET /speak-test`, `PUT /speak-test` | What the page keeps of the test reading (text, language, pause, order and choices per engine), on the server, so that every device sees the same (`speak-test.json` next to the configuration). `PUT` needs the token. |
 | `GET /voices?engine=<key>` | The voices of one engine: for each `name` and `label`. Without `engine`: the folders of the shared voices directory. |
 | `POST /voices/sync?engine=<key>` | Has a cloud engine that clones voices (DashScope) upload the voices of the shared directory. Answers with the voices now known. |
+| `POST /voices/push` | Hands the voices directory to every configured host (`receive-voices` of `scripts/tts-host-ctl.sh`; the host adds and overwrites, nothing is deleted). Needs the token. Answers `{"hosts": [names]}`; a host that does not take it is an error naming it. |
 | `POST /speak` | Door 1: the whole text; the answer is the stream of frames (below). |
 | `WS /speak/stream` | Door 2: the text arrives in pieces (a language model is still writing); the frames run back as they exist. |
 | `POST /engines/{engine}/start`, `POST /engines/{engine}/stop` | Starts or stops the container of a row of the catalog (query `host`: the machine's name; none: this one). |
@@ -65,7 +66,7 @@ One object: `voices_dir`; `hosts` (optional, the machines requests refer to by n
 `ssh_port`, `ssh_user`); `engines` (defaults per engine key: `voice` with `voice`, `speed`, `pitch`; `voice_tuning`, speed and pitch per
 voice name, which apply whenever that voice speaks, after the request's own values and before the engine's defaults;
 `vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` and `headroom_mib` (see below);
-`pronunciations` (a word to the form spoken instead). `POST` validates once, in the engine package;
+`pronunciations` (a word to the form spoken instead). `POST` validates once, in the engine package; a changed `voices_dir` releases the running containers (one a reading holds is logged and keeps the old folder), the next request starts them with the new one;
 what cannot work is `400` with the reason. There is no list of entries: who speaks, in which order, is the
 request's business. Cloud keys are not part of it (below).
 
@@ -178,7 +179,7 @@ as binary messages; after the `summary` frame the service closes.
 ## Moving out of AIfred Intelligence
 
 Goes with the suite: the engine folders and their containers, the escalation, engine manager and hosts
-(including `scripts/tts-host-ctl.sh`, which gets the voices folder with `start <service> <voices_dir>`, and the compose call that sets `TTS_GPU_UUID`), the cleaning and cutting of the text by unit,
+(including `scripts/tts-host-ctl.sh`, which mounts the voices folder next to it and unpacks pushed voices, and the compose call that sets `TTS_GPU_UUID`), the cleaning and cutting of the text by unit,
 the post-processing, the announcement texts (ten languages) and engine labels (German and English), the configuration, and
 the tests of escalation, reload, completeness and the DashScope engine. The engines are the ones that exist in the suite (no MOSS, no Fish-Speech). The container and project names
 (and the volume `xtts_voices`) are pinned in the compose files (`name:`), so Docker does not recreate running

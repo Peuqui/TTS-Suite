@@ -133,6 +133,10 @@ class FakeSuite:
         self.calls.append(("reload", ()))
         return ["old"], ["new"]
 
+    async def push_voices(self) -> list[str]:
+        self.calls.append(("push_voices", ()))
+        return ["Aragon"]
+
     async def sync_voices(self, engine: str) -> list[VoiceInfo]:
         self.calls.append(("sync_voices", (engine,)))
         return [VoiceInfo(name="Alice", label="Alice")]

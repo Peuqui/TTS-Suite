@@ -29,7 +29,7 @@ from .constants import START_WAIT_RESERVE_S, TTS_READY_POLL_INTERVAL_S
 from .engines.base import TTSEngine
 from .escalation import EngineLauncher, EscalationEntry, Skip
 from .holds import EngineHolds
-from .host_ctl import HostCommand, HostControlError, run_host_command
+from .host_ctl import HostCommand, HostControlError, pack_voices, run_host_command
 from .placement import GpuInfo, PlacementRefused, choose_gpu, query_gpus
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,11 @@ class ManagedLauncher(EngineLauncher, Protocol):
         ...
 
     async def status(self, entry: EscalationEntry) -> EntryStatus: ...
+
+    async def push_voices(self) -> list[str]:
+        """Hand the voices folder to every configured host (they add and overwrite, nothing is deleted).
+        The names of the hosts that took it. :class:`EngineControlFailed` at the first host that does not."""
+        ...
 
     def start_failure(self, entry: EscalationEntry) -> Skip | None:
         """Why the last start of the entry did not work (until the next start, a new configuration or a reload)."""
@@ -217,7 +222,7 @@ class SuiteLauncher:
         remote card beats a worse entry further down the list)."""
         logger.info("TTS: starting %s on %s", engine.key, host.name)
         try:
-            await asyncio.to_thread(self._host_command, host, "start", engine.service_dir, str(self._config.voices_dir))
+            await asyncio.to_thread(self._host_command, host, "start", engine.service_dir)
         except HostControlError as failed:
             return Skip("stopped", f"start failed: {failed}")
         deadline = self._clock() + engine.startup_timeout_s
@@ -258,6 +263,15 @@ class SuiteLauncher:
         if not entry.engine.runs_in_container:
             return "unreachable"  # a cloud engine without access: there is nothing the suite could start
         return "stopped"
+
+    async def push_voices(self) -> list[str]:
+        voices = await asyncio.to_thread(pack_voices, self._config.voices_dir)
+        for host in self._config.hosts:
+            try:
+                await asyncio.to_thread(self._host_command, host, "receive-voices", stdin=voices)
+            except HostControlError as failed:
+                raise EngineControlFailed(str(failed)) from failed
+        return [host.name for host in self._config.hosts]
 
     def start_failure(self, entry: EscalationEntry) -> Skip | None:
         """Why the last start of this entry did not work (until the next one)."""

@@ -34,7 +34,7 @@ text spoken without implementing speech output itself. The sister project is
 ```bash
 pip install .                                   # Python 3.12+
 tts-suite token                                 # makes ~/.config/tts-suite/token (readable for you alone)
-tts-suite serve --voices-dir ~/voices           # http://127.0.0.1:5090, configuration in ~/.config/tts-suite/config.json
+tts-suite serve                                 # http://127.0.0.1:5090, configuration in ~/.config/tts-suite/config.json; voices: ./voices of the repository
 curl http://127.0.0.1:5090/health
 ```
 
@@ -47,7 +47,7 @@ loads that file.
 
 As a service of your user: `deploy/install.sh` makes a venv (with the code of this clone, in editable form:
 the compose files of the engines live here), links `tts-suite` into `~/.local/bin` and installs
-`tts-suite.service`. Once, run `tts-suite serve --voices-dir <folder>` so the configuration is written, stop
+`tts-suite.service`. Once, run `tts-suite serve` (`--voices-dir <folder>` for another voices folder than `voices/` of the repository) so the configuration is written, stop
 it, then `systemctl --user enable --now tts-suite`. On a machine where other programs (a service control page,
 AIfred) must start and stop the service, run it as the system unit `tts-suite@<user>` instead:
 `sudo deploy/switch-to-system-unit.sh` (it stops the user unit first; both use port 5090).

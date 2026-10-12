@@ -61,6 +61,7 @@ export const service = {
   stop: (engine, host) => json(`../engines/${encodeURIComponent(engine)}/stop${query({ host })}`, { method: 'POST' }),
   release: (targets) => json('../release', { method: 'POST', body: { targets } }),
   voices: (engine) => json(`../voices${query({ engine })}`),
+  pushVoices: () => json('../voices/push', { method: 'POST' }),
   syncVoices: (engine) => json(`../voices/sync${query({ engine })}`, { method: 'POST' }),
   speak: (head, signal) => fetchChecked('../speak', { method: 'POST', body: head, signal }),
 }

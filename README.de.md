@@ -34,7 +34,7 @@ Programm Text sprechen, ohne selbst Sprachausgabe zu bauen. Das Schwesterprojekt
 ```bash
 pip install .                                   # Python 3.12+
 tts-suite token                                 # legt ~/.config/tts-suite/token an (nur für dich lesbar)
-tts-suite serve --voices-dir ~/voices           # http://127.0.0.1:5090, Konfiguration in ~/.config/tts-suite/config.json
+tts-suite serve                                 # http://127.0.0.1:5090, Konfiguration in ~/.config/tts-suite/config.json; Stimmen: ./voices im Repository
 curl http://127.0.0.1:5090/health
 ```
 
@@ -47,7 +47,7 @@ Datei.
 
 Als Dienst deines Benutzers: `deploy/install.sh` legt eine venv an (mit dem Code dieses Klons, editierbar: die
 Compose-Dateien der Engines liegen hier), verlinkt `tts-suite` nach `~/.local/bin` und installiert
-`tts-suite.service`. Einmal `tts-suite serve --voices-dir <Ordner>` starten, damit die Konfiguration entsteht,
+`tts-suite.service`. Einmal `tts-suite serve` starten (`--voices-dir <Ordner>` für einen anderen Stimmenordner als `voices/` im Repository), damit die Konfiguration entsteht,
 dann beenden und `systemctl --user enable --now tts-suite`. Wo andere Programme (eine Dienst-Seite, AIfred) den
 Dienst starten und stoppen sollen, läuft er stattdessen als System-Unit `tts-suite@<Benutzer>`:
 `sudo deploy/switch-to-system-unit.sh` (beendet zuerst die Benutzer-Unit; beide nutzen Port 5090).

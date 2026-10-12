@@ -18,6 +18,9 @@ SUITE_ROOT = Path(__file__).resolve().parents[2]
 
 #: Build recipes of the container engines, one folder per service.
 DOCKER_TTS_DIR = SUITE_ROOT / "docker" / "tts"
+#: The shared voices folder of a fresh installation, in the repository so that suite and voices move together.
+#: ``scripts/tts-host-ctl.sh`` resolves the same folder next to itself on every host.
+DEFAULT_VOICES_DIR = SUITE_ROOT / "voices"
 COMPOSE_FILE_NAME = "docker-compose.yml"
 
 #: The one data folder of the suite (Piper models, the DashScope voice mapping): the environment

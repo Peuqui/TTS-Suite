@@ -94,9 +94,12 @@ class FakeSsh:
         self.fail = fail
         self.then = then
         self.commands: list[tuple[str, ...]] = []
+        self.inputs: list[bytes] = []
 
-    def __call__(self, host: Host, *command: str) -> str:
+    def __call__(self, host: Host, *command: str, stdin: bytes | None = None) -> str:
         self.commands.append((host.name, *command))
+        if stdin is not None:
+            self.inputs.append(stdin)
         if self.fail:
             raise HostControlError(f"{host.name}: '{' '.join(command)}' failed: {self.fail}")
         if self.then:
@@ -156,6 +159,9 @@ class FakeManagedLauncher(FakeLauncher):
             self.failures.clear()
         else:
             self.failures.pop(entry.label, None)
+
+    async def push_voices(self) -> list[str]:
+        return []
 
     async def stop(self, entry: EscalationEntry) -> None:
         if self.stop_error is not None:

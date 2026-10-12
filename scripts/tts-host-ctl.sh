@@ -7,8 +7,10 @@
 #
 # The command then arrives in SSH_ORIGINAL_COMMAND (or directly in "$@"):
 #
-#   start <service> <voices_dir>  start the container of docker/tts/<service> (up -d); <voices_dir> is the
-#                     shared voices folder on THIS host (the suite's voices_dir), mounted into the container
+#   start <service>   start the container of docker/tts/<service> (up -d); the shared voices folder of THIS
+#                     host (voices/ next to docker/ in this repository) is mounted into the container
+#   receive-voices    unpack a tar from stdin into the voices folder of this host (adds and overwrites,
+#                     deletes nothing); how the suite of another machine hands its voices over
 #   stop [<service>]  stop this one / all TTS containers of this repository (VRAM free)
 #   status            list the running TTS containers
 #
@@ -16,7 +18,9 @@
 # The card and the idle time are set in the .env next to the compose file (TTS_GPU_UUID, *_KEEP_ALIVE).
 set -euo pipefail
 
-TTS_DIR="$(cd "$(dirname "$(readlink -f "$0")")/../docker/tts" && pwd)"
+SUITE_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+TTS_DIR="$SUITE_DIR/docker/tts"
+VOICES_DIR="$SUITE_DIR/voices"
 
 if [[ -n "${SSH_ORIGINAL_COMMAND:-}" ]]; then
     read -r -a args <<< "$SSH_ORIGINAL_COMMAND"
@@ -26,7 +30,6 @@ fi
 
 action="${args[0]:-}"
 service="${args[1]:-}"
-voices_dir="${args[2]:-}"
 
 compose_files() {
     find "$TTS_DIR" -mindepth 2 -maxdepth 2 -name docker-compose.yml | sort
@@ -42,12 +45,17 @@ require_service() {
 case "$action" in
     start)
         require_service
-        if [[ ! "$voices_dir" =~ ^/[A-Za-z0-9._/-]+$ || ! -d "$voices_dir" ]]; then
-            echo "voices folder missing on this host: '$voices_dir'" >&2
+        if [[ ! -d "$VOICES_DIR" ]]; then
+            echo "voices folder missing on this host: '$VOICES_DIR'" >&2
             exit 2
         fi
-        export TTS_VOICES_DIR="$voices_dir"
+        export TTS_VOICES_DIR="$VOICES_DIR"
         docker compose -f "$TTS_DIR/$service/docker-compose.yml" up -d
+        ;;
+    receive-voices)
+        mkdir -p "$VOICES_DIR"
+        # GNU tar drops a leading "/" and skips members with ".." by itself
+        tar -x --no-same-owner -C "$VOICES_DIR"
         ;;
     stop)
         if [[ -n "$service" ]]; then
@@ -65,7 +73,7 @@ case "$action" in
         done < <(compose_files)
         ;;
     *)
-        echo "usage: tts-host-ctl.sh start <service> <voices_dir> | stop [<service>] | status" >&2
+        echo "usage: tts-host-ctl.sh start <service> | receive-voices | stop [<service>] | status" >&2
         exit 2
         ;;
 esac
