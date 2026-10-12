@@ -1,5 +1,5 @@
 {
-  "voices_dir": "/path/to/voices",
+  "voices_dir": "/path/to/TTS-Suite/voices",
   "hosts": [
     {
       "name": "Aragon",

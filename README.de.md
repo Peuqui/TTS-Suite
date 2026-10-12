@@ -105,6 +105,11 @@ des Dienstes kann eigene Engines tragen, und der Dienst schickt Lesungen an den 
 nennt. Eine Liste kann dieselbe Engine auf mehreren Rechnern in der gewünschten Reihenfolge nennen; der Dienst
 verteilt die Last nicht von selbst, er nimmt den ersten Eintrag, der sprechen kann.
 
+Einen weiteren Rechner einrichten: Er braucht eine Kopie dieses Repositorys (die Rezepte und `scripts/tts-host-ctl.sh`; die Stimmen
+kommen mit oder werden per `POST /voices/push` übergeben, auch der Knopf im Stimmen-Reiter), Docker und den Schlüssel des Dienstes,
+an dieses Skript gebunden in `~/.ssh/authorized_keys` (die Zeile steht im Kopf des Skripts). Das Skript bindet den Ordner `voices/`
+neben sich ein, der Aufbau ist also auf jedem Rechner gleich.
+
 Ein Programm, das sich an bereits Geladenes hängen will, fragt den Katalog (`GET /engines`: Zustand `running` je
 Engine und Rechner) und setzt die laufende lokale Engine an den Anfang seiner eigenen Liste.
 

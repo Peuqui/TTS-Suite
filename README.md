@@ -103,6 +103,11 @@ the service can carry its own engines, and the service sends readings to whichev
 names. A list can name the same engine on several machines, in the order it prefers; the service does not spread
 the load by itself, it takes the first entry that can speak.
 
+Setting up another machine: it needs a copy of this repository (the recipes and `scripts/tts-host-ctl.sh`; the voices come
+with it or are handed over by `POST /voices/push`, also the button in the voices tab), Docker, and the service's key pinned to
+that script in `~/.ssh/authorized_keys` (the line is in the script's header). The script mounts the `voices/` folder next to it, so
+the layout is the same on every machine.
+
 A program that wants to hang on to what is already loaded asks the catalog (`GET /engines`: state `running` per
 engine and machine) and puts the running local engine at the front of its own list.
 
