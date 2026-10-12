@@ -1,6 +1,6 @@
 import { service } from './api.js'
 import { cardTable, h, replaceChildren } from './dom.js'
-import { t } from './i18n.js'
+import { hostLabel, t } from './i18n.js'
 import { Player } from './player.js'
 
 const UNITS = ['sentence', 'paragraph', 'whole']
@@ -107,7 +107,7 @@ export function speakView({ show, fail }) {
         h('code', {}, row.engine),
         h('input', { type: 'checkbox', checked: use[place(row)], onchange: (event) => (use[place(row)] = event.target.checked) }),
         h('div', { class: 'row' }, h('button', { class: 'small', onclick: () => move(index, -1) }, '↑'), h('button', { class: 'small', onclick: () => move(index, 1) }, '↓')),
-        row.host ?? t('thisMachine'),
+        hostLabel(row),
         h('select', { onchange: (event) => (units[place(row)] = event.target.value) },
           UNITS.map((unit) => h('option', { value: unit, selected: units[place(row)] === unit }, t(UNIT_KEYS[unit])))),
         (voiceLists[row.engine]?.length ?? 0) === 0 ? '' : h('select', { onchange: (event) => (voices[row.engine] = event.target.value) },

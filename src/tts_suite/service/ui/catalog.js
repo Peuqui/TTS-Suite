@@ -1,6 +1,6 @@
 import { service } from './api.js'
 import { cardTable, h, replaceChildren } from './dom.js'
-import { t } from './i18n.js'
+import { hostLabel, t } from './i18n.js'
 
 // The catalog: every engine on every machine, with its state and a start and stop for each row.
 export function catalogView({ show, fail }) {
@@ -39,7 +39,7 @@ export function catalogView({ show, fail }) {
         row.cloud ? h('span', { class: 'tag' }, t('cloud')) : null,
         row.needs_gpu ? h('span', { class: 'tag' }, t('needsGpu')) : null,
         h('div', { class: 'muted' }, h('code', {}, row.engine))] },
-      { key: 'host', cell: (row) => row.host ?? t('thisMachine') },
+      { key: 'host', cell: hostLabel },
       { key: 'status', cell: (row) => h('span', { class: `status ${row.status}`, title: t(`state${row.status[0].toUpperCase()}${row.status.slice(1)}`) }, t(`status${row.status[0].toUpperCase()}${row.status.slice(1)}`)) },
       { key: 'installed', cell: (row) => (row.installed ? t('yes') : t('no')) },
       // Likewise the memory: only when some row holds any.

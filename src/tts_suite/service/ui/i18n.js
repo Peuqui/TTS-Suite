@@ -74,3 +74,9 @@ export function t(key, values = {}) {
   const text = TEXTS[language][key] ?? TEXTS.en[key] ?? key
   return text.replace(/\{(\w+)\}/g, (_, name) => String(values[name] ?? ''))
 }
+
+// Where an engine of the catalog runs, as the pages show it: a cloud engine in the cloud, else the
+// machine named, else this one.
+export function hostLabel(row) {
+  return row.cloud ? t('cloud') : (row.host ?? t('thisMachine'))
+}
