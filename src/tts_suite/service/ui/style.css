@@ -28,8 +28,8 @@ nav button[aria-selected="true"] { background: var(--code); color: var(--text); 
 main { max-width: 1100px; margin: 0 auto; padding: 16px; }
 .view { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
 .view[hidden], #message[hidden] { display: none; }
-/* Fixed at the bottom: a message at the top of the page is out of sight when the page is scrolled. */
-#message { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 10; max-width: min(92vw, 640px); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 4px 16px rgb(0 0 0 / 0.35); }
+/* Fixed at the top: a message inside the page is out of sight when the page is scrolled. */
+#message { position: fixed; left: 50%; top: 16px; cursor: pointer; transform: translateX(-50%); z-index: 10; max-width: min(92vw, 640px); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 4px 16px rgb(0 0 0 / 0.35); }
 #message.error { border-color: var(--bad); color: var(--bad); }
 #message.ok { border-color: var(--ok); color: var(--ok); }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }

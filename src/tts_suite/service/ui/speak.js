@@ -5,21 +5,25 @@ import { Player } from './player.js'
 
 const UNITS = ['sentence', 'paragraph', 'whole']
 const UNIT_KEYS = { sentence: 'unitSentence', paragraph: 'unitParagraph', whole: 'unitWhole' }
+// What the Save button keeps in this browser: the text and every choice made on this tab.
+const STORAGE_KEY = 'tts-suite-speak'
 
 // Trying a reading: a text and a list of {engine, host, unit} put together here, played as it arrives, and
 // the course of the reading afterwards (who spoke, who failed or was passed over, and why).
 export function speakView({ show, fail }) {
   const root = h('div')
   const player = new Player()
+  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')
   let rows = []       // the catalog rows, in the order of this list
-  let use = {}        // "engine@host" -> bool
-  let units = {}      // "engine@host" -> unit
-  let voices = {}     // engine -> chosen voice
+  let use = saved.use ?? {}        // "engine@host" -> bool
+  let units = saved.units ?? {}    // "engine@host" -> unit
+  let voices = saved.voices ?? {}  // engine -> chosen voice
   let voiceLists = {} // engine -> [{name, label}]
-  let text = 'Hallo Welt. Das ist ein Test der Sprachausgabe.'
-  let language = 'de'
+  let text = saved.text ?? 'Hallo Welt. Das ist ein Test der Sprachausgabe.'
+  let language = saved.language ?? 'de'
   // The service requires the pause; this page starts with a usual one.
-  let pauseMs = 700
+  let pauseMs = saved.pauseMs ?? 700
+  const savedOrder = saved.order ?? []
   let speaking = null // the AbortController of a reading in progress
   let summary = null
 
@@ -28,9 +32,11 @@ export function speakView({ show, fail }) {
   async function load() {
     try {
       const catalog = (await service.engines()).filter((row) => !row.browser)
-      // Keep the order and the choices made so far; new rows join at the end.
+      // Keep the order and the choices made so far; new rows join at the end. The first time, the saved order counts.
       const known = new Set(rows.map(place))
-      rows = [...rows.filter((row) => catalog.some((candidate) => place(candidate) === place(row))), ...catalog.filter((row) => !known.has(place(row)))]
+      const savedRank = (row) => { const index = savedOrder.indexOf(place(row)); return index === -1 ? savedOrder.length : index }
+      if (rows.length === 0) rows = [...catalog].sort((a, b) => savedRank(a) - savedRank(b))
+      else rows = [...rows.filter((row) => catalog.some((candidate) => place(candidate) === place(row))), ...catalog.filter((row) => !known.has(place(row)))]
       for (const row of rows) { use[place(row)] ??= false; units[place(row)] ??= row.unit_default }
       await Promise.all([...new Set(rows.map((row) => row.engine))].map(async (engine) => {
         if (voiceLists[engine]) return
@@ -46,6 +52,11 @@ export function speakView({ show, fail }) {
     if (target < 0 || target >= rows.length) return
     rows.splice(target, 0, rows.splice(index, 1)[0])
     render()
+  }
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ text, language, pauseMs, order: rows.map(place), use, units, voices }))
+    show(t('saved'))
   }
 
   async function run() {
@@ -102,8 +113,9 @@ export function speakView({ show, fail }) {
         h('select', { onchange: (event) => (language = event.target.value) }, ['de', 'en'].map((code) => h('option', { value: code, selected: code === language }, code)))),
         h('label', {}, t('pause') + ' ',
           h('input', { type: 'number', min: '0', step: '50', value: String(pauseMs), oninput: (event) => (pauseMs = Math.max(0, Number(event.target.value) || 0)) }))),
-      h('textarea', { onchange: (event) => (text = event.target.value) }, text),
+      h('textarea', { oninput: (event) => (text = event.target.value) }, text),
       h('div', { class: 'actions' },
+        h('button', { onclick: save }, t('save')),
         h('button', { class: 'primary', onclick: run, disabled: speaking !== null }, speaking === null ? t('speak') : t('speaking')),
         speaking === null ? null : h('button', { onclick: cancel }, t('stopPlaying'))),
       traceTable(),

@@ -9,16 +9,17 @@ import { voicesView } from './voices.js'
 // The page: four views behind tabs, the token for the commands that change something, the language and
 // the colours. Light or dark follows the system until one is chosen.
 const message = document.getElementById('message')
-// Confirmations fade after a few seconds; an error stays until the next action.
-const CONFIRMATION_MS = 4000
+// A message fades after a few seconds (an error stays longer) and goes at a tap.
+const NOTICE_MS = { ok: 4000, error: 10000 }
 let hideTimer
 function say(text, kind) {
   clearTimeout(hideTimer)
   message.textContent = text
   message.className = kind
   message.hidden = false
-  if (kind === 'ok') hideTimer = setTimeout(() => { message.hidden = true }, CONFIRMATION_MS)
+  hideTimer = setTimeout(() => { message.hidden = true }, NOTICE_MS[kind])
 }
+message.addEventListener('click', () => { message.hidden = true })
 const show = (text) => say(text, 'ok')
 const fail = (error) => say(error instanceof ApiError && error.status === 401 ? `${t('needsToken')} (${error.message})` : error.message, 'error')
 
