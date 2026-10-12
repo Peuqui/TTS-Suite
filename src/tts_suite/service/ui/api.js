@@ -1,12 +1,12 @@
-// The calls to the service. The token is kept for this browser tab only (sessionStorage) and sent with
+// The calls to the service. The token is kept in this browser (localStorage, so that closing the tab does not lose it) and sent with
 // every call; the service asks for it only where something is changed (or everywhere on a network).
 const TOKEN_KEY = 'tts-suite-token'
 // Not `Authorization`: behind a reverse proxy with its own login that header belongs to the proxy.
 const TOKEN_HEADER = 'X-TTS-Suite-Token'
 
 export const token = {
-  get: () => sessionStorage.getItem(TOKEN_KEY) ?? '',
-  set: (value) => (value ? sessionStorage.setItem(TOKEN_KEY, value) : sessionStorage.removeItem(TOKEN_KEY)),
+  get: () => localStorage.getItem(TOKEN_KEY) ?? '',
+  set: (value) => (value ? localStorage.setItem(TOKEN_KEY, value) : localStorage.removeItem(TOKEN_KEY)),
 }
 
 export class ApiError extends Error {
