@@ -21,6 +21,8 @@ set -euo pipefail
 SUITE_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 TTS_DIR="$SUITE_DIR/docker/tts"
 VOICES_DIR="$SUITE_DIR/voices"
+# The compose files need it for every command (stop and ps read the file too), not only for start.
+export TTS_VOICES_DIR="$VOICES_DIR"
 
 if [[ -n "${SSH_ORIGINAL_COMMAND:-}" ]]; then
     read -r -a args <<< "$SSH_ORIGINAL_COMMAND"
@@ -49,7 +51,6 @@ case "$action" in
             echo "voices folder missing on this host: '$VOICES_DIR'" >&2
             exit 2
         fi
-        export TTS_VOICES_DIR="$VOICES_DIR"
         docker compose -f "$TTS_DIR/$service/docker-compose.yml" up -d
         ;;
     receive-voices)
