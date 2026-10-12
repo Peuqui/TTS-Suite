@@ -173,7 +173,11 @@ SENTENCES_RELEASED_IMMEDIATELY = 1
 SENTENCE_LOOKAHEAD_CHARS = 10
 
 #: Characters that close a quotation or parenthesis right after a sentence end and belong to that sentence.
-SENTENCE_CLOSERS = "\"')»"
+SENTENCE_CLOSERS = "\"')»”’」』）"
+
+#: Sentence ends of the scripts without spaces between sentences (Chinese, Japanese): they end a sentence
+#: wherever they stand, no abbreviation or number check and no space after them.
+SENTENCE_ENDS_ALWAYS = "!?！？。"
 
 #: Words that end with a period but not a sentence (lowercase). Source: ``ABBREVIATIONS_DE`` / ``_EN``.
 ABBREVIATIONS_DE = frozenset({
@@ -191,9 +195,31 @@ ABBREVIATIONS_EN = frozenset({
     "mon.", "tue.", "wed.", "thu.", "fri.", "sat.", "sun.",
     "no.", "vol.", "ch.", "pg.", "pp.", "fig.", "approx.", "dept.",
 })
-ABBREVIATIONS = ABBREVIATIONS_DE | ABBREVIATIONS_EN
+ABBREVIATIONS_FR = frozenset({
+    "m.", "mme.", "mlle.", "dr.", "pr.", "mm.", "cf.", "env.", "etc.", "p.ex.", "c.-à-d.", "n°.", "vol.", "chap.",
+    "janv.", "févr.", "avr.", "juil.", "sept.", "oct.", "nov.", "déc.",
+})
+ABBREVIATIONS_ES = frozenset({
+    "sr.", "sra.", "srta.", "dr.", "dra.", "prof.", "etc.", "p.ej.", "ud.", "uds.", "aprox.", "núm.", "pág.", "vol.", "cap.",
+    "ene.", "feb.", "abr.", "ago.", "sep.", "sept.", "oct.", "nov.", "dic.",
+})
+ABBREVIATIONS_IT = frozenset({
+    "sig.", "sig.ra", "dott.", "prof.", "ing.", "avv.", "ecc.", "es.", "cfr.", "pag.", "vol.", "cap.", "n.", "ca.",
+    "gen.", "feb.", "mar.", "apr.", "mag.", "giu.", "lug.", "ago.", "set.", "ott.", "nov.", "dic.",
+})
+ABBREVIATIONS_PT = frozenset({
+    "sr.", "sra.", "srta.", "dr.", "dra.", "prof.", "etc.", "ex.", "pág.", "vol.", "cap.", "aprox.", "n.º",
+    "jan.", "fev.", "abr.", "ago.", "set.", "out.", "nov.", "dez.",
+})
+ABBREVIATIONS_RU = frozenset({
+    "т.е.", "т. е.", "т.д.", "т. д.", "т.п.", "т. п.", "т.к.", "т. к.", "и т.д.", "и др.", "и пр.", "см.", "стр.", "рис.", "г.", "гг.", "ул.", "д.", "тел.", "им.", "проф.", "акад.",
+})
+ABBREVIATIONS = (
+    ABBREVIATIONS_DE | ABBREVIATIONS_EN | ABBREVIATIONS_FR | ABBREVIATIONS_ES | ABBREVIATIONS_IT | ABBREVIATIONS_PT
+    | ABBREVIATIONS_RU
+)
 
-#: Texts the suite speaks itself (voice-change announcements), German and English, next to the modules.
+#: Texts the suite speaks itself (voice-change announcements, hints), in every language it speaks, next to the modules.
 I18N_FILE_NAME = "i18n.json"
 
 # ── Text cleaning ───────────────────────────────────────────────────

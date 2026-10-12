@@ -105,7 +105,7 @@ def test_a_long_list_in_one_text_is_one_hint_with_the_count() -> None:
 def test_the_hints_follow_the_language_of_the_request() -> None:
     assert clean_all(["Nutze `x` hier."], "en") == ["There is code here."]
     with pytest.raises(UnsupportedLanguage):
-        cleaner("fr").clean("Nutze `x` hier.")
+        cleaner("nl").clean("Nutze `x` hier.")
 
 
 def test_two_readings_do_not_influence_each_other() -> None:

@@ -107,7 +107,7 @@ with `no_vram` (not remembered: the next request chooses again).
 - **`run`** (optional, an ID the client makes up for one reading): the service keeps per run which entries
   failed and whether something was spoken already, for about five minutes after the last piece. Entries that failed stay out for
   the rest of the run. If an entry fails after the first sound, the successor first speaks an announcement
-  (for example "Voice change to X because of Y", German or English by `language`; the texts live in the
+  (for example "Voice change to X because of Y", in the `language` of the request: de, en, fr, it, es, pt, ru, zh, ja, ko; the texts live in the
   suite), **a segment of its own in front of the successor's first one**, and then the unfinished piece. The
   choice and the state of a run sit behind a lock, so two pieces never both start the successor and the
   announcement is made once. If the service restarts in the middle of a run, the state is lost and the
@@ -179,7 +179,7 @@ as binary messages; after the `summary` frame the service closes.
 
 Goes with the suite: the engine folders and their containers, the escalation, engine manager and hosts
 (including `scripts/tts-host-ctl.sh` and the compose call that sets `TTS_GPU_UUID`), the cleaning and cutting of the text by unit,
-the post-processing, the announcement texts and engine labels (German and English), the configuration, and
+the post-processing, the announcement texts (ten languages) and engine labels (German and English), the configuration, and
 the tests of escalation, reload, completeness and the DashScope engine. The engines are the ones that exist in the suite (no MOSS, no Fish-Speech). The container and project names
 (and the volume `xtts_voices`) are pinned in the compose files (`name:`), so Docker does not recreate running
 containers. The suite keeps its own data (Piper models, the DashScope voice mapping) in one data folder, `~/.local/share/tts-suite`

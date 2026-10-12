@@ -301,3 +301,33 @@ def test_pieces_anywhere_give_the_same_boundaries_with_any_look_ahead(text: str,
         cutter = UnitCutter("sentence", immediate_sentences=immediate)
         units = [u for start in range(0, len(text), size) for u in cutter.feed(text[start:start + size])]
         assert units + cutter.flush() == expected, f"piece size {size}"
+
+
+def test_chinese_and_japanese_sentences_end_at_their_full_width_marks() -> None:
+    text = "今天天气很好，我们去公园散步吧。你觉得怎么样？我觉得非常好！"
+    assert split_texts(text, "sentence") == ["今天天气很好，我们去公园散步吧。", "你觉得怎么样？", "我觉得非常好！"]
+    assert split_texts("これはテストです。もう一つの文もここにあります。", "sentence") == [
+        "これはテストです。", "もう一つの文もここにあります。",
+    ]
+
+
+def test_a_very_short_chinese_sentence_goes_to_the_next() -> None:
+    assert split_texts("好。今天天气非常好我们走吧。", "sentence") == ["好。今天天气非常好我们走吧。"]
+
+
+def test_abbreviations_of_the_other_languages_do_not_end_a_sentence() -> None:
+    assert split_texts("Le Dr. Martin est arrivé hier soir. Nous avons parlé longtemps.", "sentence") == [
+        "Le Dr. Martin est arrivé hier soir.", "Nous avons parlé longtemps.",
+    ]
+    assert split_texts("Он купил хлеб, молоко и т.д. Потом он пошёл домой.", "sentence") == [
+        "Он купил хлеб, молоко и т.д. Потом он пошёл домой.",
+    ]
+
+
+def test_the_suite_speaks_all_ten_languages() -> None:
+    from tts_suite.i18n import supported_languages, translate
+
+    assert supported_languages() == {"de", "en", "fr", "it", "es", "pt", "ru", "zh", "ja", "ko"}
+    for language in supported_languages():
+        assert translate("tts_switch_engine", language, target="X")
+        assert "3" in translate("tts_hint_list", language, items="3")

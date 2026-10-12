@@ -1,46 +1,134 @@
 {
   "tts_hint_code": {
     "de": "Hier steht Code.",
-    "en": "There is code here."
+    "en": "There is code here.",
+    "fr": "Il y a du code ici.",
+    "it": "Qui c'è del codice.",
+    "es": "Aquí hay código.",
+    "pt": "Aqui há código.",
+    "ru": "Здесь находится код.",
+    "zh": "这里有代码。",
+    "ja": "ここにコードがあります。",
+    "ko": "여기에 코드가 있습니다."
   },
   "tts_hint_table": {
     "de": "Hier wird eine Tabelle angezeigt.",
-    "en": "A table is shown here."
+    "en": "A table is shown here.",
+    "fr": "Un tableau est affiché ici.",
+    "it": "Qui viene mostrata una tabella.",
+    "es": "Aquí se muestra una tabla.",
+    "pt": "Aqui é exibida uma tabela.",
+    "ru": "Здесь показана таблица.",
+    "zh": "这里显示一个表格。",
+    "ja": "ここに表が表示されています。",
+    "ko": "여기에 표가 표시됩니다."
   },
   "tts_hint_formula": {
     "de": "Hier steht eine Formel.",
-    "en": "There is a formula here."
+    "en": "There is a formula here.",
+    "fr": "Il y a une formule ici.",
+    "it": "Qui c'è una formula.",
+    "es": "Aquí hay una fórmula.",
+    "pt": "Aqui há uma fórmula.",
+    "ru": "Здесь находится формула.",
+    "zh": "这里有一个公式。",
+    "ja": "ここに数式があります。",
+    "ko": "여기에 수식이 있습니다."
   },
   "tts_hint_more_items": {
     "de": "und weitere Einträge.",
-    "en": "and more items."
+    "en": "and more items.",
+    "fr": "et d'autres éléments.",
+    "it": "e altre voci.",
+    "es": "y más elementos.",
+    "pt": "e mais itens.",
+    "ru": "и другие пункты.",
+    "zh": "以及更多条目。",
+    "ja": "ほかにも項目があります。",
+    "ko": "그리고 항목이 더 있습니다."
   },
   "tts_hint_list": {
     "de": "Hier wird eine Liste mit {items} Einträgen angezeigt.",
-    "en": "A list with {items} items is shown here."
+    "en": "A list with {items} items is shown here.",
+    "fr": "Une liste de {items} éléments est affichée ici.",
+    "it": "Qui viene mostrato un elenco con {items} voci.",
+    "es": "Aquí se muestra una lista con {items} elementos.",
+    "pt": "Aqui é exibida uma lista com {items} itens.",
+    "ru": "Здесь показан список из {items} пунктов.",
+    "zh": "这里显示一个包含{items}个条目的列表。",
+    "ja": "ここに{items}件の項目のリストが表示されています。",
+    "ko": "여기에 항목 {items}개의 목록이 표시됩니다."
   },
   "tts_switch_unreachable": {
     "de": "Stimmwechsel wegen Serverausfall, weiter mit {target}.",
-    "en": "Voice change due to a server outage, continuing with {target}."
+    "en": "Voice change due to a server outage, continuing with {target}.",
+    "fr": "Changement de voix en raison d'une panne de serveur, suite avec {target}.",
+    "it": "Cambio di voce per un guasto del server, si continua con {target}.",
+    "es": "Cambio de voz por una caída del servidor, se continúa con {target}.",
+    "pt": "Mudança de voz devido a uma falha do servidor, continuando com {target}.",
+    "ru": "Смена голоса из-за сбоя сервера, продолжает {target}.",
+    "zh": "由于服务器故障而更换声音，继续使用{target}。",
+    "ja": "サーバー障害のため声を切り替え、{target}で続けます。",
+    "ko": "서버 장애로 음성을 바꿔 {target}(으)로 계속합니다."
   },
   "tts_switch_engine": {
     "de": "Stimmwechsel wegen Engine-Ausfall, weiter mit {target}.",
-    "en": "Voice change due to an engine failure, continuing with {target}."
+    "en": "Voice change due to an engine failure, continuing with {target}.",
+    "fr": "Changement de voix en raison d'une défaillance du moteur, suite avec {target}.",
+    "it": "Cambio di voce per un guasto del motore, si continua con {target}.",
+    "es": "Cambio de voz por un fallo del motor, se continúa con {target}.",
+    "pt": "Mudança de voz devido a uma falha do mecanismo, continuando com {target}.",
+    "ru": "Смена голоса из-за сбоя движка, продолжает {target}.",
+    "zh": "由于引擎故障而更换声音，继续使用{target}。",
+    "ja": "エンジン障害のため声を切り替え、{target}で続けます。",
+    "ko": "엔진 장애로 음성을 바꿔 {target}(으)로 계속합니다."
   },
   "tts_switch_software": {
     "de": "Stimmwechsel wegen eines Softwarefehlers, weiter mit {target}.",
-    "en": "Voice change due to a software error, continuing with {target}."
+    "en": "Voice change due to a software error, continuing with {target}.",
+    "fr": "Changement de voix en raison d'une erreur logicielle, suite avec {target}.",
+    "it": "Cambio di voce per un errore software, si continua con {target}.",
+    "es": "Cambio de voz por un error de software, se continúa con {target}.",
+    "pt": "Mudança de voz devido a um erro de software, continuando com {target}.",
+    "ru": "Смена голоса из-за программной ошибки, продолжает {target}.",
+    "zh": "由于软件错误而更换声音，继续使用{target}。",
+    "ja": "ソフトウェアエラーのため声を切り替え、{target}で続けます。",
+    "ko": "소프트웨어 오류로 음성을 바꿔 {target}(으)로 계속합니다."
   },
   "tts_switch_timeout": {
     "de": "Stimmwechsel wegen einer Zeitüberschreitung, weiter mit {target}.",
-    "en": "Voice change due to a timeout, continuing with {target}."
+    "en": "Voice change due to a timeout, continuing with {target}.",
+    "fr": "Changement de voix en raison d'un dépassement de délai, suite avec {target}.",
+    "it": "Cambio di voce per un timeout, si continua con {target}.",
+    "es": "Cambio de voz por un tiempo de espera agotado, se continúa con {target}.",
+    "pt": "Mudança de voz devido a um tempo limite excedido, continuando com {target}.",
+    "ru": "Смена голоса из-за превышения времени ожидания, продолжает {target}.",
+    "zh": "由于超时而更换声音，继续使用{target}。",
+    "ja": "タイムアウトのため声を切り替え、{target}で続けます。",
+    "ko": "시간 초과로 음성을 바꿔 {target}(으)로 계속합니다."
   },
   "tts_switch_cloud_quota": {
     "de": "Stimmwechsel wegen erschöpften Cloud-Kontingents, weiter mit {target}.",
-    "en": "Voice change because the cloud quota is used up, continuing with {target}."
+    "en": "Voice change because the cloud quota is used up, continuing with {target}.",
+    "fr": "Changement de voix : le quota cloud est épuisé, suite avec {target}.",
+    "it": "Cambio di voce perché la quota cloud è esaurita, si continua con {target}.",
+    "es": "Cambio de voz porque se agotó la cuota de la nube, se continúa con {target}.",
+    "pt": "Mudança de voz porque a cota da nuvem acabou, continuando com {target}.",
+    "ru": "Смена голоса: облачная квота исчерпана, продолжает {target}.",
+    "zh": "由于云端配额用尽而更换声音，继续使用{target}。",
+    "ja": "クラウドの利用枠を使い切ったため声を切り替え、{target}で続けます。",
+    "ko": "클라우드 할당량이 소진되어 음성을 바꿔 {target}(으)로 계속합니다."
   },
   "tts_switch_target_remote": {
     "de": "{engine} auf {host}",
-    "en": "{engine} on {host}"
+    "en": "{engine} on {host}",
+    "fr": "{engine} sur {host}",
+    "it": "{engine} su {host}",
+    "es": "{engine} en {host}",
+    "pt": "{engine} em {host}",
+    "ru": "{engine} на {host}",
+    "zh": "{host}上的{engine}",
+    "ja": "{host}の{engine}",
+    "ko": "{host}의 {engine}"
   }
 }

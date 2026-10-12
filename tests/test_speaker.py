@@ -69,7 +69,7 @@ def test_the_speaker_hands_its_pronunciations_to_the_stream(tmp_path: Path, monk
     assert engine.texts == ["Alfred spricht hier einen vollständigen Satz."]
 
 
-@pytest.mark.parametrize("language", ["fr", "", "DE"])
+@pytest.mark.parametrize("language", ["nl", "", "DE"])
 def test_a_language_without_suite_texts_is_refused_at_once_and_nothing_is_started(
     language: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

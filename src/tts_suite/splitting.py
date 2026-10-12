@@ -26,15 +26,16 @@ from .api import Unit
 from .constants import (
     ABBREVIATIONS,
     SENTENCE_CLOSERS,
+    SENTENCE_ENDS_ALWAYS,
     SENTENCE_LOOKAHEAD_CHARS,
     SENTENCES_RELEASED_IMMEDIATELY,
     TTS_MIN_SENTENCE_WORDS,
 )
 from .engines.base import SPEECH_UNITS
 
-SENTENCE_PUNCTUATION = ".!?"
+SENTENCE_PUNCTUATION = ".!?！？。"
 #: A sentence that ends like this needs no period added when a line break ends it.
-SENTENCE_FINAL_CHARS = ".!?:;"
+SENTENCE_FINAL_CHARS = ".!?:;！？。；："
 CODE_FENCE = "```"
 PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
 #: Shortest sentence text that counts (a lone punctuation mark is no sentence).
@@ -64,6 +65,16 @@ class _Extraction:
     index: int
     next_start: int
     paragraph_start: bool
+
+
+#: Characters of the scripts written without spaces between words (Han, kana): each counts as a word.
+_UNSPACED_SCRIPT = "\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff"
+_WORD = re.compile(f"[{_UNSPACED_SCRIPT}]|[^\\s{_UNSPACED_SCRIPT}]+")
+
+
+def _word_count(text: str) -> int:
+    """Words of ``text``; in Chinese and Japanese, where no spaces separate words, every character counts."""
+    return len(_WORD.findall(text))
 
 
 def _ends_with_abbreviation(before: str) -> bool:
@@ -169,7 +180,7 @@ def _scan_sentences(text: str, start: int) -> tuple[list[_Extraction], int, bool
             if text[current_line_start:i + 1].lstrip().startswith("|"):
                 i += 1
                 continue
-            if char in "!?" or _period_ends_sentence(text, i):
+            if char in SENTENCE_ENDS_ALWAYS or _period_ends_sentence(text, i):
                 end = i + 1
                 while end < len(text) and text[end] in SENTENCE_CLOSERS:
                     end += 1  # closing quotes and parentheses belong to the sentence
@@ -289,8 +300,10 @@ class UnitCutter:
 
     @staticmethod
     def _joined(first: CutUnit, second: CutUnit) -> CutUnit:
-        """Two sentences spoken as one unit; it begins where the first one begins."""
-        return CutUnit(f"{first.text} {second.text}", first.paragraph_start)
+        """Two sentences spoken as one unit; it begins where the first one begins. Chinese and Japanese
+        sentences are written without a space between them."""
+        gap = "" if first.text[-1] in "！？。" else " "
+        return CutUnit(f"{first.text}{gap}{second.text}", first.paragraph_start)
 
     def _join_short(self, sentences: list[CutUnit]) -> list[CutUnit]:
         """Sentences with fewer than ``TTS_MIN_SENTENCE_WORDS`` words go to the next one."""
@@ -302,7 +315,7 @@ class UnitCutter:
             if self._carry:
                 sentence = self._joined(self._carry, sentence)
                 self._carry = None
-            if len(sentence.text.split()) < TTS_MIN_SENTENCE_WORDS:
+            if _word_count(sentence.text) < TTS_MIN_SENTENCE_WORDS:
                 self._carry = sentence
             else:
                 units.append(sentence)
