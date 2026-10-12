@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import subprocess
 
-from ...constants import ESPEAK_BASE_WPM, ESPEAK_VOICE_LIST_TIMEOUT_S
+from ...constants import ESPEAK_BASE_WPM, ESPEAK_VOICE_LIST_TIMEOUT_S, LOCAL_SYNTHESIS_TIMEOUT_S
 from ..base import TTSEngine, TTSFailure, validate_audio
 
 logger = logging.getLogger(__name__)
@@ -122,9 +122,12 @@ class EspeakEngine(TTSEngine):
                 ["espeak-ng", "-v", voice_id, "-s", str(wpm), "--stdout", text],
                 capture_output=True,
                 check=False,
+                timeout=LOCAL_SYNTHESIS_TIMEOUT_S,
             )
         except FileNotFoundError as exc:
             raise TTSFailure("engine", "espeak-ng not installed (sudo apt install espeak-ng)") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise TTSFailure("engine", f"eSpeak did not finish within {LOCAL_SYNTHESIS_TIMEOUT_S} s") from exc
         if result.returncode != 0 or not validate_audio(result.stdout):
             error = result.stderr.decode() if result.stderr else "no audio"
             raise TTSFailure("engine", f"eSpeak exit {result.returncode}: {error[:200]}")

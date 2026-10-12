@@ -125,6 +125,9 @@ def test_espeak_failures_are_engine_failures(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(subprocess, "run", RunRecorder(FileNotFoundError("espeak-ng")))
     with pytest.raises(TTSFailure, match="not installed"):
         _engine("espeak").generate_speech("Hallo", "Deutsch Standard", "de")
+    monkeypatch.setattr(subprocess, "run", RunRecorder(subprocess.TimeoutExpired("espeak-ng", 1)))
+    with pytest.raises(TTSFailure, match="did not finish"):
+        _engine("espeak").generate_speech("Hallo", "Deutsch Standard", "de")
 
 
 @pytest.mark.skipif(shutil.which("espeak-ng") is None, reason="espeak-ng not installed — real synthesis cannot run")
@@ -180,6 +183,12 @@ def test_piper_unknown_voice_speaks_with_the_standard_voice(monkeypatch: pytest.
 def test_piper_failures_are_engine_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     _fake_piper(monkeypatch, returncode=1, write=False)
     with pytest.raises(TTSFailure, match="Piper exit 1: model missing"):
+        _engine("piper").generate_speech("Hallo", "Deutsch (Thorsten)", "de")
+
+
+def test_piper_that_hangs_is_an_engine_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", RunRecorder(subprocess.TimeoutExpired("piper", 1)))
+    with pytest.raises(TTSFailure, match="did not finish"):
         _engine("piper").generate_speech("Hallo", "Deutsch (Thorsten)", "de")
 
 

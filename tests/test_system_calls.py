@@ -247,7 +247,11 @@ def test_a_hanging_docker_compose_times_out_with_a_message(tmp_path: Path, monke
 
 def test_an_engine_placed_on_a_card_starts_with_card_budget_and_voices(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(engines_base, "docker_compose_action", lambda *args, **kwargs: calls.append((args, kwargs)) or (True, "up"))
+    def fake_compose_action(*args: Any, **kwargs: Any) -> tuple[bool, str]:
+        calls.append((args, kwargs))
+        return True, "up"
+
+    monkeypatch.setattr(engines_base, "docker_compose_action", fake_compose_action)
     placed = get_engine("xtts").with_voices_dir(tmp_path).on_gpu("GPU-9", 3680)  # type: ignore[union-attr]
     assert (placed.gpu_uuid, placed.vram_budget_mib) == ("GPU-9", 3680)
     assert placed.start() == (True, "up")

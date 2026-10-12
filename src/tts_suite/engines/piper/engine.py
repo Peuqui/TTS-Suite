@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ...constants import PIPER_MODELS_DIR_NAME, data_dir
+from ...constants import LOCAL_SYNTHESIS_TIMEOUT_S, PIPER_MODELS_DIR_NAME, data_dir
 from ..base import TTSEngine, TTSFailure, validate_audio
 
 logger = logging.getLogger(__name__)
@@ -83,13 +83,17 @@ class PiperEngine(TTSEngine):
 
         with tempfile.TemporaryDirectory(prefix="tts_suite_piper_") as work:
             output_file = Path(work) / "out.wav"
-            result = subprocess.run(
-                [str(_piper_binary()), "--model", str(model_path), "--output_file", str(output_file),
-                 "--length_scale", str(length_scale)],
-                input=text.encode("utf-8"),
-                capture_output=True,
-                check=False,
-            )
+            try:
+                result = subprocess.run(
+                    [str(_piper_binary()), "--model", str(model_path), "--output_file", str(output_file),
+                     "--length_scale", str(length_scale)],
+                    input=text.encode("utf-8"),
+                    capture_output=True,
+                    check=False,
+                    timeout=LOCAL_SYNTHESIS_TIMEOUT_S,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise TTSFailure("engine", f"Piper did not finish within {LOCAL_SYNTHESIS_TIMEOUT_S} s") from exc
             if result.returncode != 0 or not output_file.exists():
                 raise TTSFailure("engine", f"Piper exit {result.returncode}: {result.stderr.decode()[:200]}")
             audio = output_file.read_bytes()

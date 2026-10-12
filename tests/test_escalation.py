@@ -21,6 +21,7 @@ from tts_suite import escalation
 from tts_suite.api import (
     ConfigInvalid,
     EngineDefaults,
+    EngineRef,
     EngineStarting,
     Host,
     InvalidRequest,
@@ -376,13 +377,13 @@ def test_a_run_lives_for_ttl_seconds_after_its_last_use() -> None:
     now = [0.0]
     table = RunTable(ttl_s=600, clock=lambda: now[0])
     create = lambda: make_run([entry(FakeEngine("a"))])
-    run = table.get_or_create(("r1", None), create)
+    run = table.get_or_create(("r1", ()), create)
     now[0] = 500
-    assert table.get_or_create(("r1", None), create) is run     # used again: the time starts anew
+    assert table.get_or_create(("r1", ()), create) is run     # used again: the time starts anew
     now[0] = 1000
-    assert table.get_or_create(("r1", None), create) is run
+    assert table.get_or_create(("r1", ()), create) is run
     now[0] = 1601
-    assert table.get_or_create(("r1", None), create) is not run  # expired
+    assert table.get_or_create(("r1", ()), create) is not run  # expired
     assert len(table) == 1
 
 
@@ -390,16 +391,16 @@ def test_a_run_that_speaks_longer_than_the_ttl_stays_in_the_table() -> None:
     now = [0.0]
     table = RunTable(ttl_s=600, clock=lambda: now[0])
     create = lambda: make_run([entry(FakeEngine("a"))])
-    run = table.get_or_create(("r1", None), create)
+    run = table.get_or_create(("r1", ()), create)
     run.attach()                                                 # a stream is speaking it
     now[0] = 1500
-    assert table.get_or_create(("r1", None), create) is run     # a second call joins the same run
+    assert table.get_or_create(("r1", ()), create) is run     # a second call joins the same run
     run.detach()
-    table.touch(("r1", None))                                    # the last stream ended: the time starts now
+    table.touch(("r1", ()))                                    # the last stream ended: the time starts now
     now[0] = 2000
-    assert table.get_or_create(("r1", None), create) is run
+    assert table.get_or_create(("r1", ()), create) is run
     now[0] = 2601
-    assert table.get_or_create(("r1", None), create) is not run
+    assert table.get_or_create(("r1", ()), create) is not run
 
 
 def test_the_slot_table_keeps_the_slots_of_engines_whose_limits_did_not_change() -> None:
@@ -413,8 +414,8 @@ def test_the_slot_table_keeps_the_slots_of_engines_whose_limits_did_not_change()
 def test_runs_are_told_apart_by_their_id_and_the_named_engine() -> None:
     table = RunTable()
     create = lambda: make_run([entry(FakeEngine("a"))])
-    assert table.get_or_create(("r1", None), create) is not table.get_or_create(("r2", None), create)
-    assert table.get_or_create(("r1", None), create) is not table.get_or_create(("r1", "a"), create)
+    assert table.get_or_create(("r1", ()), create) is not table.get_or_create(("r2", ()), create)
+    assert table.get_or_create(("r1", ()), create) is not table.get_or_create(("r1", (EngineRef("a", "sentence", None),)), create)
     table.clear()
     assert len(table) == 0
 

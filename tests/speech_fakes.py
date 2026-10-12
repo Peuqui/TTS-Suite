@@ -67,7 +67,7 @@ class FakeEngine(TTSEngine):
     ``fail``: every synthesis fails with this reason, ``fail_after``: only from the n-th call on.
     ``gates``: a text containing a key waits until that event is set."""
 
-    default_voice = "V"
+    default_voice: str | None = "V"
     max_parallel_requests = 2
 
     def __init__(
