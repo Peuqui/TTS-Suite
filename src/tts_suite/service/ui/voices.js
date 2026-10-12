@@ -1,6 +1,9 @@
 import { service } from './api.js'
-import { cardTable, h, replaceChildren } from './dom.js'
+import { cardTable, factorText, h, replaceChildren } from './dom.js'
 import { t } from './i18n.js'
+
+// Speed and pitch of 1 leave the audio as the engine made it.
+const NEUTRAL_FACTOR = 1
 
 // The voices of an engine, the speed and pitch each one is tuned to (a click on a voice opens them), and the
 // sync that uploads the shared folder's voices to a cloud engine.
@@ -48,13 +51,15 @@ export function voicesView({ show, fail }) {
     const current = tuningOf(selected)
     let speed = current.speed ?? null
     let pitch = current.pitch ?? null
-    const input = (value, onchange) => h('input', { type: 'number', min: 0, step: 0.05, autocomplete: 'off', value: value ?? '', placeholder: t('emptyMeansDefault'),
+    // What an empty field means is shown in it, in grey: the default of the engine, else 1 (unchanged).
+    const engineDefault = (name) => config?.engines[chosen]?.voice?.[name] ?? NEUTRAL_FACTOR
+    const input = (value, onchange, name) => h('input', { type: 'number', min: 0.1, step: 0.05, autocomplete: 'off', value: value ?? '', placeholder: factorText(engineDefault(name)),
       oninput: (event) => onchange(event.target.value === '' ? null : Number(event.target.value)) })
     return h('div', { class: 'editor' },
       h('h3', {}, t('tuningOf', { voice: selected })),
       h('p', { class: 'muted' }, t('tuningHint')),
-      h('div', { class: 'row' }, h('label', {}, t('defaultSpeed') + ' ', input(speed, (value) => (speed = value))),
-        h('label', {}, t('defaultPitch') + ' ', input(pitch, (value) => (pitch = value)))),
+      h('div', { class: 'row' }, h('label', {}, t('defaultSpeed') + ' ', input(speed, (value) => (speed = value), 'speed')),
+        h('label', {}, t('defaultPitch') + ' ', input(pitch, (value) => (pitch = value), 'pitch'))),
       h('div', { class: 'actions' },
         h('button', { class: 'primary', onclick: () => saveTuning(speed, pitch) }, t('save')),
         h('button', { onclick: () => saveTuning(null, null) }, t('reset')),

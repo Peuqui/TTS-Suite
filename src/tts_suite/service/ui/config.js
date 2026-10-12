@@ -1,9 +1,12 @@
 import { service } from './api.js'
-import { cardTable, h, replaceChildren } from './dom.js'
+import { cardTable, factorText, h, replaceChildren } from './dom.js'
 import { t } from './i18n.js'
 
 // Everything /config knows: the voices folder, the machines, the GPU rules, the margin, the defaults per
 // engine and the pronunciations. Fields the page does not edit (a voice default of an engine) are kept.
+// Speed and pitch of 1 leave the audio as the engine made it.
+const NEUTRAL_FACTOR = 1
+
 export function configView({ show, fail }) {
   const root = h('div')
   let config = null
@@ -72,8 +75,10 @@ export function configView({ show, fail }) {
     const keys = [...new Set(catalog.filter((row) => !row.browser).map((row) => row.engine))]
     const defaultsOf = (engine) => (config.engines[engine] ??= {})
     const voiceOf = (engine) => (defaultsOf(engine).voice ??= { voice: null, speed: null, pitch: null })
-    const limit = (engine, name) => numberInput(config.engines[engine]?.[name], (value) => (defaultsOf(engine)[name] = value), t('emptyMeansDefault'))
-    const setting = (engine, name) => numberInput(config.engines[engine]?.voice?.[name], (value) => (voiceOf(engine)[name] = value), t('emptyMeansDefault'), 0.05)
+    // What an empty field means is its placeholder, in grey: the engine's own value (the catalog has them).
+    const own = (engine) => catalog.find((row) => row.engine === engine)
+    const limit = (engine, name, ownValue) => numberInput(config.engines[engine]?.[name], (value) => (defaultsOf(engine)[name] = value), String(ownValue ?? '–'))
+    const setting = (engine, name) => numberInput(config.engines[engine]?.voice?.[name], (value) => (voiceOf(engine)[name] = value), factorText(NEUTRAL_FACTOR), 0.05)
     function voiceSelect(engine) {
       const chosen = config.engines[engine]?.voice?.voice ?? ''
       const names = (voiceLists[engine] ?? []).map((voice) => voice.name)
@@ -86,7 +91,8 @@ export function configView({ show, fail }) {
     return h('div', {}, h('h3', {}, t('engineDefaults')), h('p', { class: 'muted' }, t('engineDefaultsHint')),
       cardTable(['engine', 'defaultVoice', 'defaultSpeed', 'defaultPitch', 'vramBudget', 'maxParallel', 'maxQueue'].map((key) => t(key)), keys.map((engine) => [
         h('code', {}, engine), voiceSelect(engine), setting(engine, 'speed'), setting(engine, 'pitch'),
-        limit(engine, 'vram_budget_mib'), limit(engine, 'max_parallel'), limit(engine, 'max_queue')])))
+        limit(engine, 'vram_budget_mib', own(engine)?.default_vram_mib), limit(engine, 'max_parallel', own(engine)?.default_max_parallel),
+        limit(engine, 'max_queue', own(engine)?.default_max_queue)])))
   }
 
   // One line per word: the word, what is spoken instead, a button to remove it.

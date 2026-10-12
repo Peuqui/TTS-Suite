@@ -77,6 +77,9 @@ class Suite:
             installed=installed,
             start_hint=self._start_hint(entry),
             vram_mib=vram_mib,
+            default_vram_mib=entry.engine.default_vram_budget_mib,
+            default_max_parallel=entry.engine.max_parallel_requests,
+            default_max_queue=entry.engine.max_queued_requests,
         )
 
     @staticmethod
