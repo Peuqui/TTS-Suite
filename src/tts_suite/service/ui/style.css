@@ -40,7 +40,9 @@ th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 input, select, textarea, button { font: inherit; color: inherit; }
 input[type="text"], input[type="number"], input[type="password"], select, textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
 input[type="number"] { width: 7em; }
-td input[type="text"], td input[type="number"] { width: 100%; min-width: 9em; }
+td input[type="text"] { width: 100%; min-width: 9em; }
+td input[type="number"] { width: 100%; min-width: 5.5em; }
+td select { max-width: 100%; }
 /* A line of a label and its field: the field takes what is left. */
 label.row input[type="text"] { flex: 1 1 20em; min-width: 0; }
 textarea { width: 100%; min-height: 90px; resize: vertical; }
