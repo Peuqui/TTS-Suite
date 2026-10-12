@@ -12,6 +12,7 @@ from speech_fakes import TEST_EXECUTOR
 
 from tts_suite.constants import DATA_DIR_DEFAULT, DATA_DIR_ENV, PIPER_MODELS_DIR_NAME, data_dir
 from tts_suite.engines import TTSFailure, get_engine
+from tts_suite.engines.edge import engine as edge_engine
 from tts_suite.engines.edge.engine import EDGE_STANDARD_VOICE
 from tts_suite.engines.espeak.engine import ESPEAK_STANDARD_VOICE
 from tts_suite.engines.piper import engine as piper_module
@@ -31,11 +32,15 @@ class FakeCommunicate:
     created: ClassVar[list[tuple[str, str, str]]] = []
     chunks: ClassVar[list[dict[str, Any]]] = []
     error: Exception | None = None
+    #: One of these is raised, in order, by each call of stream() before any audio comes.
+    refusals: ClassVar[list[Exception]] = []
 
     def __init__(self, text: str, voice: str, rate: str) -> None:
         FakeCommunicate.created.append((text, voice, rate))
 
     async def stream(self) -> Any:
+        if FakeCommunicate.refusals:
+            raise FakeCommunicate.refusals.pop(0)
         for chunk in FakeCommunicate.chunks:
             yield chunk
         if FakeCommunicate.error:
@@ -48,6 +53,8 @@ def edge(monkeypatch: pytest.MonkeyPatch) -> type[FakeCommunicate]:
     monkeypatch.setattr(edge_tts, "Communicate", FakeCommunicate)
     FakeCommunicate.created = []
     FakeCommunicate.error = None
+    FakeCommunicate.refusals = []
+    monkeypatch.setattr(edge_engine, "EDGE_HANDSHAKE_RETRY_PAUSE_S", 0)
     FakeCommunicate.chunks = [
         {"type": "audio", "data": AUDIO[:150]}, {"type": "WordBoundary"}, {"type": "audio", "data": AUDIO[150:]},
     ]
@@ -69,6 +76,34 @@ def test_edge_empty_text_is_a_software_failure(edge: type[FakeCommunicate]) -> N
     with pytest.raises(TTSFailure) as failure:
         asyncio.run(_engine("edge").generate_speech_async("  ", "Deutsch (Katja)", "de", executor=TEST_EXECUTOR))
     assert failure.value.reason == "software"
+
+
+def _handshake_refused(status: int = 403) -> Exception:
+    import types
+
+    from aiohttp import WSServerHandshakeError
+    request_info: Any = types.SimpleNamespace(real_url="wss://edge")
+    return WSServerHandshakeError(request_info, (), status=status, message="Invalid response status")
+
+
+def test_edge_repeats_a_refused_handshake(edge: type[FakeCommunicate]) -> None:
+    edge.refusals = [_handshake_refused(), _handshake_refused(), _handshake_refused()]
+    audio = asyncio.run(_engine("edge").generate_speech_async("Hallo", "Deutsch (Katja)", "de", executor=TEST_EXECUTOR))
+    assert audio == AUDIO and len(edge.created) == 4  # three refusals, the fourth attempt speaks
+
+
+def test_edge_gives_up_after_the_last_attempt(edge: type[FakeCommunicate]) -> None:
+    edge.refusals = [_handshake_refused() for _ in range(4)]
+    with pytest.raises(TTSFailure, match="in all 4 attempts") as raised:
+        asyncio.run(_engine("edge").generate_speech_async("Hallo", "Deutsch (Katja)", "de", executor=TEST_EXECUTOR))
+    assert raised.value.reason == "engine" and len(edge.created) == 4
+
+
+def test_edge_does_not_repeat_other_handshake_errors(edge: type[FakeCommunicate]) -> None:
+    edge.refusals = [_handshake_refused(status=429)]
+    with pytest.raises(TTSFailure, match="429"):
+        asyncio.run(_engine("edge").generate_speech_async("Hallo", "Deutsch (Katja)", "de", executor=TEST_EXECUTOR))
+    assert len(edge.created) == 1
 
 
 def test_edge_service_error_is_an_engine_failure(edge: type[FakeCommunicate]) -> None:

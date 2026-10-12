@@ -79,6 +79,10 @@ DOCKER_INSPECT_TIMEOUT_S = 5
 DOCKER_LOG_TAIL_LINES = 5
 DOCKER_LOG_TAIL_MAX_CHARS = 400
 ESPEAK_VOICE_LIST_TIMEOUT_S = 5
+#: Microsoft refuses a share of the connections to Edge TTS at random (HTTP 403 in the handshake, measured
+#: about 2 in 5, with or without a pause); such a refusal is repeated this many times, after a short pause.
+EDGE_HANDSHAKE_RETRIES = 3
+EDGE_HANDSHAKE_RETRY_PAUSE_S = 0.3
 # Longest a local synthesis program (eSpeak, Piper) may run for one sentence before it counts as hung.
 LOCAL_SYNTHESIS_TIMEOUT_S = 120
 

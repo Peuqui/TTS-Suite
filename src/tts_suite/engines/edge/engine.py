@@ -1,11 +1,13 @@
 """Edge TTS — Microsoft cloud, always-on, used as fallback."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from concurrent.futures import Executor
+from http import HTTPStatus
 from typing import ClassVar
 
-from ...constants import MEDIA_TYPE_MP3
+from ...constants import EDGE_HANDSHAKE_RETRIES, EDGE_HANDSHAKE_RETRY_PAUSE_S, MEDIA_TYPE_MP3
 from ..base import TTSEngine, TTSFailure, validate_audio
 
 logger = logging.getLogger(__name__)
@@ -72,6 +74,7 @@ class EdgeEngine(TTSEngine):
         applied natively via the rate string (``+25%`` = 25% faster);
         pitch is not supported by Edge and gets ignored at this layer."""
         import edge_tts
+        from aiohttp import WSServerHandshakeError
         from edge_tts.exceptions import EdgeTTSException
 
         voice_id = self.voices_fallback.get(voice, EDGE_STANDARD_VOICE)
@@ -85,9 +88,22 @@ class EdgeEngine(TTSEngine):
         logger.info("Edge TTS: voice=%s, rate=%s, text_length=%d", voice_id, rate, len(text))
         audio = bytearray()
         try:
-            async for chunk in edge_tts.Communicate(text, voice_id, rate=rate).stream():
-                if chunk["type"] == "audio":
-                    audio += chunk["data"]
+            for attempt in range(EDGE_HANDSHAKE_RETRIES + 1):
+                try:
+                    async for chunk in edge_tts.Communicate(text, voice_id, rate=rate).stream():
+                        if chunk["type"] == "audio":
+                            audio += chunk["data"]
+                    break
+                except WSServerHandshakeError as exc:
+                    # Refused before any audio came: the same request is simply made again.
+                    if exc.status != HTTPStatus.FORBIDDEN:
+                        raise TTSFailure("engine", f"Edge TTS: handshake refused ({exc.status} {exc.message})") from exc
+                    if attempt == EDGE_HANDSHAKE_RETRIES:
+                        raise TTSFailure(
+                            "engine", f"Edge TTS: handshake refused (403) in all {attempt + 1} attempts",
+                        ) from exc
+                    logger.info("Edge TTS: handshake refused (403), attempt %d of %d", attempt + 1, EDGE_HANDSHAKE_RETRIES + 1)
+                    await asyncio.sleep(EDGE_HANDSHAKE_RETRY_PAUSE_S)
         except EdgeTTSException as exc:
             raise TTSFailure("engine", f"Edge TTS: {type(exc).__name__}: {exc}") from exc
         except OSError as exc:  # aiohttp connection errors are OSError subclasses
