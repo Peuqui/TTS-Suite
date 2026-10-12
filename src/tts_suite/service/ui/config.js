@@ -1,5 +1,6 @@
 import { service } from './api.js'
-import { cardTable, factorText, h, replaceChildren } from './dom.js'
+import { cardTable, h, replaceChildren } from './dom.js'
+import { factorInput } from './factor.js'
 import { t } from './i18n.js'
 
 // Everything /config knows: the voices folder, the machines, the GPU rules, the margin, the defaults per
@@ -78,7 +79,7 @@ export function configView({ show, fail }) {
     // What an empty field means is its placeholder, in grey: the engine's own value (the catalog has them).
     const own = (engine) => catalog.find((row) => row.engine === engine)
     const limit = (engine, name, ownValue) => numberInput(config.engines[engine]?.[name], (value) => (defaultsOf(engine)[name] = value), String(ownValue ?? '–'))
-    const setting = (engine, name) => numberInput(config.engines[engine]?.voice?.[name], (value) => (voiceOf(engine)[name] = value), factorText(NEUTRAL_FACTOR), 0.05)
+    const setting = (engine, name) => factorInput(config.engines[engine]?.voice?.[name], (value) => (voiceOf(engine)[name] = value), NEUTRAL_FACTOR, fail)
     function voiceSelect(engine) {
       const chosen = config.engines[engine]?.voice?.voice ?? ''
       const names = (voiceLists[engine] ?? []).map((voice) => voice.name)

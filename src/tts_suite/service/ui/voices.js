@@ -1,5 +1,6 @@
 import { service } from './api.js'
-import { cardTable, factorText, h, replaceChildren } from './dom.js'
+import { cardTable, h, replaceChildren } from './dom.js'
+import { factorInput } from './factor.js'
 import { t } from './i18n.js'
 
 // Speed and pitch of 1 leave the audio as the engine made it.
@@ -53,8 +54,7 @@ export function voicesView({ show, fail }) {
     let pitch = current.pitch ?? null
     // What an empty field means is shown in it, in grey: the default of the engine, else 1 (unchanged).
     const engineDefault = (name) => config?.engines[chosen]?.voice?.[name] ?? NEUTRAL_FACTOR
-    const input = (value, onchange, name) => h('input', { type: 'number', min: 0.1, step: 0.05, autocomplete: 'off', value: value ?? '', placeholder: factorText(engineDefault(name)),
-      oninput: (event) => onchange(event.target.value === '' ? null : Number(event.target.value)) })
+    const input = (value, onchange, name) => factorInput(value, onchange, engineDefault(name), fail)
     return h('div', { class: 'editor' },
       h('h3', {}, t('tuningOf', { voice: selected })),
       h('p', { class: 'muted' }, t('tuningHint')),

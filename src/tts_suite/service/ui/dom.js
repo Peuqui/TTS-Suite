@@ -25,8 +25,3 @@ export function cardTable(headings, rows) {
     h('thead', {}, h('tr', {}, headings.map((heading) => h('th', {}, heading)))),
     h('tbody', {}, rows.map((cells) => h('tr', {}, cells.map((cell, index) => h('td', { 'data-label': headings[index] || null }, cell)))))))
 }
-
-// A speed or pitch factor as it is shown in a field: a decimal number, so 1 is "1.0" (the values are not whole numbers).
-export function factorText(value) {
-  return Number.isInteger(value) ? value.toFixed(1) : String(value)
-}
