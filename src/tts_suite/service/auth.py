@@ -15,7 +15,8 @@ from pathlib import Path
 
 from .errors import ServiceError
 
-BEARER_PREFIX = "Bearer "
+# Not `Authorization`: behind a reverse proxy with its own login that header belongs to the proxy.
+TOKEN_HEADER = "X-TTS-Suite-Token"
 TOKEN_BYTES = 32
 TOKEN_FILE_MODE = 0o600
 
@@ -40,11 +41,9 @@ class Access:
             return
         if self.token is None:
             raise ServiceError(401, "unauthorized", "this needs a token and none is configured")
-        sent = headers.get("authorization", "")
-        if not sent.startswith(BEARER_PREFIX) or not secrets.compare_digest(
-            sent.removeprefix(BEARER_PREFIX), self.token
-        ):
-            raise ServiceError(401, "unauthorized", "a valid token is needed (Authorization: Bearer)")
+        sent = headers.get(TOKEN_HEADER.lower(), "")
+        if not secrets.compare_digest(sent, self.token):
+            raise ServiceError(401, "unauthorized", f"a valid token is needed ({TOKEN_HEADER})")
 
 
 def access_for(host: str, token: str | None) -> Access:

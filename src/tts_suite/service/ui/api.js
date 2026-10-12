@@ -1,6 +1,8 @@
 // The calls to the service. The token is kept for this browser tab only (sessionStorage) and sent with
 // every call; the service asks for it only where something is changed (or everywhere on a network).
 const TOKEN_KEY = 'tts-suite-token'
+// Not `Authorization`: behind a reverse proxy with its own login that header belongs to the proxy.
+const TOKEN_HEADER = 'X-TTS-Suite-Token'
 
 export const token = {
   get: () => sessionStorage.getItem(TOKEN_KEY) ?? '',
@@ -18,7 +20,7 @@ export class ApiError extends Error {
 function headers(json) {
   const result = {}
   if (json) result['Content-Type'] = 'application/json'
-  if (token.get()) result.Authorization = `Bearer ${token.get()}`
+  if (token.get()) result[TOKEN_HEADER] = token.get()
   return result
 }
 

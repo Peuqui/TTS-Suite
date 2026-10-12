@@ -165,7 +165,7 @@ gesprochen. Die Frames kommen als Binärnachrichten zurück; nach dem `summary`-
   nichts. Befehle, die etwas ändern (`POST /config`, `/engines/*/start|stop|reload`, `/voices/sync`: Rechner
   und SSH-Ziele, GPU-Container, Cloud-Schlüssel), brauchen immer das Token, auch lokal, da jedes Programm auf
   dem Rechner localhost erreicht. Lauscht der Dienst auf einer anderen Adresse, verlangt alles ein Token
-  (`Authorization: Bearer <token>`; der WebSocket nimmt es ebenfalls in dieser Kopfzeile), und er startet ohne
+  (`X-TTS-Suite-Token: <token>`; der WebSocket nimmt es ebenfalls in dieser Kopfzeile), und er startet ohne
   eines nicht.
 - **Gesundheit:** `GET /health` bei jedem Dienst.
 - **Ein Client funktioniert ohne den Dienst.** Er hat seinen eigenen Ersatz (Agent-Orc: die Browser-Stimme)

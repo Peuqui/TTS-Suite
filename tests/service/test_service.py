@@ -32,7 +32,7 @@ from tts_suite.service.config_store import ConfigStore
 from tts_suite.service.frames import FRAMES_MEDIA_TYPE, decode_frames
 
 TOKEN = "secret-token"
-BEARER = {"Authorization": f"Bearer {TOKEN}"}
+TOKEN_HEADERS = {"X-TTS-Suite-Token": TOKEN}
 
 
 MAX_TEXT_CHARS = 100
@@ -73,17 +73,17 @@ def test_a_command_that_changes_something_needs_the_token_also_here(tmp_path: Pa
     for method, path in commands:
         refused = client.request(method, path)
         assert refused.status_code == 401 and refused.json()["error"] == "unauthorized", path
-        wrong = client.request(method, path, headers={"Authorization": "Bearer nope"})
+        wrong = client.request(method, path, headers={"X-TTS-Suite-Token": "nope"})
         assert wrong.status_code == 401, path
     assert suite.calls == []
 
 
 def test_the_commands_work_with_the_token(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
-    assert client.post("/engines/xtts/start", params={"host": "aragon"}, headers=BEARER).status_code == 204
-    assert client.post("/engines/xtts/stop", headers=BEARER).status_code == 204
-    assert client.post("/engines/reload", headers=BEARER).json() == {"removed": ["old"], "added": ["new"]}
-    assert client.post("/voices/sync", params={"engine": "dashscope"}, headers=BEARER).status_code == 200
+    assert client.post("/engines/xtts/start", params={"host": "aragon"}, headers=TOKEN_HEADERS).status_code == 204
+    assert client.post("/engines/xtts/stop", headers=TOKEN_HEADERS).status_code == 204
+    assert client.post("/engines/reload", headers=TOKEN_HEADERS).json() == {"removed": ["old"], "added": ["new"]}
+    assert client.post("/voices/sync", params={"engine": "dashscope"}, headers=TOKEN_HEADERS).status_code == 200
     assert suite.calls == [
         ("start", ("xtts", "aragon")),
         ("stop", ("xtts", None)),
@@ -105,7 +105,7 @@ def test_on_a_network_everything_needs_the_token(tmp_path: Path) -> None:
     client, _, _ = build(tmp_path, token_for_everything=True)
     assert client.get("/health").status_code == 200
     assert client.get("/engines").status_code == 401
-    assert client.get("/engines", headers=BEARER).status_code == 200
+    assert client.get("/engines", headers=TOKEN_HEADERS).status_code == 200
     assert client.post("/speak", json={"text": "Hi", "language": "en", "engines": ENGINES, "paragraph_pause_ms": 0}).status_code == 401
 
 
@@ -116,7 +116,7 @@ def test_a_new_configuration_is_set_and_kept(tmp_path: Path) -> None:
         "gpus": [{"gpu": "0", "reserve_mib": 2048}],
         "pronunciations": {"AIfred": "Alfred"},
     }
-    answer = client.post("/config", json=wanted, headers=BEARER)
+    answer = client.post("/config", json=wanted, headers=TOKEN_HEADERS)
     assert answer.status_code == 200
     assert answer.json()["gpus"] == [{"gpu": "0", "reserve_mib": 2048}]
     saved = store.load()
@@ -128,7 +128,7 @@ def test_a_new_configuration_is_set_and_kept(tmp_path: Path) -> None:
 def test_a_configuration_the_suite_refuses_is_not_kept(tmp_path: Path) -> None:
     client, suite, store = build(tmp_path)
     suite.rejects_config = ConfigInvalid("no engine 'nope'")
-    answer = client.post("/config", json={"voices_dir": str(tmp_path)}, headers=BEARER)
+    answer = client.post("/config", json={"voices_dir": str(tmp_path)}, headers=TOKEN_HEADERS)
     assert answer.status_code == 400
     assert answer.json() == {"error": "config_invalid", "detail": "no engine 'nope'"}
     assert store.load() is None
@@ -136,9 +136,9 @@ def test_a_configuration_the_suite_refuses_is_not_kept(tmp_path: Path) -> None:
 
 def test_a_configuration_that_makes_no_sense_is_a_bad_request(tmp_path: Path) -> None:
     client, _, _ = build(tmp_path)
-    assert client.post("/config", json={"hosts": "aragon"}, headers=BEARER).json()["error"] == "bad_request"
-    assert client.post("/config", content=b"{", headers=BEARER).json()["error"] == "bad_request"
-    assert client.post("/config", json=[1], headers=BEARER).status_code == 400
+    assert client.post("/config", json={"hosts": "aragon"}, headers=TOKEN_HEADERS).json()["error"] == "bad_request"
+    assert client.post("/config", content=b"{", headers=TOKEN_HEADERS).json()["error"] == "bad_request"
+    assert client.post("/config", json=[1], headers=TOKEN_HEADERS).status_code == 400
 
 
 def test_errors_of_the_suite_have_their_status_and_code(tmp_path: Path) -> None:
@@ -323,7 +323,7 @@ def test_a_stream_on_a_network_needs_the_token(tmp_path: Path) -> None:
     client, _, _ = build(tmp_path, token_for_everything=True)
     with pytest.raises(WebSocketDisconnect), client.websocket_connect("/speak/stream"):
         pass
-    with client.websocket_connect("/speak/stream", headers=BEARER) as socket:
+    with client.websocket_connect("/speak/stream", headers=TOKEN_HEADERS) as socket:
         socket.send_text(json.dumps({"type": "start", "language": "en", "engines": ENGINES, "paragraph_pause_ms": 0}))
         socket.send_text(json.dumps({"type": "finish"}))
         assert decode_frames(socket.receive_bytes())[0][0]["kind"] == "audio"
@@ -341,7 +341,7 @@ def test_the_suite_is_closed_when_the_service_ends(tmp_path: Path) -> None:
 
 def test_the_configuration_survives_a_restart(tmp_path: Path) -> None:
     client, _, store = build(tmp_path)
-    client.post("/config", json={"voices_dir": str(tmp_path / "v"), "headroom_mib": 256}, headers=BEARER)
+    client.post("/config", json={"voices_dir": str(tmp_path / "v"), "headroom_mib": 256}, headers=TOKEN_HEADERS)
     again = ConfigStore(store.path).load()
     assert again is not None and again.headroom_mib == 256
     assert list(store.path.parent.iterdir()) == [store.path]
@@ -422,7 +422,7 @@ def test_release_takes_both_forms_of_the_targets_without_a_token_on_this_machine
 def test_release_asks_for_the_token_where_everything_does(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path, token_for_everything=True)
     assert client.post("/release", json={"targets": "all"}).status_code == 401
-    assert client.post("/release", json={"targets": "all"}, headers=BEARER).status_code == 200
+    assert client.post("/release", json={"targets": "all"}, headers=TOKEN_HEADERS).status_code == 200
     assert suite.calls == [("release", ("all",))]
 
 

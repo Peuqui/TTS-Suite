@@ -161,7 +161,7 @@ as binary messages; after the `summary` frame the service closes.
   nothing. Commands that change something (`POST /config`, `/engines/*/start|stop|reload`, `/voices/sync`:
   hosts and SSH targets, GPU containers, cloud keys) always need the token, also locally, since every program
   on the machine reaches localhost. Listening on any other address, everything requires a token
-  (`Authorization: Bearer <token>`; the WebSocket takes it in that header too) and the service refuses to
+  (`X-TTS-Suite-Token: <token>`; the WebSocket takes it in that header too) and the service refuses to
   start without one.
 - **Health:** `GET /health` on every service.
 - **A client works without the service.** It has its own fallback (Agent-Orc: the browser's voice) and
