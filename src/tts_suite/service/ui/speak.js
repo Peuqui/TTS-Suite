@@ -80,22 +80,28 @@ export function speakView({ show, fail }) {
     } catch (error) { fail(error) }
   }
 
+  // Every ticked row speaks, one after the other in the order of the list: a comparison. Each gets a
+  // reading of its own, so one that fails or is not up does not stop the rest (it shows in the course).
   async function run() {
     const chosen = rows.filter((row) => use[place(row)])
     if (chosen.length === 0) { fail(new Error(t('nothingChosen'))); return }
-    const head = {
-      text, language, paragraph_pause_ms: pauseMs,
-      engines: chosen.map((row) => ({ engine: row.engine, unit: units[place(row)], host: row.host })),
-      voices: Object.fromEntries(chosen.filter((row) => voices[place(row)]).map((row) => [place(row), { voice: voices[place(row)] }])),
-    }
     const controller = new AbortController()
     speaking = controller
-    summary = null
+    summary = { trace: [], switch: null }
     render()
-    try {
-      const response = await service.speak(head, controller.signal)
-      summary = await player.play(response, controller.signal)
-    } catch (error) { fail(error) }
+    for (const row of chosen) {
+      const head = {
+        text, language, paragraph_pause_ms: pauseMs,
+        engines: [{ engine: row.engine, unit: units[place(row)], host: row.host }],
+        voices: voices[place(row)] ? { [place(row)]: { voice: voices[place(row)] } } : {},
+      }
+      try {
+        const part = await player.play(await service.speak(head, controller.signal), controller.signal)
+        if (part === null) break
+        summary.trace.push(...part.trace)
+      } catch (error) { if (controller.signal.aborted) break; fail(error) }
+      render()
+    }
     speaking = null
     render()
   }
