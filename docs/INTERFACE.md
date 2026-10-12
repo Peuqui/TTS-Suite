@@ -178,7 +178,7 @@ as binary messages; after the `summary` frame the service closes.
 ## Moving out of AIfred Intelligence
 
 Goes with the suite: the engine folders and their containers, the escalation, engine manager and hosts
-(including `scripts/tts-host-ctl.sh` and the compose call that sets `TTS_GPU_UUID`), the cleaning and cutting of the text by unit,
+(including `scripts/tts-host-ctl.sh`, which gets the voices folder with `start <service> <voices_dir>`, and the compose call that sets `TTS_GPU_UUID`), the cleaning and cutting of the text by unit,
 the post-processing, the announcement texts (ten languages) and engine labels (German and English), the configuration, and
 the tests of escalation, reload, completeness and the DashScope engine. The engines are the ones that exist in the suite (no MOSS, no Fish-Speech). The container and project names
 (and the volume `xtts_voices`) are pinned in the compose files (`name:`), so Docker does not recreate running

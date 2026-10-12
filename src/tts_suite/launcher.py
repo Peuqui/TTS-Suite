@@ -217,7 +217,7 @@ class SuiteLauncher:
         remote card beats a worse entry further down the list)."""
         logger.info("TTS: starting %s on %s", engine.key, host.name)
         try:
-            await asyncio.to_thread(self._host_command, host, "start", engine.service_dir)
+            await asyncio.to_thread(self._host_command, host, "start", engine.service_dir, str(self._config.voices_dir))
         except HostControlError as failed:
             return Skip("stopped", f"start failed: {failed}")
         deadline = self._clock() + engine.startup_timeout_s

@@ -7,7 +7,8 @@
 #
 # The command then arrives in SSH_ORIGINAL_COMMAND (or directly in "$@"):
 #
-#   start <service>   start the container of docker/tts/<service> (up -d)
+#   start <service> <voices_dir>  start the container of docker/tts/<service> (up -d); <voices_dir> is the
+#                     shared voices folder on THIS host (the suite's voices_dir), mounted into the container
 #   stop [<service>]  stop this one / all TTS containers of this repository (VRAM free)
 #   status            list the running TTS containers
 #
@@ -25,6 +26,7 @@ fi
 
 action="${args[0]:-}"
 service="${args[1]:-}"
+voices_dir="${args[2]:-}"
 
 compose_files() {
     find "$TTS_DIR" -mindepth 2 -maxdepth 2 -name docker-compose.yml | sort
@@ -40,6 +42,11 @@ require_service() {
 case "$action" in
     start)
         require_service
+        if [[ ! "$voices_dir" =~ ^/[A-Za-z0-9._/-]+$ || ! -d "$voices_dir" ]]; then
+            echo "voices folder missing on this host: '$voices_dir'" >&2
+            exit 2
+        fi
+        export TTS_VOICES_DIR="$voices_dir"
         docker compose -f "$TTS_DIR/$service/docker-compose.yml" up -d
         ;;
     stop)
@@ -58,7 +65,7 @@ case "$action" in
         done < <(compose_files)
         ;;
     *)
-        echo "usage: tts-host-ctl.sh start <service> | stop [<service>] | status" >&2
+        echo "usage: tts-host-ctl.sh start <service> <voices_dir> | stop [<service>] | status" >&2
         exit 2
         ;;
 esac

@@ -145,14 +145,14 @@ def test_a_remote_entry_is_started_over_ssh_and_awaited(tmp_path: Path) -> None:
     engine = ContainerEngine("q", remote=True)
     ssh = FakeSsh(then=lambda *command: setattr(engine, "up", True))
     skip = run_async(_launcher(tmp_path, ssh=ssh).ensure_serving(remote_entry(engine), wait=True))
-    assert skip is None and ssh.commands == [("Aragon", "start", "q")]
+    assert skip is None and ssh.commands == [("Aragon", "start", "q", str(tmp_path))]
     assert engine.ready_calls == 0 and engine.placements == []  # the host chooses its card, not the suite
 
 
 def test_a_failing_ssh_command_is_a_skip_with_the_hosts_message(tmp_path: Path) -> None:
     ssh = FakeSsh(fail="no route to host")
     skip = run_async(_launcher(tmp_path, ssh=ssh).ensure_serving(remote_entry(ContainerEngine("q", remote=True)), wait=True))
-    assert skip == Skip("stopped", "start failed: Aragon: 'start q' failed: no route to host")
+    assert skip == Skip("stopped", f"start failed: Aragon: 'start q {tmp_path}' failed: no route to host")
 
 
 def test_a_remote_container_that_never_serves_is_a_skip_after_the_startup_time(tmp_path: Path) -> None:
@@ -184,7 +184,7 @@ def test_a_reachable_host_with_the_container_off_is_stopped_and_started_over_ssh
         assert await launcher.status(remote_entry(engine)) == "running"
 
     run_async(scenario())
-    assert ssh.commands == [("Aragon", "start", "q")]
+    assert ssh.commands == [("Aragon", "start", "q", str(tmp_path))]
 
 
 # ── Entries without a container ─────────────────────────────────────
