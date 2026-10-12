@@ -2,8 +2,8 @@
 # Install the TTS-Suite service for the current user: its own venv with the code of this clone
 # (editable: the compose files and scripts of the engines live in the clone and are found from the
 # code), the command `tts-suite` in ~/.local/bin, and a systemd user service that runs it.
-# The service starts on its first run only with a configuration: name the shared voices folder once
-# with `tts-suite serve --voices-dir <folder>` (it is kept in ~/.config/tts-suite/config.json).
+# The first `tts-suite serve` writes the configuration (~/.config/tts-suite/config.json) with the voices
+# folder of this clone (`voices/`); `--voices-dir <folder>` names another one.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -22,5 +22,5 @@ ln -sfn "$VENV/bin/tts-suite" "$BIN/tts-suite"
 cp "$REPO/deploy/tts-suite.service" "$UNITS/tts-suite.service"
 systemctl --user daemon-reload
 echo "Installed $REPO to $VENV."
-echo "Next: tts-suite token; tts-suite serve --voices-dir <folder> once to write the configuration; then"
+echo "Next: tts-suite token; tts-suite serve once to write the configuration (stop it again); then"
 echo "systemctl --user enable --now tts-suite"
