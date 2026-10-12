@@ -28,7 +28,8 @@ nav button[aria-selected="true"] { background: var(--code); color: var(--text); 
 main { max-width: 1100px; margin: 0 auto; padding: 16px; }
 .view { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
 .view[hidden], #message[hidden] { display: none; }
-#message { margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
+/* Fixed at the bottom: a message at the top of the page is out of sight when the page is scrolled. */
+#message { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 10; max-width: min(92vw, 640px); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 4px 16px rgb(0 0 0 / 0.35); }
 #message.error { border-color: var(--bad); color: var(--bad); }
 #message.ok { border-color: var(--ok); color: var(--ok); }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -40,6 +41,8 @@ input[type="text"], input[type="number"], input[type="password"], select, textar
 input[type="number"] { width: 7em; }
 textarea { width: 100%; min-height: 90px; resize: vertical; }
 button { background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+button:hover { filter: brightness(1.15); }
+button:active { transform: translateY(1px); filter: brightness(0.85); }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.small { padding: 3px 8px; font-size: 13px; }
 button:disabled { opacity: 0.5; cursor: default; }
