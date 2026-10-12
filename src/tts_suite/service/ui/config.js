@@ -72,13 +72,16 @@ export function configView({ show, fail }) {
         h('code', {}, engine), limit(engine, 'vram_budget_mib'), limit(engine, 'max_parallel'), limit(engine, 'max_queue')])))
   }
 
+  // One line per word: the word, what is spoken instead, a button to remove it.
   function pronunciationsTable() {
     const words = Object.entries(config.pronunciations)
     return h('div', {}, h('h3', {}, t('pronunciations')),
-      cardTable([t('word'), t('spoken'), ''], words.map(([word, spoken]) => [
-        textInput(word, (value) => { delete config.pronunciations[word]; if (value) config.pronunciations[value] = spoken; render() }),
-        textInput(spoken, (value) => (config.pronunciations[word] = value)),
-        h('button', { class: 'small', onclick: () => { delete config.pronunciations[word]; render() } }, t('remove'))])),
+      h('div', { class: 'pairs' },
+        h('span', { class: 'muted' }, t('word')), h('span', { class: 'muted' }, t('spoken')), h('span'),
+        words.flatMap(([word, spoken]) => [
+          textInput(word, (value) => { delete config.pronunciations[word]; if (value) config.pronunciations[value] = spoken; render() }),
+          textInput(spoken, (value) => (config.pronunciations[word] = value)),
+          h('button', { class: 'small', title: t('remove'), 'aria-label': t('remove'), onclick: () => { delete config.pronunciations[word]; render() } }, '✕')])),
       h('div', { class: 'actions' }, h('button', { class: 'small', onclick: () => { config.pronunciations[''] = ''; render() } }, t('add'))))
   }
 

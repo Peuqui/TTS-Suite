@@ -59,6 +59,9 @@ button:disabled { opacity: 0.5; cursor: default; }
 code, .hint { font-family: ui-monospace, monospace; font-size: 13px; background: var(--code); padding: 1px 5px; border-radius: 4px; }
 .hint { display: inline-block; max-width: 36em; white-space: pre-wrap; word-break: break-word; }
 .tag { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 0 6px; margin-left: 4px; }
+/* Pairs of fields in one line each (the pronunciations). */
+.pairs { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px 8px; align-items: center; }
+.pairs input { width: 100%; min-width: 0; }
 /* The buttons of a row stay in one line. */
 .buttons { display: flex; gap: 6px; white-space: nowrap; }
 @media (max-width: 640px) {
