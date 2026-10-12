@@ -14,7 +14,8 @@
     <div class="tools">
       <label class="token">
         <span data-i18n="token"></span>
-        <input id="token" type="password" autocomplete="off" spellcheck="false" />
+        <!-- Not type="password": that makes the password manager of the browser offer itself on every field of the page. -->
+        <input id="token" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" />
       </label>
       <button id="language" type="button" class="small"></button>
       <button id="theme" type="button" class="small"></button>
