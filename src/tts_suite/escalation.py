@@ -45,6 +45,7 @@ from .api import (
     Unit,
     UnknownEngine,
     VoiceSettings,
+    VoiceTuning,
 )
 from .cleaning import TextCleaner
 from .constants import HOST_ADDRESS_PATTERN, HOST_SSH_USER_PATTERN, PITCH_DEFAULT, RUN_TTL_S, SPEED_DEFAULT
@@ -134,6 +135,9 @@ def _check_defaults(config: SuiteConfig) -> None:
             raise ConfigInvalid(f"engines[{key}]: max_parallel must be at least 1")
         if defaults.max_queue is not None and defaults.max_queue < 0:
             raise ConfigInvalid(f"engines[{key}]: max_queue must not be negative")
+        for voice, tuning in defaults.voice_tuning.items():
+            if any(value is not None and value <= 0 for value in (tuning.speed, tuning.pitch)):
+                raise ConfigInvalid(f"engines[{key}].voice_tuning[{voice}]: speed and pitch must be above 0")
 
 
 def _check_pronunciations(config: SuiteConfig) -> None:
@@ -244,7 +248,8 @@ def resolve_voice(
 ) -> tuple[str, float, float]:
     """Voice, speed and pitch of one entry. Each value comes from the first of: the request's
     setting for this engine (``request.voices``), the request's own fields, the configured
-    defaults of the engine, the engine's own default (speed and pitch: neutral). The request's
+    tuning of the voice that speaks, the configured defaults of the engine, the engine's own
+    default (speed and pitch: neutral). The request's
     ``voice`` is a voice of the container engines and is not offered to the others.
     No voice at all: :class:`TTSFailure` ``software`` — this entry fails, the list goes on."""
     own = request.voices.get(engine.key, VoiceSettings())
@@ -255,10 +260,11 @@ def resolve_voice(
         ) if name),
         None,
     )
-    speed = next(v for v in (own.speed, request.speed, configured.speed, SPEED_DEFAULT) if v is not None)
-    pitch = next(v for v in (own.pitch, request.pitch, configured.pitch, PITCH_DEFAULT) if v is not None)
     if voice is None:
         raise TTSFailure("software", f"no voice configured for {engine.key}")
+    tuning = defaults[engine.key].voice_tuning.get(voice, VoiceTuning()) if engine.key in defaults else VoiceTuning()
+    speed = next(v for v in (own.speed, request.speed, tuning.speed, configured.speed, SPEED_DEFAULT) if v is not None)
+    pitch = next(v for v in (own.pitch, request.pitch, tuning.pitch, configured.pitch, PITCH_DEFAULT) if v is not None)
     if speed <= 0 or pitch <= 0:
         raise TTSFailure("software", f"invalid speed/pitch for {engine.key}: {speed}/{pitch}")
     return voice, speed, pitch

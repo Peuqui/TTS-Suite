@@ -61,7 +61,8 @@ a request may not name it, the client decides whether and how it speaks.
 ### `GET /config`, `POST /config`
 
 One object: `voices_dir`; `hosts` (optional, the machines requests refer to by name: `name`, `address`,
-`ssh_port`, `ssh_user`); `engines` (defaults per engine key: `voice` with `voice`, `speed`, `pitch`,
+`ssh_port`, `ssh_user`); `engines` (defaults per engine key: `voice` with `voice`, `speed`, `pitch`; `voice_tuning`, speed and pitch per
+voice name, which apply whenever that voice speaks, after the request's own values and before the engine's defaults;
 `vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` and `headroom_mib` (see below);
 `pronunciations` (a word to the form spoken instead). `POST` validates once, in the engine package;
 what cannot work is `400` with the reason. There is no list of entries: who speaks, in which order, is the

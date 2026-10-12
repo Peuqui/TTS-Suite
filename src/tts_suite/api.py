@@ -58,10 +58,22 @@ class VoiceSettings:
 
 
 @dataclass(frozen=True)
+class VoiceTuning:
+    """Speed and pitch of ONE voice of an engine (some voices sound right only a little faster or
+    deeper); ``None`` = the next default."""
+
+    speed: float | None = None
+    pitch: float | None = None
+
+
+@dataclass(frozen=True)
 class EngineDefaults:
     """Per-engine defaults the request's list does not carry (the unit is the request's, per entry)."""
 
     voice: VoiceSettings = field(default_factory=VoiceSettings)
+    # Speed and pitch per voice name (as the voice list shows it): they apply whenever that voice
+    # speaks, after what the request itself says and before the defaults of the engine above.
+    voice_tuning: Mapping[str, VoiceTuning] = field(default_factory=dict)
     vram_budget_mib: int | None = None  # GPU engines: VRAM the engine may use (card choice + cap in the container)
     max_parallel: int | None = None  # requests running at once; None = the engine's own default
     max_queue: int | None = None  # requests waiting beyond that, then ``Overloaded``; None = engine default

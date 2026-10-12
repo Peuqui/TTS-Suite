@@ -33,6 +33,7 @@ from tts_suite.api import (
     TraceStep,
     UnknownEngine,
     VoiceSettings,
+    VoiceTuning,
 )
 from tts_suite.engines import get_engine
 from tts_suite.escalation import (
@@ -128,6 +129,7 @@ def test_a_missing_voices_dir_is_refused(tmp_path: Path) -> None:
     [
         ({"nope": EngineDefaults()}, "unknown TTS engine"),
         ({"xtts": EngineDefaults(max_parallel=0)}, "max_parallel"),
+        ({"xtts": EngineDefaults(voice_tuning={"V": VoiceTuning(pitch=0)})}, "voice_tuning"),
         ({"xtts": EngineDefaults(max_queue=-1)}, "max_queue"),
     ],
 )
@@ -152,6 +154,20 @@ def test_the_voice_comes_from_the_engine_setting_then_the_request_then_the_defau
     assert _voice(engine, request("x", voice="Request"), defaults) == ("Request", 1.1, 1.2)
     assert _voice(engine, REQUEST, defaults) == ("Config", 1.1, 1.2)
     assert _voice(engine, REQUEST, {}) == ("V", 1.0, 1.0)               # the engine's own voice, neutral speed/pitch
+
+
+def test_the_tuning_of_the_voice_sits_between_the_request_and_the_defaults_of_the_engine() -> None:
+    engine = FakeEngine("x")
+    defaults = {"x": EngineDefaults(
+        voice=VoiceSettings("Katja", 1.1, 1.2),
+        voice_tuning={"Katja": VoiceTuning(speed=0.9), "Conrad": VoiceTuning(speed=1.3, pitch=0.8)},
+    )}
+    assert _voice(engine, REQUEST, defaults) == ("Katja", 0.9, 1.2)                           # tuning speed, engine pitch
+    assert _voice(engine, request("x", speed=1.5), defaults) == ("Katja", 1.5, 1.2)            # the request wins
+    own = request("x", voices={"x": VoiceSettings(voice="Conrad")})
+    assert _voice(engine, own, defaults) == ("Conrad", 1.3, 0.8)                              # tuning of the voice that speaks
+    other = request("x", voices={"x": VoiceSettings(voice="Nobody")})
+    assert _voice(engine, other, defaults) == ("Nobody", 1.1, 1.2)                            # no tuning: the engine's
 
 
 def test_the_request_voice_is_not_offered_to_engines_that_are_not_containers() -> None:

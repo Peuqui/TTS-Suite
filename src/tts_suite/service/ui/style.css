@@ -51,6 +51,10 @@ button:hover { filter: brightness(1.15); }
 button:active { transform: translateY(1px); filter: brightness(0.85); }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.small { padding: 3px 8px; font-size: 13px; }
+/* A button that looks like a link: a voice in the list, a click opens its settings. */
+button.link { background: none; border: 0; padding: 0; text-align: left; color: var(--heading); text-decoration: underline; cursor: pointer; }
+button.link[aria-pressed="true"] { font-weight: 700; }
+.editor { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
 button:disabled { opacity: 0.5; cursor: default; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }

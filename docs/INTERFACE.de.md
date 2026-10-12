@@ -63,7 +63,8 @@ Dienst kann es nicht); eine Anfrage darf sie nicht nennen, der Client entscheide
 
 Ein Objekt: `voices_dir`; `hosts` (optional, die Rechner, auf die Anfragen mit Namen verweisen: `name`,
 `address`, `ssh_port`, `ssh_user`); `engines` (Vorgaben je Engine-Schlüssel: `voice` mit `voice`, `speed`,
-`pitch`, `vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` und `headroom_mib` (siehe unten);
+`pitch`; `voice_tuning`, Tempo und Tonhöhe je Stimmenname, gelten immer, wenn diese Stimme spricht, nach den Werten der
+Anfrage und vor den Vorgaben der Engine; `vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` und `headroom_mib` (siehe unten);
 `pronunciations` (ein Wort zur Form, die stattdessen gesprochen wird). `POST` prüft einmal, im Engine-Paket;
 was nicht funktionieren kann, ist `400` mit dem Grund. Es gibt keine Liste von Einträgen: Wer spricht, in
 welcher Reihenfolge, ist Sache der Anfrage. Cloud-Schlüssel gehören nicht dazu (unten).
