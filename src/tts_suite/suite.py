@@ -75,7 +75,9 @@ class Suite:
 
     async def _info(self, entry: EscalationEntry) -> EngineInfo:
         status = await self._launcher.status(entry)
-        vram_mib, installed = await asyncio.gather(self._vram_mib(entry, status), self._installed(entry))
+        vram_mib, installed, idle_remaining_s = await asyncio.gather(
+            self._vram_mib(entry, status), self._installed(entry), self._idle_remaining_s(entry, status),
+        )
         return EngineInfo(
             engine=entry.engine.key,
             host=entry.host.name if entry.host is not None else None,
@@ -89,6 +91,7 @@ class Suite:
             installed=installed,
             start_hint=self._start_hint(entry),
             vram_mib=vram_mib,
+            idle_remaining_s=idle_remaining_s,
             default_vram_mib=entry.engine.default_vram_budget_mib,
             default_max_parallel=entry.engine.max_parallel_requests,
             default_max_queue=entry.engine.max_queued_requests,
@@ -118,6 +121,13 @@ class Suite:
         except VramMeasurementFailed as failed:
             logger.error("TTS: VRAM of %s could not be measured: %s", entry.label, failed)
             return None
+
+    @staticmethod
+    async def _idle_remaining_s(entry: EscalationEntry, status: EntryStatus) -> float | None:
+        """How long a running container engine still lives without a request; None for all others."""
+        if status != "running":
+            return None
+        return await asyncio.to_thread(entry.engine.idle_remaining_s)
 
     # ── Voices ──────────────────────────────────────────────────────
 

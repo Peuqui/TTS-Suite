@@ -54,7 +54,9 @@ A row has `engine`, `host`, `label` and `label_short` (names for a user interfac
 `unit_default` (`sentence`, `paragraph` or `whole`: how much text the engine recommends it is given at once),
 `needs_gpu`, `cloud`, `browser`, `installed` (it can be started: it needs no container (cloud, CPU) or runs on
 another host, otherwise its Docker image is built), `start_hint` (why the last start of this entry failed,
-until the next start, a new configuration or a reload; otherwise null) and `vram_mib`. Rows of other hosts
+until the next start, a new configuration or a reload; otherwise null), `vram_mib` and `idle_remaining_s`
+(seconds until a running container ends itself for being idle, any request resets it; null = not running, no
+container or auto-shutdown off). Rows of other hosts
 are asked in parallel: a dead host does not delay the others.
 
 `browser: true` marks the row that stands for the client's own voice (the browser speaks, the service cannot);

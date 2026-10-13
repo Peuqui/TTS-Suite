@@ -212,6 +212,31 @@ def test_vram_is_reported_for_running_local_gpu_engines_only_and_a_failed_measur
     assert "qwen3local could not be measured" in caplog.text and "gone" in caplog.text
 
 
+def test_idle_remaining_comes_from_the_health_answer_of_a_running_container_engine_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    suite, _ = _suite(
+        make_config(tmp_path), FakeManagedLauncher(statuses={"xtts": "running", "qwen3local": "stopped", "edge": "running"}),
+    )
+    monkeypatch.setattr(
+        registry.TTS_ENGINES["xtts"].__class__, "_health", lambda self, timeout=None: {"idle_remaining_s": 287.5},
+    )
+    rows = _rows(run_async(suite.engines()))
+    assert rows[("xtts", None)].idle_remaining_s == 287.5
+    assert rows[("qwen3local", None)].idle_remaining_s is None  # stopped: nothing is counting down
+    assert rows[("edge", None)].idle_remaining_s is None  # no container: nothing ends itself
+
+
+def test_idle_remaining_is_none_when_the_container_has_auto_shutdown_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    suite, _ = _suite(make_config(tmp_path), FakeManagedLauncher(statuses={"xtts": "running"}))
+    monkeypatch.setattr(
+        registry.TTS_ENGINES["xtts"].__class__, "_health", lambda self, timeout=None: {"idle_remaining_s": None},
+    )
+    assert _rows(run_async(suite.engines()))[("xtts", None)].idle_remaining_s is None
+
+
 # ── Voices ──────────────────────────────────────────────────────────
 
 

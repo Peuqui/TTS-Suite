@@ -387,6 +387,15 @@ class TTSEngine(ABC):
         health = self._health()
         return health is not None and self._model_ready(health)
 
+    def idle_remaining_s(self) -> float | None:
+        """Seconds until the container ends itself for being idle, as its health answer reports it;
+        None when it does not run in a container, does not answer, or has auto-shutdown off."""
+        if not self.runs_in_container:
+            return None
+        health = self._health()
+        remaining = None if health is None else health.get("idle_remaining_s")
+        return None if remaining is None else float(remaining)
+
     def reachability(self) -> Reachability:
         """Whether the engine's host answers, from the health request alone (no ping): see :data:`Reachability`."""
         return self._probe()[0]

@@ -147,6 +147,7 @@ class EngineInfo:
     installed: bool  # can be started: no container needed (cloud, CPU) or runs on another host; else the Docker image is built
     start_hint: str | None  # why the last start of this entry failed (until the next start, a new configuration or a reload); else None
     vram_mib: Mapping[str, int] | None  # {gpu_uuid: MiB} per card it holds (display only); {} = none/not local; None = measurement failed
+    idle_remaining_s: float | None  # seconds until a running container ends itself for being idle (a request resets it); None = not running, no container, or auto-shutdown off
     # What the engine does when ``EngineDefaults`` leaves a limit empty (for a page that shows them).
     default_vram_mib: int | None  # GPU engines: the budget; None = the engine takes no budget
     default_max_parallel: int

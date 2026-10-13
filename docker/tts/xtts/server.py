@@ -1250,7 +1250,8 @@ def health():
         "model_loaded": _synthesizer is not None,
         "model": _model_name,
         "device": _device or "not loaded",
-        "custom_voices": len(_custom_voices)
+        "custom_voices": len(_custom_voices),
+        "idle_remaining_s": _idle_remaining_s(),
     })
 
 
@@ -1424,6 +1425,17 @@ def _idle_watchdog_loop():
             continue
         _shutdown_container()
         return  # _shutdown_container does not return; this is for clarity
+
+
+def _idle_remaining_s() -> float | None:
+    """Seconds until the idle watchdog shuts the container down; None = auto-shutdown off.
+    A request in flight holds the full window (the watchdog skips while one runs)."""
+    import time
+    if KEEP_ALIVE_MINUTES <= 0 or _last_request_time is None:
+        return None
+    if _active_requests > 0:
+        return KEEP_ALIVE_MINUTES * 60.0
+    return max(0.0, KEEP_ALIVE_MINUTES * 60 - (time.time() - _last_request_time))
 
 
 def _reset_restart_timer():

@@ -55,7 +55,9 @@ nicht), `unit_default` (`sentence`, `paragraph` oder `whole`: wie viel Text die 
 auf einmal empfiehlt), `needs_gpu`, `cloud`, `browser`, `installed` (sie lässt sich starten: sie braucht keinen
 Container (Cloud, CPU) oder läuft auf einem anderen Rechner, sonst wird ihr Docker-Image gebaut), `start_hint`
 (warum der letzte Start dieses Eintrags scheiterte, bis zum nächsten Start, einer neuen Konfiguration oder
-einem Reload; sonst null) und `vram_mib`. Die Zeilen anderer Hosts werden parallel abgefragt: Ein toter Host
+einem Reload; sonst null), `vram_mib` und `idle_remaining_s` (Sekunden, bis sich ein laufender Container
+wegen Leerlauf selbst beendet, jede Anfrage setzt sie zurück; null = läuft nicht, kein Container oder
+Automatik aus). Die Zeilen anderer Hosts werden parallel abgefragt: Ein toter Host
 hält die anderen nicht auf.
 
 `browser: true` kennzeichnet die Zeile, die für die eigene Stimme des Clients steht (der Browser spricht, der

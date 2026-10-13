@@ -258,6 +258,16 @@ def _touch():
     _last_request_time = time.time()
 
 
+def _idle_remaining_s() -> float | None:
+    """Seconds until the idle watcher shuts the container down; None = auto-shutdown off.
+    A request in flight holds the full window (the watcher skips while one runs)."""
+    if KEEP_ALIVE_MINUTES <= 0:
+        return None
+    if _active_requests > 0:
+        return KEEP_ALIVE_MINUTES * 60.0
+    return max(0.0, KEEP_ALIVE_MINUTES * 60 - (time.time() - _last_request_time))
+
+
 # ── Auto-shutdown thread ─────────────────────────────────────────────────────
 def _idle_watcher():
     if KEEP_ALIVE_MINUTES <= 0:
@@ -310,6 +320,7 @@ def health():
         # anyway. The split-flag distinction was never wired up to a
         # second event, so collapsing them is intentional.
         "warmup_done": _ready_for_calibration,
+        "idle_remaining_s": _idle_remaining_s(),
     })
 
 

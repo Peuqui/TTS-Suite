@@ -33,6 +33,7 @@ ENGINE_INFO = EngineInfo(
     installed=True,
     start_hint=None,
     vram_mib={"GPU-1": 4000},
+    idle_remaining_s=1500.0,
     default_vram_mib=3680,
     default_max_parallel=2,
     default_max_queue=8,
