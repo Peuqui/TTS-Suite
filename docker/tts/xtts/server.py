@@ -28,16 +28,17 @@ Usage:
     Returns: {"success": true, "voice": "name"}
 """
 
-import os
-import unicodedata
-import tempfile
-import logging
 import json
-import time
+import logging
+import os
+import tempfile
 import threading
+import time
+import unicodedata
 import uuid
 from pathlib import Path
-from flask import Flask, request, send_file, jsonify, render_template_string
+
+from flask import Flask, jsonify, render_template_string, request, send_file
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -663,7 +664,7 @@ def get_gpu_memory_info() -> dict:
             "reserved_gb": round(reserved / (1024**3), 2),
             "free_gb": round(free / (1024**3), 2),
         }
-    except Exception as e:
+    except RuntimeError as e:
         return {"available": False, "reason": str(e)}
 
 
@@ -677,7 +678,7 @@ def check_system_vram() -> dict:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=index,name,memory.total,memory.used,memory.free",
              "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True, text=True, timeout=5, check=False
         )
 
         if result.returncode != 0:
@@ -697,7 +698,7 @@ def check_system_vram() -> dict:
                 })
 
         return {"available": True, "gpus": gpus}
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError) as e:
         return {"available": False, "reason": str(e)}
 
 
@@ -790,7 +791,6 @@ def get_synthesizer():
 
 def load_custom_voices():
     """Load custom voice embeddings from persistent storage."""
-    global _custom_voices
     import torch
 
     CUSTOM_VOICES_DIR.mkdir(parents=True, exist_ok=True)
@@ -801,15 +801,14 @@ def load_custom_voices():
             # Load to the selected device
             _custom_voices[voice_name] = torch.load(pth_file, map_location=_device)
             logger.info(f"Loaded custom voice: {voice_name}")
-        except Exception as e:
-            logger.error(f"Failed to load custom voice {voice_name}: {e}")
+        except Exception:
+            logger.exception(f"Failed to load custom voice {voice_name}")
 
     logger.info(f"Loaded {len(_custom_voices)} custom voices")
 
 
 def auto_generate_voice_embeddings():
     """Generate embeddings for WAV files in the reference audio directory."""
-    global _custom_voices
     import torch
 
     if not REFERENCE_AUDIO_DIR.exists():
@@ -840,8 +839,8 @@ def auto_generate_voice_embeddings():
             _custom_voices[voice_name] = voice_data
             logger.info(f"Generated and saved embedding for: {voice_name}")
 
-        except Exception as e:
-            logger.error(f"Failed to generate embedding for {voice_name}: {e}")
+        except Exception:
+            logger.exception(f"Failed to generate embedding for {voice_name}")
 
 
 def get_speaker_embedding(speaker_name: str):
@@ -1368,8 +1367,8 @@ def _deep_cuda_cleanup():
             torch.cuda.ipc_collect()
 
             logger.info("✅ Deep CUDA cleanup completed")
-    except Exception as e:
-        logger.warning(f"CUDA cleanup error: {e}")
+    except Exception:
+        logger.warning("CUDA cleanup error", exc_info=True)
 
 
 def _shutdown_container():
@@ -1479,6 +1478,7 @@ def _tokenize_for_diagnostic(chunk: str, language: str) -> dict:
             "ids": ids,
         }
     except Exception as e:
+        logger.exception("tokenize failed")
         return {"error": f"tokenize_failed: {e}"}
 
 
@@ -1492,7 +1492,7 @@ def _write_crash_dump(payload: dict) -> str:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         return str(path)
-    except Exception as e:
+    except (OSError, TypeError, ValueError) as e:
         logger.error(f"crash-dump write failed: {e}")
         return ""
 
@@ -1531,8 +1531,7 @@ def tts():
     speaker = data.get("speaker", DEFAULT_SPEAKER)
 
     # Remove "* " prefix if present (UI marker for custom voices)
-    if speaker.startswith("* "):
-        speaker = speaker[2:]
+    speaker = speaker.removeprefix("* ")
 
     if not text.strip():
         return jsonify({"error": "Empty text"}), 400
@@ -1670,13 +1669,10 @@ def tts():
             "ffmpeg", "-y", "-i", wav_path,
             "-c:a", "libopus", "-b:a", "48k",  # 48kbps Opus - excellent for speech
             ogg_path
-        ], capture_output=True, text=True)
+        ], capture_output=True, text=True, check=False)
 
         # Clean up WAV immediately
-        try:
-            os.unlink(wav_path)
-        except Exception:
-            pass
+        Path(wav_path).unlink(missing_ok=True)
 
         if ffmpeg_result.returncode != 0:
             logger.error(f"ffmpeg conversion failed: {ffmpeg_result.stderr}")
@@ -1696,8 +1692,8 @@ def tts():
         try:
             torch.cuda.empty_cache()
             logger.debug("CUDA cache cleared after TTS request")
-        except Exception:
-            pass
+        except RuntimeError as error:
+            logger.warning(f"CUDA cache clear failed: {error}")
 
         # Request done - decrement counter and reset timer
         _active_requests -= 1
@@ -1714,19 +1710,14 @@ def tts():
         # Cleanup after response
         @response.call_on_close
         def cleanup():
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                pass
+            Path(temp_path).unlink(missing_ok=True)
 
         return response
 
     except Exception as e:
         # Request done (with error) - decrement counter
         _active_requests -= 1
-        logger.error(f"TTS generation failed: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("TTS generation failed")
         return jsonify({"error": str(e)}), 500
 
 
@@ -1802,9 +1793,7 @@ def clone_voice():
         })
 
     except Exception as e:
-        logger.error(f"Voice cloning failed: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Voice cloning failed")
         return jsonify({"error": str(e)}), 500
 
 
@@ -1852,7 +1841,7 @@ def delete_voice(name: str):
         })
 
     except Exception as e:
-        logger.error(f"Failed to delete voice: {e}")
+        logger.exception("Failed to delete voice")
         return jsonify({"error": str(e)}), 500
 
 

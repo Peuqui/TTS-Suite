@@ -199,8 +199,8 @@ def _warmup_inference() -> None:
             language=DEFAULT_LANGUAGE,
             voice_clone_prompt=prompt,
         )
-    except Exception as e:
-        logger.exception(f"Warmup inference failed: {e}")
+    except Exception:
+        logger.exception("Warmup inference failed")
         return
     if torch.cuda.is_available() and _device and _device.startswith("cuda"):
         peak = torch.cuda.max_memory_allocated() / (1024 ** 3)
@@ -233,8 +233,8 @@ def _warm_clone_prompts() -> None:
                 ref_text=None,
                 x_vector_only_mode=True,
             )
-        except Exception as e:
-            logger.error(f"Failed to warm x-vector prompt for '{name}': {e}")
+        except Exception:
+            logger.exception(f"Failed to warm x-vector prompt for '{name}'")
 
         # with-transcript mode only when a .txt exists next to the WAV.
         if ref_text:
@@ -244,8 +244,8 @@ def _warm_clone_prompts() -> None:
                     ref_text=ref_text,
                     x_vector_only_mode=False,
                 )
-            except Exception as e:
-                logger.error(f"Failed to warm with-transcript prompt for '{name}': {e}")
+            except Exception:
+                logger.exception(f"Failed to warm with-transcript prompt for '{name}'")
 
         if per_voice:
             _clone_prompts[name] = per_voice
@@ -377,7 +377,7 @@ def keep_alive():
 
 @app.route("/unload", methods=["POST"])
 def unload():
-    global _model, _clone_prompts, _device, _ready_for_calibration, _sample_rate
+    global _model, _device, _ready_for_calibration, _sample_rate
     # Serialize against concurrent /tts requests: if one is mid-generation
     # we'd otherwise rip the model out from under it.
     with _load_lock:
@@ -402,8 +402,8 @@ def unload():
                 _, total = torch.cuda.mem_get_info(0)
                 free, _t = torch.cuda.mem_get_info(0)
                 before_mb = (total - free) // (1024 * 1024)
-            except Exception:
-                pass
+            except RuntimeError as error:
+                logger.warning(f"VRAM reading before unload failed: {error}")
 
         # Drop the voice-clone prompts first — they hold ref_code +
         # speaker_embedding tensors on GPU (one set per voice × cloning
@@ -435,8 +435,8 @@ def unload():
                 free, total = torch.cuda.mem_get_info(0)
                 after_mb = (total - free) // (1024 * 1024)
                 freed_mb = max(0, before_mb - after_mb)
-            except Exception:
-                pass
+            except RuntimeError as error:
+                logger.warning(f"VRAM reading after unload failed: {error}")
 
         label = f"{freed_name} ({freed})" if freed_name else freed
         logger.info(f"Unloaded model from {label}, freed ~{freed_mb} MiB")
@@ -552,8 +552,8 @@ def _eager_init():
     """
     try:
         _load_model()
-    except Exception as e:
-        logger.exception(f"Eager load failed: {e}")
+    except Exception:
+        logger.exception("Eager load failed")
         # A container without its model can never speak. End it (SIGTERM to the gunicorn master,
         # the parent of this worker) so the caller sees the container gone instead of waiting for
         # a model that will not come.
