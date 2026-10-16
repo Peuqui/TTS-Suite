@@ -46,7 +46,12 @@ class Suite:
 
     async def aclose(self) -> None:
         await self._speaker.aclose()
+        # The launcher goes first: it ends the starts and drops the holds, so the release below also takes
+        # down a container a reading was using (the service is going away, nobody could stop it afterwards).
         await self._launcher.aclose()
+        for result in await self.release("all"):
+            if result.outcome in ("failed", "unreachable"):
+                logger.warning("TTS: %s stays up on shutdown (%s): %s", result.engine, result.outcome, result.detail)
 
     # ── Configuration ───────────────────────────────────────────────
 

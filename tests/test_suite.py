@@ -517,6 +517,23 @@ def test_closing_the_suite_closes_the_launcher(tmp_path: Path) -> None:
     assert launcher.closed
 
 
+def test_closing_the_suite_stops_every_container_also_a_held_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    held, idle = ContainerEngine("held"), ContainerEngine("idle")
+    held.up = True
+    idle.up = True
+    install(monkeypatch, held, idle)
+    config = make_config(tmp_path)
+    launcher = SuiteLauncher(config, gpus=list)
+    suite, _ = _suite(config, launcher)  # type: ignore[arg-type]
+
+    async def scenario() -> None:
+        launcher.hold(EscalationEntry(held, None, "sentence"))  # a reading is using it
+        await suite.aclose()
+
+    run_async(scenario())
+    assert held.stops == 1 and idle.stops == 1
+
+
 # ── The voices folder: new path releases the containers, push to the hosts ──
 
 

@@ -359,7 +359,8 @@ class TTSSuite(Protocol):
     async def aclose(self) -> None:
         """Release semaphores, HTTP sessions, the table of runs and the synthesis threads (the
         service calls it in its lifespan): syntheses not yet started are dropped, running ones
-        end on their own."""
+        end on their own. Takes down every container, on this machine and on the hosts, also one a
+        reading was using; the next request starts what it needs again."""
         ...
 
     async def config(self) -> SuiteConfig: ...
