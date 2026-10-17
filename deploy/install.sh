@@ -36,5 +36,6 @@ json.dump(config, open(target, "w", encoding="utf-8"), ensure_ascii=False, inden
 PY
     chmod 600 "$CONFIG_FILE"
 fi
+bash "$REPO/deploy/install-engines.sh"
 echo "Installed $REPO to $VENV."
 echo "Next: systemctl --user enable --now tts-suite   (or, for AIfred: sudo $REPO/deploy/switch-to-system-unit.sh)"

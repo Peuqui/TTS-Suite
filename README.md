@@ -47,7 +47,10 @@ loads that file.
 
 As a service of your user: `deploy/install.sh` makes a venv (with the code of this clone, in editable form:
 the compose files of the engines live here), links `tts-suite` into `~/.local/bin` and installs
-`tts-suite.service`. Once, run `tts-suite serve` (`--voices-dir <folder>` for another voices folder than `voices/` of the repository) so the configuration is written, stop
+`tts-suite.service`, then `deploy/install-engines.sh` asks which engines to set up: the Piper voice Thorsten (download),
+eSpeak (package `espeak-ng`) and, with an NVIDIA GPU, the Docker images of Qwen3-TTS and XTTS (their models download on the
+first start); every question has an environment variable for unattended installs (listed in the script), and you can run the
+script again later. Edge (cloud) and the browser voice need nothing. Once, run `tts-suite serve` (`--voices-dir <folder>` for another voices folder than `voices/` of the repository) so the configuration is written, stop
 it, then `systemctl --user enable --now tts-suite`. On a machine where other programs (a service control page,
 AIfred) must start and stop the service, run it as the system unit `tts-suite@<user>` instead:
 `sudo deploy/switch-to-system-unit.sh` (it stops the user unit first; both use port 5090).
