@@ -5,7 +5,7 @@
 # with its environment variable (unattended install); without a terminal and without the variable the
 # default applies.
 #
-#   TTS_SUITE_INSTALL_PIPER   y/n  download the German Piper voice Thorsten (about 114 MB)   default y
+#   TTS_SUITE_INSTALL_PIPER   y/n  download the German Piper voices Thorsten and Ramona (about 114 + 63 MB)  default y
 #   TTS_SUITE_INSTALL_ESPEAK  y/n  install eSpeak (package espeak-ng, needs sudo)           default y
 #   TTS_SUITE_INSTALL_QWEN3   y/n  build the Qwen3-TTS image (NVIDIA GPU, large; the model downloads on first use)  default n
 #   TTS_SUITE_INSTALL_XTTS    y/n  build the XTTS image (NVIDIA GPU, large; the model downloads on first use)       default n
@@ -13,8 +13,9 @@ set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 DATA=${TTS_SUITE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/tts-suite}
-PIPER_VOICE_URL=https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/high
-PIPER_VOICE_FILE=de_DE-thorsten-high.onnx
+PIPER_VOICES_URL=https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE
+# <path below PIPER_VOICES_URL>/<model file>, one line per voice (the names the engine knows are in engines/piper/engine.py)
+PIPER_VOICES=(thorsten/high/de_DE-thorsten-high.onnx ramona/low/de_DE-ramona-low.onnx)
 CONFIG_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/tts-suite/config.json
 VOICES_DIR=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["voices_dir"])' "$CONFIG_FILE")
 
@@ -35,18 +36,21 @@ ask() {
     [[ $REPLY =~ ^[JjYy]$ ]] && REPLY=y || REPLY=n
 }
 
-install_piper_voice() {
-    local target="$DATA/piper_models"
-    if [ -f "$target/$PIPER_VOICE_FILE" ]; then
-        echo "Piper voice already there: $target/$PIPER_VOICE_FILE"
-        return
-    fi
+install_piper_voices() {
+    local target="$DATA/piper_models" voice file
     mkdir -p "$target"
-    for file in "$PIPER_VOICE_FILE" "$PIPER_VOICE_FILE.json"; do
-        curl -fL --retry 3 -o "$target/$file.part" "$PIPER_VOICE_URL/$file"
-        mv "$target/$file.part" "$target/$file"
+    for voice in "${PIPER_VOICES[@]}"; do
+        file=$(basename "$voice")
+        if [ -f "$target/$file" ]; then
+            echo "Piper voice already there: $target/$file"
+            continue
+        fi
+        for part in "$file" "$file.json"; do
+            curl -fL --retry 3 -o "$target/$part.part" "$PIPER_VOICES_URL/$(dirname "$voice")/$part"
+            mv "$target/$part.part" "$target/$part"
+        done
+        echo "Piper voice installed: $target/$file"
     done
-    echo "Piper voice installed: $target/$PIPER_VOICE_FILE"
 }
 
 install_espeak() {
@@ -69,8 +73,8 @@ build_image() {
     (cd "$REPO/docker/tts/$1" && TTS_VOICES_DIR="$VOICES_DIR" docker compose build)
 }
 
-ask TTS_SUITE_INSTALL_PIPER "Download the Piper voice Thorsten (German, local, no GPU, about 114 MB)? (Y/n): " y
-[ "$REPLY" = y ] && install_piper_voice
+ask TTS_SUITE_INSTALL_PIPER "Download the Piper voices Thorsten and Ramona (German, local, no GPU, about 180 MB)? (Y/n): " y
+[ "$REPLY" = y ] && install_piper_voices
 
 ask TTS_SUITE_INSTALL_ESPEAK "Install eSpeak (robotic offline voice, package espeak-ng, needs sudo)? (Y/n): " y
 [ "$REPLY" = y ] && install_espeak

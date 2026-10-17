@@ -47,7 +47,7 @@ Datei.
 
 Als Dienst deines Benutzers: `deploy/install.sh` legt eine venv an (mit dem Code dieses Klons, editierbar: die
 Compose-Dateien der Engines liegen hier), verlinkt `tts-suite` nach `~/.local/bin` und installiert
-`tts-suite.service`, danach fragt `deploy/install-engines.sh`, welche Engines eingerichtet werden: die Piper-Stimme Thorsten
+`tts-suite.service`, danach fragt `deploy/install-engines.sh`, welche Engines eingerichtet werden: die Piper-Stimmen Thorsten und Ramona
 (Download), eSpeak (Paket `espeak-ng`) und, mit NVIDIA-Karte, die Docker-Images von Qwen3-TTS und XTTS (ihre Modelle laden
 beim ersten Start); jede Frage hat eine Umgebungsvariable für Installationen ohne Rückfragen (im Skript aufgelistet), und das
 Skript lässt sich später erneut ausführen. Edge (Cloud) und die Browser-Stimme brauchen nichts. Einmal `tts-suite serve` starten (`--voices-dir <Ordner>` für einen anderen Stimmenordner als `voices/` im Repository), damit die Konfiguration entsteht,
