@@ -19,12 +19,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
+# What `pytest tests` needs besides the service itself.
+test = [
     "pytest",
+    "httpx2",
+]
+dev = [
+    "tts-suite[test]",
     "ruff",
     "mypy",
     "types-requests",
-    "httpx2",
 ]
 
 [project.scripts]
