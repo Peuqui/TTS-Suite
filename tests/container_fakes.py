@@ -76,7 +76,7 @@ class CardList:
     """What ``nvidia-smi`` lists. ``queries`` counts the calls, ``take`` makes a card fuller."""
 
     def __init__(self, *free_mib: int, total_mib: int = 24000) -> None:
-        self.cards = [GpuInfo(index, f"GPU-{index}", free, total_mib) for index, free in enumerate(free_mib)]
+        self.cards = [GpuInfo(index, f"GPU-{index}", free, total_mib, total_mib - free) for index, free in enumerate(free_mib)]
         self.queries = 0
         self._lock = threading.Lock()
 

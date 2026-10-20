@@ -83,7 +83,7 @@ def test_no_vram_is_not_remembered_so_the_next_request_chooses_the_card_again(tm
         skip = await launcher.ensure_serving(entry, wait=True)
         assert skip is not None and skip.reason == "no_vram" and engine.ready_calls == 0
         assert launcher.start_failure(entry) is None
-        cards.cards[0] = GpuInfo(0, "GPU-0", 20000, 24000)  # room again, no explicit start
+        cards.cards[0] = GpuInfo(0, "GPU-0", 20000, 24000, 4000)  # room again, no explicit start
         assert await launcher.ensure_serving(entry, wait=True) is None
         assert engine.ready_calls == 1
 

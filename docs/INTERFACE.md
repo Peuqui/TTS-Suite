@@ -72,8 +72,8 @@ voice name, which apply whenever that voice speaks, after the request's own valu
 what cannot work is `400` with the reason. There is no list of entries: who speaks, in which order, is the
 request's business. Cloud keys are not part of it (below).
 
-**GPU placement is a rule set**, no callback to a program. `gpu_mode` `auto` (the default) puts an engine on the
-card with the most free VRAM that fits (best fit); `list` only on the first card of `gpus` that fits
+**GPU placement is a rule set**, no callback to a program. `gpu_mode` `auto` (the default) puts an engine on a card no program
+uses that fits, else on the card with the most free VRAM that fits; `list` only on the first card of `gpus` that fits
 (`gpu` = index as `nvidia-smi` lists it, or UUID; `reserve_mib` = VRAM that stays free for other programs)
 whose free VRAM minus the reserve covers the engine's `vram_budget_mib` plus `headroom_mib` (a margin so a
 card is not filled to the last MiB). The container gets the budget as its cap; the suite does not watch the

@@ -74,7 +74,7 @@ was nicht funktionieren kann, ist `400` mit dem Grund. Ein geändertes `voices_d
 welcher Reihenfolge, ist Sache der Anfrage. Cloud-Schlüssel gehören nicht dazu (unten).
 
 **Die Platzierung auf der GPU ist ein Regelsatz**, kein Rückruf an ein Programm. `gpu_mode` `auto` (Vorgabe) stellt
-eine Engine auf die Karte mit dem meisten freien VRAM, auf die sie passt (Best Fit); `list` nur auf die erste passende
+eine Engine auf eine Karte, die kein Programm belegt und auf die sie passt, sonst auf die Karte mit dem meisten freien VRAM, auf die sie passt; `list` nur auf die erste passende
 Karte aus `gpus` (`gpu` = Index wie `nvidia-smi` ihn nennt, oder UUID; `reserve_mib` = VRAM, der für
 andere Programme frei bleibt), deren freier VRAM abzüglich der Reserve das `vram_budget_mib` der Engine plus `headroom_mib` deckt (ein
 Aufschlag, damit keine Karte bis auf das letzte MiB gefüllt wird). Der Container bekommt das Budget als Kappe;

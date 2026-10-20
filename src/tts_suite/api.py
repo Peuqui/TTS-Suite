@@ -102,8 +102,8 @@ class SuiteConfig:
     GPU placement is a rule set, not a callback: the suite owns the cards' use for all
     programs that talk to it. The suite offers every engine it knows (the catalog,
     :meth:`TTSSuite.engines`); it keeps NO escalation list: each request brings its own, so no
-    program owns a list the others share. ``gpu_mode`` ``auto`` puts an engine on the card with the most
-    free VRAM that fits (best fit, the default); ``list`` only on the cards of ``gpus``, the first
+    program owns a list the others share. ``gpu_mode`` ``auto`` puts an engine on a card no program uses
+    (``memory.used`` 0) that fits, else on the card with the most free VRAM that fits (the default); ``list`` only on the cards of ``gpus``, the first
     one whose free VRAM (``nvidia-smi``) minus ``reserve_mib`` covers the engine's ``vram_budget_mib``
     plus ``headroom_mib``. The container gets the budget itself as its cap; the headroom
     only keeps a card from being filled to the last MiB. The cap counts PyTorch memory only,

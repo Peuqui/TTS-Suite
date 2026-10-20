@@ -15,7 +15,7 @@ from tts_suite.placement import (
     vram_budget_mib,
 )
 
-CARDS = [GpuInfo(0, "GPU-a", 5000, 24000), GpuInfo(1, "GPU-b", 9000, 24000), GpuInfo(2, "GPU-c", 7000, 24000)]
+CARDS = [GpuInfo(0, "GPU-a", 5000, 24000, 19000), GpuInfo(1, "GPU-b", 9000, 24000, 15000), GpuInfo(2, "GPU-c", 7000, 24000, 17000)]
 
 
 def _config(tmp_path: Path, *rules: GpuRule, headroom_mib: int = 500, **engines: EngineDefaults) -> SuiteConfig:
@@ -23,7 +23,7 @@ def _config(tmp_path: Path, *rules: GpuRule, headroom_mib: int = 500, **engines:
 
 
 def test_the_nvidia_smi_lines_are_read() -> None:
-    assert parse_gpus("0, GPU-a, 5000, 24000\n1, GPU-b, 9000, 24000\n") == CARDS[:2]
+    assert parse_gpus("0, GPU-a, 5000, 24000, 19000\n1, GPU-b, 9000, 24000, 15000\n") == CARDS[:2]
 
 
 def test_the_first_fitting_card_in_the_order_of_the_list_wins(tmp_path: Path) -> None:
@@ -40,7 +40,7 @@ def test_a_card_is_skipped_when_free_vram_minus_reserve_does_not_cover_budget_an
 
 
 def test_the_headroom_is_added_to_the_budget(tmp_path: Path) -> None:
-    tight = [GpuInfo(0, "GPU-a", 4400, 24000)]
+    tight = [GpuInfo(0, "GPU-a", 4400, 24000, 19600)]
     with pytest.raises(PlacementRefused):
         choose_gpu(tight, ContainerEngine("x"), _config(tmp_path, headroom_mib=512))
     assert choose_gpu(tight, ContainerEngine("x"), _config(tmp_path, headroom_mib=400)).gpu.index == 0
@@ -48,6 +48,15 @@ def test_the_headroom_is_added_to_the_budget(tmp_path: Path) -> None:
 
 def test_an_empty_list_means_every_card_the_one_with_the_most_free_vram_first(tmp_path: Path) -> None:
     assert choose_gpu(CARDS, ContainerEngine("x"), _config(tmp_path)).gpu.uuid == "GPU-b"
+
+
+def test_auto_mode_takes_a_card_nobody_uses_before_the_one_with_the_most_free_vram(tmp_path: Path) -> None:
+    cards = [*CARDS, GpuInfo(3, "GPU-d", 6000, 6000, 0), GpuInfo(4, "GPU-e", 6000, 6000, 0)]
+    assert choose_gpu(cards, ContainerEngine("x"), _config(tmp_path)).gpu.uuid == "GPU-d"  # unused, though GPU-b has more free
+    taken = [*CARDS, GpuInfo(3, "GPU-d", 5000, 6000, 1000), GpuInfo(4, "GPU-e", 6000, 6000, 0)]
+    assert choose_gpu(taken, ContainerEngine("x"), _config(tmp_path)).gpu.uuid == "GPU-e"  # the first one is in use now: the other free card
+    too_small = [*CARDS, GpuInfo(3, "GPU-d", 3000, 3000, 0)]
+    assert choose_gpu(too_small, ContainerEngine("x"), _config(tmp_path)).gpu.uuid == "GPU-b"  # unused but too small: next in line
 
 
 def test_auto_mode_ignores_the_list_and_picks_the_best_fit(tmp_path: Path) -> None:
