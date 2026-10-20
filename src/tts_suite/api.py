@@ -394,9 +394,12 @@ class TTSSuite(Protocol):
         """Same early errors as :meth:`speak`."""
         ...
 
-    async def start(self, engine: str, host: str | None = None) -> None:
+    async def start(self, engine: str, host: str | None = None, gpu: str | None = None) -> None:
         """Start the container of any catalog row and wait until it serves. Forgets why an earlier start
-        of it failed."""
+        of it failed. ``gpu`` (index or UUID) puts a local GPU engine on that card, outside the rules of
+        ``gpu_mode`` (for a measurement on a given card): :class:`InvalidRequest` for an engine on a host or
+        without GPU, :class:`EngineInUse` while it runs or starts, :class:`EngineControlFailed` when the card
+        is not there or has too little room."""
         ...
 
     async def stop(self, engine: str, host: str | None = None) -> None: ...

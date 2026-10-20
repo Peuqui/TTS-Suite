@@ -94,3 +94,16 @@ def test_when_nothing_fits_the_text_says_what_was_needed_and_what_was_most_free(
     with pytest.raises(PlacementRefused) as refused:
         choose_gpu(CARDS, ContainerEngine("x"), reserved)
     assert str(refused.value) == "needs 6500 MiB, most free 5000 MiB on GPU 0"
+
+
+def test_a_named_card_is_taken_outside_the_rules_of_the_mode(tmp_path: Path) -> None:
+    listed = _config(tmp_path, GpuRule("1"))
+    assert choose_gpu(CARDS, ContainerEngine("x"), listed, gpu="2").gpu.uuid == "GPU-c"  # not in the list
+    assert choose_gpu(CARDS, ContainerEngine("x"), _config(tmp_path), gpu="GPU-c").gpu.index == 2  # auto would take GPU-b
+
+
+def test_a_named_card_that_is_missing_or_too_small_refuses_the_placement(tmp_path: Path) -> None:
+    with pytest.raises(PlacementRefused, match="GPU 7 is not present"):
+        choose_gpu(CARDS, ContainerEngine("x"), _config(tmp_path), gpu="7")
+    with pytest.raises(PlacementRefused, match="needs 4500 MiB, most free 4000 MiB on GPU 0"):
+        choose_gpu([GpuInfo(0, "GPU-a", 4000, 24000, 20000), *CARDS[1:]], ContainerEngine("x"), _config(tmp_path), gpu="0")

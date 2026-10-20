@@ -146,6 +146,7 @@ class FakeManagedLauncher(FakeLauncher):
         self.configs: list[SuiteConfig] = []
         self.cleared: list[str | None] = []  # labels whose failures were forgotten (None = all)
         self.stopped: list[str] = []
+        self.started_on_gpu: list[tuple[str, str]] = []  # (label, card) of each start on a named card
         self.failures: dict[str, Skip] = {}  # label -> why its last start failed
         self.stop_error: Exception | None = None
         self.closed = False
@@ -162,6 +163,10 @@ class FakeManagedLauncher(FakeLauncher):
 
     async def push_voices(self) -> list[str]:
         return []
+
+    async def start_on_gpu(self, entry: EscalationEntry, gpu: str) -> Skip | None:
+        self.started_on_gpu.append((entry.label, gpu))
+        return None
 
     async def stop(self, entry: EscalationEntry) -> None:
         if self.stop_error is not None:

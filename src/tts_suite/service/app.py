@@ -174,9 +174,9 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
         return {"removed": removed, "added": added}
 
     @app.post("/engines/{engine}/start", status_code=204)
-    async def start(request: Request, engine: str, host: str | None = None) -> None:
+    async def start(request: Request, engine: str, host: str | None = None, gpu: str | None = None) -> None:
         check(request, True)
-        await suite.start(engine, host)
+        await suite.start(engine, host, gpu)
 
     @app.post("/engines/{engine}/stop", status_code=204)
     async def stop(request: Request, engine: str, host: str | None = None) -> None:

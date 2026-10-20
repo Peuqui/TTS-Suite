@@ -95,15 +95,23 @@ def _candidates(cards: list[GpuInfo], config: SuiteConfig) -> list[tuple[GpuInfo
     return candidates
 
 
-def choose_gpu(cards: list[GpuInfo], engine: TTSEngine, config: SuiteConfig) -> Placement:
+def _named_card(cards: list[GpuInfo], gpu: str) -> list[tuple[GpuInfo, int]]:
+    """The one card a start asks for by index or UUID, with all its free VRAM."""
+    card = next((card for card in cards if gpu in (str(card.index), card.uuid)), None)
+    if card is None:
+        raise PlacementRefused(f"GPU {gpu} is not present")
+    return [(card, card.free_mib)]
+
+
+def choose_gpu(cards: list[GpuInfo], engine: TTSEngine, config: SuiteConfig, gpu: str | None = None) -> Placement:
     """The first card (in the order of ``config.gpus`` in list mode, else a card nobody uses first, then the most free VRAM)
-    whose free VRAM minus reserve covers the budget plus headroom. :class:`PlacementRefused` when
-    none does or the budget is unknown."""
+    whose free VRAM minus reserve covers the budget plus headroom; with ``gpu`` (index or UUID) only that card,
+    outside the rules of ``gpu_mode``. :class:`PlacementRefused` when none does or the budget is unknown."""
     budget = vram_budget_mib(engine, config)
     if budget is None:
         raise PlacementRefused(f"no VRAM budget for {engine.key} — set engines[{engine.key}].vram_budget_mib")
     needed = budget + config.headroom_mib
-    candidates = _candidates(cards, config)
+    candidates = _candidates(cards, config) if gpu is None else _named_card(cards, gpu)
     if not candidates:
         raise PlacementRefused("none of the configured GPUs is present")
     for card, available in candidates:

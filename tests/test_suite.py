@@ -318,6 +318,25 @@ def test_start_and_stop_work_on_any_catalog_row_without_a_list(tmp_path: Path, m
     assert launcher.stopped == ["lo", "re@Aragon"] and launcher.starts == ["re@Aragon"]
 
 
+def test_a_start_on_a_named_card_goes_to_the_launcher_only_for_a_local_gpu_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gpu, cpu, remote = ContainerEngine("lo"), FakeEngine("cpufake"), ContainerEngine("re")
+    remote.default_port = 5000
+    install(monkeypatch, gpu, cpu, remote)
+    suite, launcher = _suite(make_config(tmp_path, hosts=(ARAGON,)))
+
+    async def scenario() -> None:
+        await suite.start("lo", gpu="4")
+        with pytest.raises(InvalidRequest, match="only be named for a local GPU engine"):
+            await suite.start("cpufake", gpu="4")
+        with pytest.raises(InvalidRequest, match="only be named for a local GPU engine"):
+            await suite.start("re", "Aragon", gpu="4")
+
+    run_async(scenario())
+    assert launcher.started_on_gpu == [("lo", "4")] and launcher.starts == []
+
+
 def test_start_and_stop_refuse_what_is_not_a_catalog_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, ContainerEngine("lo"))  # no REST API: it has no row on a host
     suite, launcher = _suite(make_config(tmp_path, hosts=(ARAGON,)))

@@ -118,8 +118,8 @@ class FakeSuite:
         self.requests.append((None, request))
         return self.stream
 
-    async def start(self, engine: str, host: str | None = None) -> None:
-        self.calls.append(("start", (engine, host)))
+    async def start(self, engine: str, host: str | None = None, gpu: str | None = None) -> None:
+        self.calls.append(("start", (engine, host, gpu)))
 
     async def stop(self, engine: str, host: str | None = None) -> None:
         self.calls.append(("stop", (engine, host)))

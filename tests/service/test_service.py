@@ -82,12 +82,14 @@ def test_a_command_that_changes_something_needs_the_token_also_here(tmp_path: Pa
 def test_the_commands_work_with_the_token(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
     assert client.post("/engines/xtts/start", params={"host": "aragon"}, headers=TOKEN_HEADERS).status_code == 204
+    assert client.post("/engines/xtts/start", params={"gpu": "4"}, headers=TOKEN_HEADERS).status_code == 204
     assert client.post("/engines/xtts/stop", headers=TOKEN_HEADERS).status_code == 204
     assert client.post("/engines/reload", headers=TOKEN_HEADERS).json() == {"removed": ["old"], "added": ["new"]}
     assert client.post("/voices/sync", params={"engine": "dashscope"}, headers=TOKEN_HEADERS).status_code == 200
     assert client.post("/voices/push", headers=TOKEN_HEADERS).json() == {"hosts": ["Aragon"]}
     assert suite.calls == [
-        ("start", ("xtts", "aragon")),
+        ("start", ("xtts", "aragon", None)),
+        ("start", ("xtts", None, "4")),
         ("stop", ("xtts", None)),
         ("reload", ()),
         ("sync_voices", ("dashscope",)),

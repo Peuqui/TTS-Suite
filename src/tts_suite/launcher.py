@@ -47,6 +47,11 @@ class ManagedLauncher(EngineLauncher, Protocol):
         """Forget why the entry (``None`` = every entry) did not start: the next request tries again."""
         ...
 
+    async def start_on_gpu(self, entry: EscalationEntry, gpu: str) -> Skip | None:
+        """Start a local GPU entry on the card ``gpu`` (index or UUID) and wait until it serves; ``None`` = it
+        serves now, else why not. :class:`EngineInUse` while it runs or starts (its card is chosen already)."""
+        ...
+
     async def stop(self, entry: EscalationEntry) -> None:
         """Take the entry's container down. :class:`EngineInUse` while a reading holds it,
         :class:`EngineControlFailed` when it cannot be stopped."""
@@ -130,6 +135,16 @@ class SuiteLauncher:
         task = self._in_flight(entry.label) or self._begin_start(entry)
         if not wait:
             raise EngineStarting(f"{entry.label} is starting")
+        return await self._wait_for_start(entry, task)
+
+    async def start_on_gpu(self, entry: EscalationEntry, gpu: str) -> Skip | None:
+        if self._in_flight(entry.label) or await self.is_serving(entry):
+            raise EngineInUse(f"{entry.label} is already running or starting — stop it to choose its card")
+        if (unstartable := await self._unstartable(entry)) is not None:
+            return unstartable
+        return await self._wait_for_start(entry, self._begin_start(entry, gpu))
+
+    async def _wait_for_start(self, entry: EscalationEntry, task: asyncio.Task[Skip | None]) -> Skip | None:
         limit_s = entry.engine.startup_timeout_s + START_WAIT_RESERVE_S
         try:
             # shield: a waiter that goes away or runs out of patience does not cancel the start
@@ -150,8 +165,8 @@ class SuiteLauncher:
         task = self._starts.get(label)
         return task if task is not None and not task.done() else None
 
-    def _begin_start(self, entry: EscalationEntry) -> asyncio.Task[Skip | None]:
-        task = asyncio.get_running_loop().create_task(self._start(entry))
+    def _begin_start(self, entry: EscalationEntry, gpu: str | None = None) -> asyncio.Task[Skip | None]:
+        task = asyncio.get_running_loop().create_task(self._start(entry, gpu))
         self._starts[entry.label] = task
         task.add_done_callback(lambda done: self._start_finished(entry.label, done))
         return task
@@ -193,21 +208,23 @@ class SuiteLauncher:
             return Skip("stopped", "docker image not built")
         return None
 
-    async def _start(self, entry: EscalationEntry) -> Skip | None:
+    async def _start(self, entry: EscalationEntry, gpu: str | None) -> Skip | None:
         if entry.host is not None:
             return await self._start_remote(entry.engine, entry.host)
-        return await self._start_local(entry.engine)
+        return await self._start_local(entry.engine, gpu)
 
-    async def _start_local(self, engine: TTSEngine) -> Skip | None:
-        """Start the container on this machine — on the card the rules choose when it needs a GPU —
-        and wait until its model is loaded."""
+    async def _start_local(self, engine: TTSEngine, gpu: str | None) -> Skip | None:
+        """Start the container on this machine — on the card the rules choose when it needs a GPU, or on
+        ``gpu`` — and wait until its model is loaded."""
         async with self._local_gpu_start, program_lock(self._config.placement_lock_file):
             if await asyncio.to_thread(engine.is_running):
+                if gpu is not None:  # started by whoever held the lock before us, on a card of its own choice
+                    return Skip("stopped", f"{engine.key} was started meanwhile, not on GPU {gpu}")
                 return None  # started by whoever held the lock before us
             if engine.needs_gpu:
                 try:
                     cards = await asyncio.to_thread(self._gpus)
-                    placement = choose_gpu(cards, engine, self._config)
+                    placement = choose_gpu(cards, engine, self._config, gpu)
                 except PlacementRefused as refused:
                     return Skip("no_vram", str(refused))  # transient: ``_start_finished`` does not remember it
                 logger.info(

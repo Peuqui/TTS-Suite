@@ -61,6 +61,25 @@ def test_a_local_gpu_engine_starts_on_the_chosen_card_with_its_budget(tmp_path: 
     assert engine.placements == [("GPU-1", 4000)] and engine.ready_calls == 1
 
 
+def test_a_start_on_a_named_card_ignores_the_rules_and_refuses_a_running_engine(tmp_path: Path) -> None:
+    engine = ContainerEngine("a")
+    launcher = _launcher(tmp_path, CardList(3000, 9000, 20000))  # auto would take GPU-2
+
+    async def scenario() -> None:
+        assert await launcher.start_on_gpu(local_entry(engine), "1") is None
+        with pytest.raises(EngineInUse, match="already running or starting"):
+            await launcher.start_on_gpu(local_entry(engine), "2")
+        await launcher.aclose()
+
+    run_async(scenario())
+    assert engine.placements == [("GPU-1", 4000)] and engine.ready_calls == 1
+
+
+def test_a_start_on_a_named_card_without_room_is_no_vram(tmp_path: Path) -> None:
+    skip = run_async(_launcher(tmp_path, CardList(3000, 9000)).start_on_gpu(local_entry(ContainerEngine("a")), "0"))
+    assert skip is not None and skip.reason == "no_vram"
+
+
 def test_a_start_that_does_not_come_up_is_a_skip_with_the_reason(tmp_path: Path) -> None:
     engine = ContainerEngine("a", ready_ok=False)
     skip = run_async(_launcher(tmp_path).ensure_serving(local_entry(engine), wait=True))

@@ -162,12 +162,17 @@ class Suite:
 
     # ── Containers ──────────────────────────────────────────────────
 
-    async def start(self, engine: str, host: str | None = None) -> None:
+    async def start(self, engine: str, host: str | None = None, gpu: str | None = None) -> None:
         entry = self._catalog_entry(engine, host)
+        if gpu is not None and (entry.host is not None or not entry.engine.needs_gpu):
+            raise InvalidRequest(f"{entry.label}: a card can only be named for a local GPU engine")
         self._launcher.clear_failures(entry)  # an explicit start tries again, whatever happened before
-        if await self._launcher.is_serving(entry):
+        if gpu is not None:
+            skip = await self._launcher.start_on_gpu(entry, gpu)
+        elif await self._launcher.is_serving(entry):
             return
-        skip = await self._launcher.ensure_serving(entry, wait=True)
+        else:
+            skip = await self._launcher.ensure_serving(entry, wait=True)
         if skip is not None:
             raise EngineControlFailed(f"{entry.label} not started ({skip.reason}): {skip.detail}")
 
