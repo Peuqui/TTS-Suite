@@ -112,6 +112,10 @@ class SuiteConfig:
     used (and kept for the next switch to ``list``). No card fits: the entry is skipped with
     ``no_vram`` (not remembered: the next request chooses again).
 
+    ``placement_lock_file`` names a file that every program placing models on the cards locks (``flock``)
+    while it chooses a card and loads onto it (the STT suite does); programs that start together then do
+    not choose the same card. ``None`` = the suite is alone on the cards.
+
     ``pronunciations`` maps a word to the form that is spoken instead (whole words, case as
     written; for example "AIfred" -> "Alfred"). The text cleaning of every unit applies it; it is
     the one program-specific part of the cleaning that is configuration.
@@ -123,6 +127,7 @@ class SuiteConfig:
     gpu_mode: GpuMode = "auto"
     gpus: tuple[GpuRule, ...] = ()
     headroom_mib: int = HEADROOM_MIB_DEFAULT
+    placement_lock_file: Path | None = None  # shared with other programs that place models on the cards
     pronunciations: Mapping[str, str] = field(default_factory=dict)
 
 

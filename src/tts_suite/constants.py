@@ -260,6 +260,9 @@ NVIDIA_SMI_QUERY_TIMEOUT_S = 5
 NVIDIA_SMI_APPS_TIMEOUT_S = 10
 DOCKER_PIDS_TIMEOUT_S = 10
 
+#: Waiting for the card-choice lock another program holds (``placement_lock``): how often to look again.
+PLACEMENT_LOCK_POLL_INTERVAL_S = 0.2
+
 #: Shape of a host address and an SSH user in the configuration. Both end up as the target of an ``ssh``
 #: command; a value starting with ``-`` would be read as an ssh option, so neither may.
 HOST_ADDRESS_PATTERN = r"[A-Za-z0-9][A-Za-z0-9.:_-]*"

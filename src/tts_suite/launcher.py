@@ -31,6 +31,7 @@ from .escalation import EngineLauncher, EscalationEntry, Skip
 from .holds import EngineHolds
 from .host_ctl import HostCommand, HostControlError, pack_voices, run_host_command
 from .placement import GpuInfo, PlacementRefused, choose_gpu, query_gpus
+from .placement_lock import program_lock
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +201,7 @@ class SuiteLauncher:
     async def _start_local(self, engine: TTSEngine) -> Skip | None:
         """Start the container on this machine — on the card the rules choose when it needs a GPU —
         and wait until its model is loaded."""
-        async with self._local_gpu_start:
+        async with self._local_gpu_start, program_lock(self._config.placement_lock_file):
             if await asyncio.to_thread(engine.is_running):
                 return None  # started by whoever held the lock before us
             if engine.needs_gpu:
