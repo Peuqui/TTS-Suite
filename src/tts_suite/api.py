@@ -184,6 +184,33 @@ class ReleaseResult:
     detail: str
 
 
+GpuReleaseOutcome = Literal["released", "not_running", "busy", "failed"]
+"""The common release API of the suites (the STT-Suite has the same; GPU-Orc uses it). ``released`` = the
+container is proven down (Docker reports it gone or exited); ``not_running`` = nothing to release; ``busy`` = a
+reading holds it (only without force) or it is starting; ``failed`` = the end could not be proven (``detail``
+says why)."""
+
+
+@dataclass(frozen=True)
+class GpuHolder:
+    """A local GPU engine whose container runs: the cards the container may use (from its configuration, so
+    always known), the memory it holds per card (``None`` = not measurable here) and whether it works now."""
+
+    item: str
+    gpu_uuids: tuple[str, ...]
+    memory_mib: Mapping[str, int] | None
+    busy: bool
+
+
+@dataclass(frozen=True)
+class GpuReleaseResult:
+    """What :meth:`TTSSuite.gpu_release` did for one engine."""
+
+    item: str
+    outcome: GpuReleaseOutcome
+    detail: str
+
+
 @dataclass(frozen=True)
 class VoiceInfo:
     name: str
@@ -349,6 +376,11 @@ class EngineControlFailed(SuiteError):
     its detail, the host's answer, Docker's)."""
 
 
+class ReadingAborted(SuiteError):
+    """A reading ended because the card of an engine it uses is needed (a forced GPU release); the message
+    names the reason. It does not move on to the next entry: clients show it and may read the text again."""
+
+
 class ConfigInvalid(SuiteError):
     """``set_config`` was given something that cannot work: defaults for an unknown engine, a
     bad host, a missing ``voices_dir`` (HTTP 400). The check lives here,
@@ -405,12 +437,28 @@ class TTSSuite(Protocol):
     async def stop(self, engine: str, host: str | None = None) -> None: ...
 
     async def release(self, targets: tuple[EngineTarget, ...] | Literal["all"]) -> tuple[ReleaseResult, ...]:
-        """A client asks the suite to take containers off the cards (for example to make room for a language
-        model): the container is stopped, not only unloaded. The suite decides per target (see
-        :data:`ReleaseOutcome`); a container a reading holds is never stopped. ``"all"`` = every catalog row
-        with a container, on this machine and on the hosts. The targets are handled in parallel; the results
-        come in the order of the targets. The whole request is checked before the first stop:
-        :class:`InvalidRequest` (empty or a repeated target), :class:`UnknownEngine`, :class:`UnknownHost`."""
+        """A client asks the suite to take containers on OTHER hosts off their cards: the container is stopped,
+        not only unloaded. The suite decides per target (see :data:`ReleaseOutcome`); a container a reading
+        holds is never stopped. ``"all"`` = every catalog row with a container on the hosts. Engines on this
+        machine are released through :meth:`gpu_release` only (one way). The targets are handled in parallel;
+        the results come in the order of the targets. The whole request is checked before the first stop:
+        :class:`InvalidRequest` (empty, a repeated target, an engine on this machine), :class:`UnknownEngine`,
+        :class:`UnknownHost`."""
+        ...
+
+    async def gpu_holders(self) -> list[GpuHolder]:
+        """What the suite holds on this machine's GPUs: every local GPU engine whose container runs."""
+        ...
+
+    async def gpu_release(
+        self, items: tuple[str, ...] | Literal["all"], *, force: bool, reason: str
+    ) -> tuple[GpuReleaseResult, ...]:
+        """Take local GPU engines off their cards; ``items`` are engine keys, ``"all"`` = every holder.
+        Without ``force`` an engine a reading holds stays (``busy``); with ``force`` those readings end with
+        :class:`ReadingAborted` naming ``reason``, then the container is stopped. An engine that is starting
+        stays ``busy`` either way (its start cannot be called back). ``released`` only once Docker reports the
+        container down; a stop that does not take it down is followed by ``docker kill``.
+        :class:`InvalidRequest` for an unknown or repeated item, an empty list or an empty reason."""
         ...
 
     async def reload(self) -> tuple[list[str], list[str]]:

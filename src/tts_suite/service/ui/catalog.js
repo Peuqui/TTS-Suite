@@ -33,12 +33,23 @@ export function catalogView({ show, fail }) {
   })
 
   // Takes the containers down so their GPU memory is free: the targets, or "all" rows. A reading that
-  // holds one keeps it; the answer says what became of each.
+  // holds one keeps it; the answer says what became of each. This machine's engines go through the
+  // common GPU release API, the hosts' through /release.
   function release(targets) {
     const affected = targets === 'all' ? rows.filter((row) => !row.browser && !row.cloud) : rows.filter((row) => targets.some((target) => target.engine === row.engine && (target.host ?? null) === (row.host ?? null)))
+    const local = targets === 'all' ? 'all' : targets.filter((target) => target.host == null).map((target) => target.engine)
+    const remote = targets === 'all' ? 'all' : targets.filter((target) => target.host != null)
+    const describe = (engine, host, outcome, detail) =>
+      `${engine}${host ? `@${host}` : ''}: ${t(`release${outcome[0].toUpperCase()}${outcome.slice(1)}`)}${detail ? ` (${detail})` : ''}`
     return working('release', affected, async () => {
-      const results = await service.release(targets)
-      show(results.map((result) => `${result.engine}${result.host ? `@${result.host}` : ''}: ${t(`release${result.outcome[0].toUpperCase()}${result.outcome.slice(1)}`)}${result.detail ? ` (${result.detail})` : ''}`).join(' · '))
+      const lines = []
+      if (local === 'all' || local.length > 0) {
+        lines.push(...(await service.gpuRelease(local)).map((result) => describe(result.item, null, result.outcome, result.detail)))
+      }
+      if (remote === 'all' || remote.length > 0) {
+        lines.push(...(await service.release(remote)).map((result) => describe(result.engine, result.host, result.outcome, result.detail)))
+      }
+      show(lines.join(' · '))
     })
   }
 

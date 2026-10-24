@@ -28,6 +28,7 @@ from tts_suite.api import (
     InvalidRequest,
     NoEngineAvailable,
     Overloaded,
+    ReadingAborted,
     SpeakRequest,
     SuiteConfig,
     TraceStep,
@@ -487,3 +488,39 @@ def test_an_entry_without_a_voice_fails_before_anything_is_started_for_it() -> N
         run_async(run.speak("Ein Satz ohne Stimme hier.", REQUEST))
     assert launcher.starts == [] and launcher.asked == []  # no container started, not even asked
     assert [(s.entry, s.outcome, s.reason) for s in run.trace] == [("mute", "failed", "software")]
+
+
+# ── A reading aborted from outside (a forced GPU release) ───────────
+
+
+def test_an_aborted_reading_ends_with_its_reason_instead_of_moving_to_the_next_entry() -> None:
+    first, second = GatedFailEngine("a"), FakeEngine("b")
+    launcher = FakeLauncher()
+    run = make_run([entry(first), entry(second)], launcher)
+
+    async def scenario() -> None:
+        await run.speak("Erster Satz hier.", REQUEST)
+        assert run.holds("a") and not run.aborted
+        first.fail_gates = {"kaputt": asyncio.Event()}
+        broken = asyncio.create_task(run.speak("Ein kaputter Satz hier.", REQUEST))
+        await asyncio.sleep(0.01)
+        run.abort("GPU-Orc: loading X")
+        first.fail_gates["kaputt"].set()  # its container went down: the synthesis fails
+        with pytest.raises(ReadingAborted, match="GPU-Orc: loading X"):
+            await broken
+        with pytest.raises(ReadingAborted):  # and nothing new is spoken either
+            await run.speak("Noch ein Satz.", REQUEST)
+
+    run_async(scenario())
+    assert second.texts == []  # the next entry was never asked
+    assert [step.outcome for step in run.trace] == ["spoke"]  # no failure of "a" recorded: it did not break on its own
+
+
+def test_an_aborted_run_is_not_given_out_again_for_its_run_id() -> None:
+    table = escalation.RunTable()
+    first = make_run([entry(FakeEngine("a"))])
+    key = ("run-1", ())
+    assert table.get_or_create(key, lambda: first) is first
+    first.abort("loading X")
+    second = make_run([entry(FakeEngine("a"))])
+    assert table.get_or_create(key, lambda: second) is second

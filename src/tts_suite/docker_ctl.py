@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -27,6 +28,10 @@ DOCKER_CONTAINER_STATES: dict[str, ContainerState] = {
 }
 #: What Docker says (stderr) for a container that does not exist.
 NO_SUCH_CONTAINER = "No such container"
+#: The states in which the container's process still runs, and so still holds its card's memory.
+CONTAINER_STILL_RUNNING: tuple[ContainerState, ...] = ("running", "restarting")
+#: Values of NVIDIA_VISIBLE_DEVICES that give the container no card.
+NO_GPU_VALUES = ("", "none", "void")
 
 #: Environment variable the compose files read to pin the container to a card.
 GPU_UUID_ENV = "TTS_GPU_UUID"
@@ -103,6 +108,57 @@ def container_state(container_name: str) -> ContainerState:
     if state is None:
         raise ContainerStateUnreadable(f"container {container_name} is in an unexpected state: {status!r}")
     return state
+
+
+def kill_container(container_name: str) -> tuple[bool, str]:
+    """``docker kill``: the hard end when a stop did not take the container down. Returns ``(success,
+    message)``; a container that no longer exists counts as killed."""
+    command = ["docker", "kill", container_name]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=DOCKER_INSPECT_TIMEOUT_S, check=False)
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        return False, f"docker kill {container_name}: {exc}"
+    if result.returncode != 0 and NO_SUCH_CONTAINER not in result.stderr:
+        return False, f"docker kill {container_name} failed: {result.stderr.strip()[:200]}"
+    return True, f"{container_name} killed"
+
+
+def container_gpus(container_name: str) -> tuple[str, ...] | Literal["all"] | None:
+    """The cards the container may use, from its configuration (no measurement, so always known): the
+    GPU ``DeviceRequests`` of the NVIDIA runtime, else ``NVIDIA_VISIBLE_DEVICES`` in its environment. UUIDs or
+    indices as Docker has them, ``"all"`` for every card, ``()`` for none; ``None`` when there is no such
+    container. :class:`ContainerStateUnreadable` when Docker does not answer."""
+    template = "{{json .HostConfig.DeviceRequests}}\n{{json .Config.Env}}"
+    command = ["docker", "inspect", "--type", "container", "-f", template, container_name]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=DOCKER_INSPECT_TIMEOUT_S, check=False)
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        raise ContainerStateUnreadable(f"docker unavailable: {exc}") from exc
+    if result.returncode != 0:
+        if NO_SUCH_CONTAINER in result.stderr:
+            return None
+        raise ContainerStateUnreadable(f"docker inspect {container_name} failed: {result.stderr.strip()[:200]}")
+    try:
+        requests_json, environment_json = result.stdout.strip().split("\n", 1)
+        requests, environment = json.loads(requests_json) or [], json.loads(environment_json) or []
+    except ValueError as exc:
+        raise ContainerStateUnreadable(f"docker inspect {container_name}: unreadable answer: {exc}") from exc
+    for request in requests:
+        if any("gpu" in capabilities for capabilities in request.get("Capabilities") or []):
+            if request.get("Count") == -1:
+                return "all"
+            if request.get("DeviceIDs"):
+                return tuple(request["DeviceIDs"])
+    for variable in environment:
+        name, _, value = variable.partition("=")
+        if name == "NVIDIA_VISIBLE_DEVICES":
+            value = value.strip()
+            if value == "all":
+                return "all"
+            if value in NO_GPU_VALUES:
+                return ()
+            return tuple(part.strip() for part in value.split(",") if part.strip())
+    return ()
 
 
 def container_log_tail(container_name: str) -> str:

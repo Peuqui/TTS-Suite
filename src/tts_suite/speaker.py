@@ -8,6 +8,7 @@ opens the streams. It keeps no escalation list: every request brings its own, bo
 from __future__ import annotations
 
 import time
+import weakref
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -72,6 +73,9 @@ class Speaker:
         self._launcher = launcher
         self._keepalive_s = keepalive_s
         self._runs = RunTable(run_ttl_s, clock)
+        # Every run a stream was opened for, also those without a run ID; a forced GPU release ends the ones
+        # that hold the engine. Weak: a run nobody uses any more is gone with its last stream.
+        self._active: weakref.WeakSet[SpeechRun] = weakref.WeakSet()
         self._slots = EngineSlotTable(config.engines)
         self._engines: dict[str, TTSEngine] = {}  # engine@host -> the bound engine, shared by all requests
         self._hosts: dict[str, Host] = {}
@@ -164,6 +168,13 @@ class Speaker:
                 raise InvalidRequest(f"{label!r} is in the list twice")
         return entries
 
+    def abort_readings(self, label: str, reason: str) -> int:
+        """End every reading that holds the entry's container (see :meth:`SpeechRun.abort`); how many."""
+        runs = [run for run in list(self._active) if run.attached and run.holds(label)]
+        for run in runs:
+            run.abort(reason)
+        return len(runs)
+
     def _run_ended(self, request: SpeakRequest) -> None:
         if request.run is not None:
             self._runs.touch((request.run, request.engines))
@@ -172,6 +183,6 @@ class Speaker:
         def create() -> SpeechRun:
             return SpeechRun(entries, self._launcher, self._slots, lambda: self._config.engines, self._executor)
 
-        if request.run is None:
-            return create()
-        return self._runs.get_or_create((request.run, request.engines), create)
+        run = create() if request.run is None else self._runs.get_or_create((request.run, request.engines), create)
+        self._active.add(run)
+        return run

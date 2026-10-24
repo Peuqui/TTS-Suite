@@ -34,7 +34,15 @@ from ..constants import (
     TTS_READY_STATE_CHECK_INTERVAL_S,
     TTS_VOICES_TIMEOUT_S,
 )
-from ..docker_ctl import ContainerStateUnreadable, container_log_tail, container_state, docker_compose_action
+from ..docker_ctl import (
+    ContainerState,
+    ContainerStateUnreadable,
+    container_gpus,
+    container_log_tail,
+    container_state,
+    docker_compose_action,
+    kill_container,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -442,6 +450,23 @@ class TTSEngine(ABC):
         """Take the engine down. Returns ``(success, message)``."""
         self._require_local("stop")
         return self._stop_local()
+
+    def container_state(self) -> ContainerState:
+        """Docker's state of this engine's container on this machine (``absent`` when there is none).
+        :class:`ContainerStateUnreadable` when Docker does not answer."""
+        self._require_local("inspect")
+        return container_state(self.service_dir)
+
+    def kill_container(self) -> tuple[bool, str]:
+        """``docker kill`` of this engine's container: the hard end after a stop that did not take it down."""
+        self._require_local("kill")
+        return kill_container(self.service_dir)
+
+    def container_gpus(self) -> tuple[str, ...] | Literal["all"] | None:
+        """The cards this engine's container may use, from its configuration; ``None`` when there is no
+        container. :class:`ContainerStateUnreadable` when Docker does not answer."""
+        self._require_local("inspect")
+        return container_gpus(self.service_dir)
 
     def ensure_ready(self, timeout: int | None = None) -> tuple[bool, str, str]:
         """Ensure the engine is up and serving. Returns

@@ -44,6 +44,20 @@ export async function json(path, options) {
   return response.status === 204 ? null : response.json()
 }
 
+// Who asks, in the log of the service.
+const RELEASE_REASON = 'TTS-Suite page'
+
+// The common GPU release API answers 409 (one is busy) and 500 (one failed) with its results as well.
+async function gpuRelease(items) {
+  const response = await fetch('../gpu/release', {
+    method: 'POST', headers: headers(true), body: JSON.stringify({ items, force: false, reason: RELEASE_REASON }),
+  })
+  let data = {}
+  try { data = await response.json() } catch { /* an answer that is no JSON has no results */ }
+  if (!Array.isArray(data.results)) throw new ApiError(response.status, data.error ?? `http${response.status}`, data.detail ?? response.statusText)
+  return data.results
+}
+
 const query = (parameters) => {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(parameters)) if (value !== null && value !== undefined) search.set(key, value)
@@ -60,6 +74,7 @@ export const service = {
   start: (engine, host) => json(`../engines/${encodeURIComponent(engine)}/start${query({ host })}`, { method: 'POST' }),
   stop: (engine, host) => json(`../engines/${encodeURIComponent(engine)}/stop${query({ host })}`, { method: 'POST' }),
   release: (targets) => json('../release', { method: 'POST', body: { targets } }),
+  gpuRelease,
   voices: (engine) => json(`../voices${query({ engine })}`),
   pushVoices: () => json('../voices/push', { method: 'POST' }),
   syncVoices: (engine) => json(`../voices/sync${query({ engine })}`, { method: 'POST' }),

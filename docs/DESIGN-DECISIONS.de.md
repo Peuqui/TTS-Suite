@@ -39,6 +39,12 @@ unerreichbaren Host scheitert sofort (`stopped`, "host ... unreachable"), ohne a
 
 ## Freigabe auf Anfrage
 
+Seit der gemeinsamen GPU-Freigabe-Schnittstelle der Suiten werden die Engines dieses Rechners nur noch
+über `POST /gpu/release` freigegeben (ein Weg); `POST /release` ist für die Container anderer Rechner.
+`/gpu/release` kann auch erzwingen: Die Lesungen, die die Engine halten, enden mit `reading_aborted` und
+dem Grund, dann wird der Container gestoppt, und ein lokaler Stopp zählt erst, wenn Docker den Container
+unten meldet (nötigenfalls nach `docker kill`). Das Folgende beschreibt `/release`.
+
 Ein Client, der Platz auf einer Karte braucht (etwa AIfred für ein Sprachmodell), bittet den Dienst
 per `POST /release`, Container von den Karten zu nehmen: `{"targets": "all"}` oder eine Liste von
 `{"engine", "host"}`. Der Container wird heruntergefahren (VRAM danach frei), nicht nur das Modell

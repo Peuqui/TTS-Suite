@@ -15,7 +15,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
-from typing import Protocol
+from typing import Literal, Protocol
 
 from .api import (
     EngineControlFailed,
@@ -26,6 +26,7 @@ from .api import (
     SuiteConfig,
 )
 from .constants import START_WAIT_RESERVE_S, TTS_READY_POLL_INTERVAL_S
+from .docker_ctl import CONTAINER_STILL_RUNNING, ContainerStateUnreadable
 from .engines.base import TTSEngine
 from .escalation import EngineLauncher, EscalationEntry, Skip
 from .holds import EngineHolds
@@ -34,6 +35,9 @@ from .placement import GpuInfo, PlacementRefused, choose_gpu, query_gpus
 from .placement_lock import program_lock
 
 logger = logging.getLogger(__name__)
+
+#: Why a container must not be taken down now: a start is under way, or a reading holds it.
+Busy = Literal["starting", "in_use"]
 
 
 class ManagedLauncher(EngineLauncher, Protocol):
@@ -52,9 +56,19 @@ class ManagedLauncher(EngineLauncher, Protocol):
         serves now, else why not. :class:`EngineInUse` while it runs or starts (its card is chosen already)."""
         ...
 
-    async def stop(self, entry: EscalationEntry) -> None:
-        """Take the entry's container down. :class:`EngineInUse` while a reading holds it,
-        :class:`EngineControlFailed` when it cannot be stopped."""
+    async def stop(self, entry: EscalationEntry, *, force: bool = False) -> None:
+        """Take the entry's container down. :class:`EngineInUse` while it starts, and while a reading holds
+        it unless ``force``; :class:`EngineControlFailed` when it cannot be stopped. A local container counts
+        as stopped only when Docker reports it down (after ``docker kill`` if the stop did not do it)."""
+        ...
+
+    def busy(self, entry: EscalationEntry) -> Busy | None:
+        """Why the entry's container must not be taken down now; ``None`` = it may."""
+        ...
+
+    async def gpu_cards(self, entry: EscalationEntry) -> tuple[str, ...] | None:
+        """The cards (UUIDs) a local entry's running container may use, from its configuration; ``None`` when
+        its container does not run. :class:`EngineControlFailed` when Docker or ``nvidia-smi`` cannot tell."""
         ...
 
     async def status(self, entry: EscalationEntry) -> EntryStatus: ...
@@ -252,14 +266,14 @@ class SuiteLauncher:
 
     # ── Stopping and status ─────────────────────────────────────────
 
-    async def stop(self, entry: EscalationEntry) -> None:
+    async def stop(self, entry: EscalationEntry, *, force: bool = False) -> None:
         engine = entry.engine
         if not engine.runs_in_container:
             raise EngineControlFailed(f"{entry.label} has no container the suite controls")
-        if self._holds.in_use(entry.label):
-            raise EngineInUse(f"{entry.label} is in use by a reading")
         if self._in_flight(entry.label):
             raise EngineInUse(f"{entry.label} is starting")
+        if self._holds.in_use(entry.label) and not force:
+            raise EngineInUse(f"{entry.label} is in use by a reading")
         if entry.host is not None:
             try:
                 await asyncio.to_thread(self._host_command, entry.host, "stop", engine.service_dir)
@@ -267,8 +281,44 @@ class SuiteLauncher:
                 raise EngineControlFailed(str(failed)) from failed
             return
         stopped, message = await asyncio.to_thread(engine.stop)
-        if not stopped:
-            raise EngineControlFailed(f"{entry.label}: {message}")
+        await self._prove_down(entry, "" if stopped else message)
+
+    async def _prove_down(self, entry: EscalationEntry, stop_problem: str) -> None:
+        """Stopped means Docker reports the container down (gone or exited). One that still runs gets
+        ``docker kill`` and is asked again; a stop that cannot be proven raises :class:`EngineControlFailed`."""
+        engine = entry.engine
+        try:
+            state = await asyncio.to_thread(engine.container_state)
+            if state in CONTAINER_STILL_RUNNING:
+                logger.warning("TTS: %s still %s after the stop (%s), docker kill", entry.label, state, stop_problem or "ok")
+                _killed, kill_message = await asyncio.to_thread(engine.kill_container)
+                state = await asyncio.to_thread(engine.container_state)
+                if state in CONTAINER_STILL_RUNNING:
+                    raise EngineControlFailed(f"{entry.label}: container still {state} after docker kill ({kill_message})")
+        except ContainerStateUnreadable as unreadable:
+            raise EngineControlFailed(f"{entry.label}: stop not proven, {unreadable}") from unreadable
+        if stop_problem:
+            logger.warning("TTS: %s is down although the stop reported: %s", entry.label, stop_problem)
+
+    def busy(self, entry: EscalationEntry) -> Busy | None:
+        if self._in_flight(entry.label):
+            return "starting"
+        if self._holds.in_use(entry.label):
+            return "in_use"
+        return None
+
+    async def gpu_cards(self, entry: EscalationEntry) -> tuple[str, ...] | None:
+        engine = entry.engine
+        try:
+            if await asyncio.to_thread(engine.container_state) not in CONTAINER_STILL_RUNNING:
+                return None
+            configured = await asyncio.to_thread(engine.container_gpus)
+            if configured is None:
+                return None
+            cards = await asyncio.to_thread(self._gpus)
+        except (ContainerStateUnreadable, PlacementRefused) as unreadable:
+            raise EngineControlFailed(f"{entry.label}: cards unknown, {unreadable}") from unreadable
+        return resolve_cards(configured, cards, entry.label)
 
     async def status(self, entry: EscalationEntry) -> EntryStatus:
         """What the entry would do right now, by checks only — nothing is started."""
@@ -294,3 +344,20 @@ class SuiteLauncher:
     def start_failure(self, entry: EscalationEntry) -> Skip | None:
         """Why the last start of this entry did not work (until the next one)."""
         return self._failures.get(entry.label)
+
+
+def resolve_cards(configured: tuple[str, ...] | Literal["all"], cards: list[GpuInfo], label: str) -> tuple[str, ...]:
+    """The UUIDs of what a container's configuration names: ``"all"``, UUIDs (also a unique prefix) or the
+    indices of ``nvidia-smi``. :class:`EngineControlFailed` for a name that is no card of this machine."""
+    if configured == "all":
+        return tuple(card.uuid for card in cards)
+    uuids = []
+    for name in configured:
+        if name.isdigit():
+            matches = [card.uuid for card in cards if card.index == int(name)]
+        else:
+            matches = [card.uuid for card in cards if card.uuid.startswith(name)]
+        if len(matches) != 1:
+            raise EngineControlFailed(f"{label}: its container names card {name!r}, which is no card of this machine")
+        uuids.append(matches[0])
+    return tuple(uuids)

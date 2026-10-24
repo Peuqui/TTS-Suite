@@ -12,10 +12,12 @@ import pytest
 from speech_fakes import FakeEngine, FakeLauncher
 
 from tts_suite.api import EngineDefaults, EntryStatus, Host, SuiteConfig
+from tts_suite.docker_ctl import ContainerState
 from tts_suite.engines import registry
 from tts_suite.engines.base import Reachability
 from tts_suite.escalation import EscalationEntry, Skip
 from tts_suite.host_ctl import HostControlError
+from tts_suite.launcher import Busy
 from tts_suite.placement import GpuInfo
 
 ARAGON = Host("Aragon", "192.0.2.2")
@@ -41,6 +43,10 @@ class ContainerEngine(FakeEngine):
         self.ready_ok = ready_ok
         self.placements: list[tuple[str, int | None]] = []
         self.stops = 0
+        self.kills = 0
+        self.survives_stop = False  # the stop leaves the container running (a stuck container)
+        self.survives_kill = False  # not even docker kill takes it down
+        self.gpus: tuple[str, ...] | str = ("GPU-0",)  # what its container's configuration names
         self.ready_calls = 0
         self.reach: Reachability | None = None  # what the host answers; None = follows ``up``
         self.started_at = self.finished_at = 0.0  # when ``ensure_ready`` ran (monotonic seconds)
@@ -68,8 +74,21 @@ class ContainerEngine(FakeEngine):
 
     def stop(self) -> tuple[bool, str]:
         self.stops += 1
-        self.up = False
+        if not self.survives_stop:
+            self.up = False
         return True, "stopped"
+
+    def container_state(self) -> ContainerState:
+        return "running" if self.up else "absent"
+
+    def kill_container(self) -> tuple[bool, str]:
+        self.kills += 1
+        if not self.survives_kill:
+            self.up = False
+        return True, "killed"
+
+    def container_gpus(self) -> Any:
+        return self.gpus if self.up else None
 
 
 class CardList:
@@ -149,6 +168,9 @@ class FakeManagedLauncher(FakeLauncher):
         self.started_on_gpu: list[tuple[str, str]] = []  # (label, card) of each start on a named card
         self.failures: dict[str, Skip] = {}  # label -> why its last start failed
         self.stop_error: Exception | None = None
+        self.forced: list[str] = []  # labels stopped with force
+        self.busy_reasons: dict[str, Busy] = {}  # label -> why it must not be taken down now
+        self.cards: dict[str, tuple[str, ...] | None] = {}  # label -> the cards of its running container (None = down)
         self.closed = False
 
     def set_config(self, config: SuiteConfig) -> None:
@@ -168,10 +190,19 @@ class FakeManagedLauncher(FakeLauncher):
         self.started_on_gpu.append((entry.label, gpu))
         return None
 
-    async def stop(self, entry: EscalationEntry) -> None:
+    async def stop(self, entry: EscalationEntry, *, force: bool = False) -> None:
         if self.stop_error is not None:
             raise self.stop_error
         self.stopped.append(entry.label)
+        if force:
+            self.forced.append(entry.label)
+        self.cards[entry.label] = None
+
+    def busy(self, entry: EscalationEntry) -> Busy | None:
+        return self.busy_reasons.get(entry.label)
+
+    async def gpu_cards(self, entry: EscalationEntry) -> tuple[str, ...] | None:
+        return self.cards.get(entry.label)
 
     async def status(self, entry: EscalationEntry) -> EntryStatus:
         self.status_in_flight += 1

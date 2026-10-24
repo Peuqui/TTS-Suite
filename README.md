@@ -97,7 +97,7 @@ What happens with several programs at once (examples):
 | A and B both want Qwen3 on the same machine | One container, started once. The two take turns (Qwen3 renders one at a time, the second waits in the queue); nothing is reloaded. |
 | Qwen3 runs, B wants XTTS on the same machine | Qwen3 is left alone. XTTS starts on a card that has room for its budget (several cards: next to it). If no card has room, that entry is skipped (`no_vram`) and B's list goes on with its next entry. |
 | A and B ask for the same cold engine at once | One start, shared by both. Two starts on one machine are done one after the other, so they never pick the same card. |
-| A reads, B wants the container gone (`POST /release`) | The container that is speaking is not touched (`in_use`); every other one is shut down. |
+| A reads, B wants the container gone (`POST /gpu/release`, `/release` for other hosts) | Without `force` the container that is speaking is not touched (`busy`); every other one is shut down. With `force` A's reading ends with `reading_aborted` and the reason. |
 
 Limits: a container takes `max_parallel` readings at once and a queue of `max_queue` more; beyond that the
 service answers `429 overloaded`. The limits are set per engine on the page of the service. With more

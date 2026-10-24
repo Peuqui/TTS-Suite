@@ -36,6 +36,12 @@ once (`stopped`, "host ... unreachable") without waiting for an SSH connect.
 
 ## Release on request
 
+Since the common GPU release API of the suites, this machine's engines are released through
+`POST /gpu/release` only (one way); `POST /release` is for the containers of other hosts. `/gpu/release`
+can also force: the readings that hold the engine end with `reading_aborted` and the reason, then the
+container is stopped, and a local stop only counts once Docker reports the container down (after
+`docker kill` if needed). What follows describes `/release`.
+
 A client that needs room on a card (for example AIfred for a language model) asks the service with
 `POST /release` to take containers off the cards: `{"targets": "all"}` or a list of
 `{"engine", "host"}`. The container is shut down (VRAM free afterwards), not only unloaded. The

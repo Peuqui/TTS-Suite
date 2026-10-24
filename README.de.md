@@ -99,7 +99,7 @@ Was bei mehreren Programmen gleichzeitig passiert (Beispiele):
 | A und B wollen beide Qwen3 auf demselben Rechner | Ein Container, einmal gestartet. Die beiden wechseln sich ab (Qwen3 rendert eins nach dem anderen, das zweite wartet in der Warteschlange), nichts wird umgeladen. |
 | Qwen3 läuft, B will XTTS auf demselben Rechner | Qwen3 bleibt unberührt. XTTS startet auf einer Karte mit Platz für sein Budget (bei mehreren Karten daneben). Hat keine Karte Platz, wird dieser Eintrag übersprungen (`no_vram`) und die Liste von B geht mit dem nächsten Eintrag weiter. |
 | A und B fordern gleichzeitig dieselbe kalte Engine an | Ein Start, den beide teilen. Zwei Starts auf einem Rechner laufen nacheinander, sie wählen nie dieselbe Karte. |
-| A liest, B will den Container loswerden (`POST /release`) | Der Container, der gerade spricht, wird nicht angefasst (`in_use`), alle anderen werden heruntergefahren. |
+| A liest, B will den Container loswerden (`POST /gpu/release`, `/release` für andere Rechner) | Ohne `force` wird der Container, der gerade spricht, nicht angefasst (`busy`), alle anderen werden heruntergefahren. Mit `force` endet die Lesung von A mit `reading_aborted` und dem Grund. |
 
 Grenzen: Ein Container nimmt `max_parallel` Lesungen zugleich und danach `max_queue` in der Warteschlange; darüber
 antwortet der Dienst mit `429 überlastet`. Die Grenzen stellt man je Engine auf der Seite des Dienstes ein. Mit

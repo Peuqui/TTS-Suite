@@ -17,9 +17,12 @@ from tts_suite.api import (
     EngineRef,
     EngineStarting,
     EngineTarget,
+    GpuReleaseOutcome,
+    GpuReleaseResult,
     InvalidRequest,
     NoEngineAvailable,
     Overloaded,
+    ReadingAborted,
     SpeakSummary,
     TraceStep,
     UnknownEngine,
@@ -478,3 +481,48 @@ def test_release_answers_the_errors_of_the_suite_like_speak(tmp_path: Path, erro
     suite.refuses = error  # type: ignore[assignment]
     refused = client.post("/release", json={"targets": []})
     assert refused.status_code == status and refused.json()["error"] == code
+
+
+# ── The common GPU release API ──────────────────────────────────────
+
+
+def test_gpu_holders_without_a_token_on_this_machine(tmp_path: Path) -> None:
+    client, _, _ = build(tmp_path)
+    answer = client.get("/gpu/holders")
+    assert answer.status_code == 200
+    assert answer.json() == {"holders": [{"item": "xtts", "gpu_uuids": ["GPU-a"], "memory_mib": {"GPU-a": 4000}, "busy": False}]}
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "status"),
+    [(("released", "not_running"), 200), (("released", "busy"), 409), (("busy", "failed"), 500)],
+)
+def test_gpu_release_answers_with_the_status_of_its_results(
+    tmp_path: Path, outcomes: tuple[GpuReleaseOutcome, ...], status: int
+) -> None:
+    client, suite, _ = build(tmp_path)
+    suite.gpu_results = tuple(GpuReleaseResult(f"e{i}", outcome, "") for i, outcome in enumerate(outcomes))
+    answer = client.post("/gpu/release", json={"items": ["e0", "e1"], "force": True, "reason": "GPU-Orc: loading X"})
+    assert answer.status_code == status
+    assert [r["outcome"] for r in answer.json()["results"]] == list(outcomes)
+    assert suite.calls == [("gpu_release", (("e0", "e1"), True, "GPU-Orc: loading X"))]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"items": "all"}, {"items": "some", "reason": "r"}, {"items": "all", "reason": "r", "force": "yes"},
+     {"items": "all", "reason": "r", "extra": 1}],
+)
+def test_gpu_release_refuses_a_malformed_body(tmp_path: Path, body: dict[str, object]) -> None:
+    client, suite, _ = build(tmp_path)
+    assert client.post("/gpu/release", json=body).status_code == 400
+    assert suite.calls == []
+
+
+def test_a_reading_aborted_for_the_gpu_ends_with_its_own_error_code(tmp_path: Path) -> None:
+    client, suite, _ = build(tmp_path)
+    suite.stream = FakeStream([audio(data=b"one"), ReadingAborted("reading aborted, the GPU is needed: loading X")])
+    answer = client.post("/speak", json={"text": "Hi", "language": "en", "engines": ENGINES, "paragraph_pause_ms": 0})
+    frames = decode_frames(answer.content)
+    assert [header["kind"] for header, _ in frames] == ["audio", "error"]
+    assert json.loads(frames[1][1]) == {"error": "reading_aborted", "detail": "reading aborted, the GPU is needed: loading X"}

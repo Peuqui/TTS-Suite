@@ -14,9 +14,12 @@ from ..api import (
     EngineInUse,
     EngineStarting,
     EngineTarget,
+    GpuHolder,
+    GpuReleaseResult,
     InvalidRequest,
     NoEngineAvailable,
     Overloaded,
+    ReadingAborted,
     ReleaseResult,
     SpeakRequest,
     SpeakSummary,
@@ -35,6 +38,9 @@ _REQUEST = TypeAdapter(SpeakRequest)
 _SUMMARY = TypeAdapter(SpeakSummary)
 _TARGETS: TypeAdapter[tuple[EngineTarget, ...] | Literal["all"]] = TypeAdapter(tuple[EngineTarget, ...] | Literal["all"])
 _RELEASES = TypeAdapter(tuple[ReleaseResult, ...])
+_GPU_HOLDERS = TypeAdapter(list[GpuHolder])
+_GPU_RELEASES = TypeAdapter(tuple[GpuReleaseResult, ...])
+_GPU_ITEMS: TypeAdapter[tuple[str, ...] | Literal["all"]] = TypeAdapter(tuple[str, ...] | Literal["all"])
 
 # Every error the suite raises on purpose: its HTTP status and its code in `{"error": ...}`.
 ERROR_ANSWERS: dict[type[SuiteError], tuple[int, str]] = {
@@ -47,6 +53,7 @@ ERROR_ANSWERS: dict[type[SuiteError], tuple[int, str]] = {
     EngineInUse: (409, "engine_in_use"),
     EngineControlFailed: (502, "engine_control_failed"),
     ConfigInvalid: (400, "config_invalid"),
+    ReadingAborted: (503, "reading_aborted"),
     UnsupportedLanguage: (422, "unsupported_language"),
 }
 
@@ -77,6 +84,18 @@ def targets_from_json(data: Any) -> tuple[EngineTarget, ...] | Literal["all"]:
 
 def releases_to_json(results: tuple[ReleaseResult, ...]) -> Any:
     return _RELEASES.dump_python(results, mode="json")
+
+
+def gpu_holders_to_json(holders: list[GpuHolder]) -> Any:
+    return {"holders": _GPU_HOLDERS.dump_python(holders, mode="json")}
+
+
+def gpu_items_from_json(data: Any) -> tuple[str, ...] | Literal["all"]:
+    return _GPU_ITEMS.validate_python(data)
+
+
+def gpu_releases_to_json(results: tuple[GpuReleaseResult, ...]) -> Any:
+    return {"results": _GPU_RELEASES.dump_python(results, mode="json")}
 
 
 def summary_to_json(summary: SpeakSummary) -> Any:

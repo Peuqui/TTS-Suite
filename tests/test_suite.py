@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from container_fakes import (
     ARAGON,
+    CardList,
     ContainerEngine,
     FakeManagedLauncher,
     FakeSsh,
@@ -25,9 +26,11 @@ from tts_suite.api import (
     EngineInfo,
     EngineInUse,
     EngineTarget,
+    GpuHolder,
+    GpuReleaseResult,
     Host,
     InvalidRequest,
-    ReleaseResult,
+    ReadingAborted,
     SuiteConfig,
     TTSSuite,
     UnknownEngine,
@@ -374,60 +377,43 @@ class SlowStopLauncher(FakeManagedLauncher):
         self.stop_delay_s: dict[str, float] = {}
         self.stop_errors: dict[str, Exception] = {}
 
-    async def stop(self, entry: Any) -> None:
+    async def stop(self, entry: Any, *, force: bool = False) -> None:
         await asyncio.sleep(self.stop_delay_s.get(entry.label, 0.0))
         if entry.label in self.stop_errors:
             raise self.stop_errors[entry.label]
-        self.stopped.append(entry.label)
+        await super().stop(entry, force=force)
 
 
 def _release_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **launcher_args: Any) -> tuple[Suite, SlowStopLauncher]:
-    local, remote = ContainerEngine("lo"), ContainerEngine("re")
-    remote.default_port = 5000
-    install(monkeypatch, local, remote, FakeEngine("nocontainer"))
+    """Local GPU engines ``lo`` and ``re``; on the host Aragon ``re``, ``up``, ``held``, ``broken`` and ``idle``."""
+    install(monkeypatch, ContainerEngine("lo"), FakeEngine("nocontainer"))
+    for key in ("re", "up", "held", "broken", "idle"):
+        engine = ContainerEngine(key)
+        engine.default_port = 5000
+        install(monkeypatch, engine)
     return _suite(make_config(tmp_path, hosts=(ARAGON,)), SlowStopLauncher(**launcher_args))  # type: ignore[return-value]
 
 
-def test_release_reports_every_outcome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    suite, launcher = _release_setup(
-        tmp_path, monkeypatch, statuses={"lo": "running", "re@Aragon": "unreachable", "held": "running", "broken": "running"}
-    )
-    for key in ("held", "broken", "idle"):
-        install(monkeypatch, ContainerEngine(key))
-    launcher.statuses["idle"] = "stopped"
-    launcher.stop_errors = {"held": EngineInUse("held is in use by a reading"), "broken": EngineControlFailed("broken: boom")}
-    targets = tuple(EngineTarget(key, host) for key, host in (
-        ("lo", None), ("re", "Aragon"), ("held", None), ("broken", None), ("idle", None), ("nocontainer", None)
-    ))
+def test_release_of_host_containers_reports_every_outcome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch, statuses={"re@Aragon": "unreachable", "idle@Aragon": "stopped"})
+    launcher.stop_errors = {
+        "held@Aragon": EngineInUse("held@Aragon is in use by a reading"), "broken@Aragon": EngineControlFailed("broken: boom"),
+    }
+    targets = tuple(EngineTarget(key, "Aragon") for key in ("up", "re", "held", "broken", "idle"))
     results = run_async(suite.release(targets))
     assert [(r.engine, r.host, r.outcome) for r in results] == [
-        ("lo", None, "stopped"), ("re", "Aragon", "unreachable"), ("held", None, "in_use"),
-        ("broken", None, "failed"), ("idle", None, "not_running"), ("nocontainer", None, "not_running"),
+        ("up", "Aragon", "stopped"), ("re", "Aragon", "unreachable"), ("held", "Aragon", "in_use"),
+        ("broken", "Aragon", "failed"), ("idle", "Aragon", "not_running"),
     ]
-    assert results[2].detail == "held is in use by a reading" and results[3].detail == "broken: boom"
-    assert results[5] == ReleaseResult("nocontainer", None, "not_running", "nothing to release")
-    assert launcher.stopped == ["lo"]  # nothing else was stopped, the unreachable host was not even tried
+    assert results[2].detail == "held@Aragon is in use by a reading" and results[3].detail == "broken: boom"
+    assert launcher.stopped == ["up@Aragon"]  # nothing else was stopped, the unreachable host was not even tried
 
 
-def test_release_leaves_a_held_container_alone_with_the_real_launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    held, remote = ContainerEngine("held"), ContainerEngine("re", remote=True)
-    held.up = True
-    remote.default_port = 5000
-    remote.reach = "unreachable"
-    install(monkeypatch, held, remote)
-    ssh = FakeSsh()
-    config = make_config(tmp_path, hosts=(ARAGON,))
-    launcher = SuiteLauncher(config, gpus=list, host_command=ssh)  # type: ignore[arg-type]
-    suite, _ = _suite(config, launcher)  # type: ignore[arg-type]
-
-    async def scenario() -> tuple[ReleaseResult, ...]:
-        launcher.hold(EscalationEntry(held, None, "sentence"))  # a hold starts a heartbeat task: needs the loop
-        return await suite.release((EngineTarget("held", None), EngineTarget("re", "Aragon")))
-
-    results = run_async(scenario())
-    assert [r.outcome for r in results] == ["in_use", "unreachable"]
-    assert held.stops == 0 and held.up and ssh.commands == []
-    run_async(launcher.aclose())
+def test_release_refuses_engines_on_this_machine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    with pytest.raises(InvalidRequest, match="gpu_release"):
+        run_async(suite.release((EngineTarget("up", "Aragon"), EngineTarget("lo", None))))
+    assert launcher.stopped == []
 
 
 def test_release_stops_a_host_container_over_ssh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -442,26 +428,22 @@ def test_release_stops_a_host_container_over_ssh(tmp_path: Path, monkeypatch: py
     assert results[0].outcome == "stopped" and [c[:2] for c in ssh.commands] == [("Aragon", "stop")]
 
 
-def test_release_all_takes_every_catalog_row_with_a_container(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_release_all_takes_the_container_rows_of_the_hosts_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     suite, launcher = _release_setup(tmp_path, monkeypatch)
     results = run_async(suite.release("all"))
-    rows = {(r.engine, r.host): r.outcome for r in results}
-    # The registry's own container engines are in the catalog too; ours are all there, the one without a container is not.
-    assert {key: rows[key] for key in (("lo", None), ("re", None), ("re", "Aragon"))} == {
-        ("lo", None): "stopped", ("re", None): "stopped", ("re", "Aragon"): "stopped"
-    }
-    assert ("nocontainer", None) not in rows and set(rows.values()) == {"stopped"}
-    assert {"lo", "re", "re@Aragon"} <= set(launcher.stopped)
+    assert {r.host for r in results} == {"Aragon"} and {r.outcome for r in results} == {"stopped"}
+    assert {"re@Aragon", "up@Aragon"} <= set(launcher.stopped) and "lo" not in launcher.stopped
 
 
 def test_a_bad_release_request_stops_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     suite, launcher = _release_setup(tmp_path, monkeypatch)
-    lo = EngineTarget("lo", None)
+    up = EngineTarget("up", "Aragon")
     bad: list[tuple[type[Exception], tuple[EngineTarget, ...]]] = [
         (InvalidRequest, ()),
-        (InvalidRequest, (lo, lo)),
-        (UnknownEngine, (lo, EngineTarget("nope", None))),
-        (UnknownHost, (lo, EngineTarget("re", "Ghost"))),
+        (InvalidRequest, (up, up)),
+        (InvalidRequest, (up, EngineTarget("lo", None))),
+        (UnknownEngine, (up, EngineTarget("nope", "Aragon"))),
+        (UnknownHost, (up, EngineTarget("re", "Ghost"))),
     ]
     for error, targets in bad:
         with pytest.raises(error):
@@ -473,10 +455,109 @@ def test_release_handles_the_targets_in_parallel(tmp_path: Path, monkeypatch: py
     suite, launcher = _release_setup(tmp_path, monkeypatch)
     launcher.stop_delay_s = {"re@Aragon": 0.4}  # a slow host
     started = time.monotonic()
-    results = run_async(suite.release((EngineTarget("re", "Aragon"), EngineTarget("lo", None), EngineTarget("re", None))))
+    results = run_async(suite.release(tuple(EngineTarget(key, "Aragon") for key in ("re", "up", "held"))))
     assert time.monotonic() - started < 0.7  # one delay, not a sum of three
     assert [r.outcome for r in results] == ["stopped"] * 3
     assert launcher.stopped[-1] == "re@Aragon"  # the fast ones finished first
+
+
+# ── The common GPU release API ──────────────────────────────────────
+
+
+def test_gpu_holders_are_the_local_gpu_engines_whose_container_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(suite_module, "engine_vram_mib", lambda engine: {"GPU-1": 3000} if engine.key == "lo" else {})
+    launcher.cards = {"lo": ("GPU-1",), "re": ("GPU-0", "GPU-1"), "re@Aragon": ("GPU-9",)}
+    launcher.busy_reasons = {"lo": "in_use"}
+    holders = run_async(suite.gpu_holders())
+    assert holders == [
+        GpuHolder("lo", ("GPU-1",), {"GPU-1": 3000}, True),
+        GpuHolder("re", ("GPU-0", "GPU-1"), None, False),  # nothing measured: memory unknown, not empty
+    ]
+
+
+def test_gpu_release_reports_every_outcome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    for key in ("held", "starting", "broken", "free"):
+        install(monkeypatch, ContainerEngine(key))
+    launcher.cards = {key: ("GPU-0",) for key in ("held", "starting", "broken", "free")}
+    launcher.busy_reasons = {"held": "in_use", "starting": "starting"}
+    launcher.stop_errors = {"broken": EngineControlFailed("broken: container still running after docker kill")}
+    results = run_async(suite.gpu_release(("held", "starting", "broken", "free", "lo"), force=False, reason="loading X"))
+    assert [(r.item, r.outcome) for r in results] == [
+        ("held", "busy"), ("starting", "busy"), ("broken", "failed"), ("free", "released"), ("lo", "not_running"),
+    ]
+    assert "docker kill" in results[2].detail
+    assert launcher.stopped == ["free"] and launcher.forced == []
+
+
+def test_forced_gpu_release_takes_a_held_engine_down_but_not_a_starting_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    for key in ("held", "starting"):
+        install(monkeypatch, ContainerEngine(key))
+    launcher.cards = {"held": ("GPU-0",), "starting": ("GPU-1",)}
+    launcher.busy_reasons = {"held": "in_use", "starting": "starting"}
+    results = run_async(suite.gpu_release(("held", "starting"), force=True, reason="loading X"))
+    assert [(r.item, r.outcome) for r in results] == [("held", "released"), ("starting", "busy")]
+    assert launcher.forced == ["held"]
+
+
+def test_gpu_release_all_takes_the_holders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    launcher.cards = {"lo": ("GPU-0",)}
+    results = run_async(suite.gpu_release("all", force=False, reason="r"))
+    assert [(r.item, r.outcome) for r in results] == [("lo", "released")]
+
+
+@pytest.mark.parametrize("items, reason", [
+    ((), "r"), (("lo", "lo"), "r"), (("nope",), "r"), (("nocontainer",), "r"), (("lo",), " "),
+])
+def test_a_bad_gpu_release_stops_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, items: tuple[str, ...], reason: str) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    launcher.cards = {"lo": ("GPU-0",)}
+    with pytest.raises(InvalidRequest):
+        run_async(suite.gpu_release(items, force=True, reason=reason))
+    assert launcher.stopped == []
+
+
+async def _collect_until_error(stream: Any) -> Exception | None:
+    """Read a stream to its end; the error it ended with, ``None`` when it ended normally."""
+    try:
+        async for _segment in stream.segments():
+            pass
+    except Exception as error:  # noqa: BLE001 — the test looks at which error it was
+        return error
+    return None
+
+
+def test_a_forced_gpu_release_ends_the_reading_with_its_reason_and_proves_the_container_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = ContainerEngine("a")
+    engine.up = True
+    for key in list(registry.TTS_ENGINES):  # only the fake: the registry's own engines would ask Docker
+        monkeypatch.delitem(registry.TTS_ENGINES, key)
+    install(monkeypatch, engine)
+    config = make_config(tmp_path)
+    launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh())
+    suite = Suite(config, launcher)
+
+    async def scenario() -> tuple[GpuReleaseResult, ...]:
+        gate = engine.gates["zwei"] = asyncio.Event()
+        stream = suite.speak("Der Satz mit zwei Wörtern kommt hier.", request("a"))
+        reading = asyncio.ensure_future(_collect_until_error(stream))
+        await asyncio.sleep(0.05)
+        assert await suite.gpu_holders() == [GpuHolder("a", ("GPU-0",), None, True)]  # the reading holds it
+        results = await suite.gpu_release(("a",), force=True, reason="GPU-Orc: loading X")
+        gate.set()  # the synthesis that was running comes back after the container went down
+        error = await reading
+        assert isinstance(error, ReadingAborted) and "GPU-Orc: loading X" in str(error)
+        await launcher.aclose()
+        return results
+
+    results = run_async(scenario())
+    assert [(r.item, r.outcome) for r in results] == [("a", "released")]
+    assert engine.stops == 1 and engine.kills == 0 and not engine.up
 
 
 def test_reload_rereads_the_engine_folders_and_binds_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

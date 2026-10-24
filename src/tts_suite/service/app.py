@@ -27,6 +27,9 @@ from .wire import (
     config_to_json,
     engines_to_json,
     error_answer,
+    gpu_holders_to_json,
+    gpu_items_from_json,
+    gpu_releases_to_json,
     releases_to_json,
     request_from_json,
     targets_from_json,
@@ -193,6 +196,30 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
         except ValidationError as error:
             raise bad_request(str(error)) from error
         return releases_to_json(await suite.release(targets))
+
+    # The common GPU release API of the suites (the STT-Suite has the same; GPU-Orc uses it).
+    @app.get("/gpu/holders")
+    async def gpu_holders(request: Request) -> Any:
+        check(request, False)
+        return gpu_holders_to_json(await suite.gpu_holders())
+
+    @app.post("/gpu/release")
+    async def gpu_release(request: Request) -> Any:
+        # Like /release: a client asks and the suite decides, so no token on this machine.
+        check(request, False)
+        body = await _json_body(request)
+        unknown = set(body) - {"items", "force", "reason"}
+        force, reason = body.get("force", False), body.get("reason")
+        if unknown or not isinstance(force, bool) or not isinstance(reason, str):
+            raise bad_request('body: {"items": [...] | "all", "force": bool, "reason": str}')
+        try:
+            items = gpu_items_from_json(body.get("items"))
+        except ValidationError as error:
+            raise bad_request(str(error)) from error
+        results = await suite.gpu_release(items, force=force, reason=reason)
+        outcomes = {result.outcome for result in results}
+        status = 500 if "failed" in outcomes else 409 if "busy" in outcomes else 200
+        return JSONResponse(gpu_releases_to_json(results), status_code=status)
 
     @app.post("/speak")
     async def speak(request: Request) -> StreamingResponse:

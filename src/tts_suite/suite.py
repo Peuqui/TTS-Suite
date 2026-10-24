@@ -16,6 +16,8 @@ from .api import (
     EngineInUse,
     EngineTarget,
     EntryStatus,
+    GpuHolder,
+    GpuReleaseResult,
     InvalidRequest,
     ReleaseResult,
     SpeakRequest,
@@ -49,7 +51,7 @@ class Suite:
         # The launcher goes first: it ends the starts and drops the holds, so the release below also takes
         # down a container a reading was using (the service is going away, nobody could stop it afterwards).
         await self._launcher.aclose()
-        for result in await self.release("all"):
+        for result in await self._release_everything():
             if result.outcome in ("failed", "unreachable"):
                 logger.warning("TTS: %s stays up on shutdown (%s): %s", result.engine, result.outcome, result.detail)
 
@@ -68,7 +70,7 @@ class Suite:
     async def _release_for_new_voices(self) -> None:
         """A running container keeps the voices folder it was started with: release them all, the next
         request starts them with the new one. One a reading holds stays as it is (and is logged)."""
-        for result in await self.release("all"):
+        for result in await self._release_everything():
             if result.outcome in ("in_use", "failed"):
                 logger.warning(
                     "TTS: %s keeps the old voices folder (%s): %s", result.engine, result.outcome, result.detail,
@@ -184,14 +186,86 @@ class Suite:
         return tuple(await asyncio.gather(*(self._release_one(entry) for entry in entries)))
 
     def _release_entries(self, targets: tuple[EngineTarget, ...] | Literal["all"]) -> list[EscalationEntry]:
-        """The rows to release; the whole request is checked here, before anything is stopped."""
+        """The rows on other hosts to release; the whole request is checked here, before anything is stopped.
+        Engines on this machine go through :meth:`gpu_release` (one way)."""
         if targets == "all":
-            return [entry for entry in self._speaker.catalog_entries() if entry.engine.runs_in_container]
+            return [entry for entry in self._speaker.catalog_entries() if entry.engine.runs_in_container and entry.host is not None]
         if not targets:
             raise InvalidRequest("release needs at least one target")
         if len(set(targets)) != len(targets):
             raise InvalidRequest("a target is named twice")
+        local = [target.engine for target in targets if target.host is None]
+        if local:
+            raise InvalidRequest(f"{local} run on this machine: release them through gpu_release (/gpu/release)")
         return [self._catalog_entry(target.engine, target.host) for target in targets]
+
+    async def _release_everything(self) -> tuple[ReleaseResult, ...]:
+        """Every container on this machine and on the hosts, without force (shutdown, a new voices folder)."""
+        entries = [entry for entry in self._speaker.catalog_entries() if entry.engine.runs_in_container]
+        return tuple(await asyncio.gather(*(self._release_one(entry) for entry in entries)))
+
+    # ── The common GPU release API of the suites ────────────────────
+
+    def _local_gpu_entries(self) -> dict[str, EscalationEntry]:
+        return {
+            entry.engine.key: entry
+            for entry in self._speaker.catalog_entries()
+            if entry.host is None and entry.engine.runs_in_container and entry.engine.needs_gpu
+        }
+
+    async def gpu_holders(self) -> list[GpuHolder]:
+        entries = list(self._local_gpu_entries().values())
+        holders = await asyncio.gather(*(self._gpu_holder(entry) for entry in entries))
+        return [holder for holder in holders if holder is not None]
+
+    async def _gpu_holder(self, entry: EscalationEntry) -> GpuHolder | None:
+        cards = await self._launcher.gpu_cards(entry)
+        if cards is None:
+            return None
+        memory = await self._vram_mib(entry, "running")
+        return GpuHolder(entry.engine.key, cards, memory or None, self._launcher.busy(entry) is not None)
+
+    async def gpu_release(
+        self, items: tuple[str, ...] | Literal["all"], *, force: bool, reason: str
+    ) -> tuple[GpuReleaseResult, ...]:
+        if not reason.strip():
+            raise InvalidRequest("a GPU release needs a reason")
+        entries = self._local_gpu_entries()
+        if items == "all":
+            keys = [holder.item for holder in await self.gpu_holders()]
+        else:
+            if not items:
+                raise InvalidRequest("a GPU release needs at least one item")
+            if len(set(items)) != len(items):
+                raise InvalidRequest("an item is named twice")
+            unknown = [item for item in items if item not in entries]
+            if unknown:
+                raise InvalidRequest(f"{unknown} are no GPU engines of this machine, known: {sorted(entries)}")
+            keys = list(items)
+        return tuple(await asyncio.gather(*(self._gpu_release_one(entries[key], force, reason) for key in keys)))
+
+    async def _gpu_release_one(self, entry: EscalationEntry, force: bool, reason: str) -> GpuReleaseResult:
+        key = entry.engine.key
+        try:
+            if await self._launcher.gpu_cards(entry) is None:
+                return GpuReleaseResult(key, "not_running", NOTHING_TO_RELEASE)
+        except EngineControlFailed as unknown:
+            return GpuReleaseResult(key, "failed", str(unknown))
+        busy = self._launcher.busy(entry)
+        if busy == "starting":
+            return GpuReleaseResult(key, "busy", f"{entry.label} is starting")
+        if busy == "in_use":
+            if not force:
+                return GpuReleaseResult(key, "busy", f"{entry.label} is in use by a reading")
+            aborted = self._speaker.abort_readings(entry.label, reason)
+            logger.warning("TTS: %d reading(s) on %s aborted, the GPU is needed: %s", aborted, entry.label, reason)
+        try:
+            await self._launcher.stop(entry, force=force)
+        except EngineInUse as in_use:
+            return GpuReleaseResult(key, "busy", str(in_use))
+        except EngineControlFailed as failed:
+            return GpuReleaseResult(key, "failed", str(failed))
+        return GpuReleaseResult(key, "released", f"{entry.label} container down")
 
     async def _release_one(self, entry: EscalationEntry) -> ReleaseResult:
         """The same stop as :meth:`stop`, with its refusals turned into an outcome."""

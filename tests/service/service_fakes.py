@@ -11,6 +11,8 @@ from tts_suite.api import (
     AudioSegment,
     EngineInfo,
     EngineTarget,
+    GpuHolder,
+    GpuReleaseResult,
     ReleaseResult,
     SpeakRequest,
     SpeakSummary,
@@ -86,6 +88,7 @@ class FakeSuite:
         self.calls: list[tuple[str, tuple[object, ...]]] = []
         self.closed = False
         self.rejects_config: SuiteError | None = None
+        self.gpu_results: tuple[GpuReleaseResult, ...] = (GpuReleaseResult("xtts", "released", "xtts container down"),)
 
     async def aclose(self) -> None:
         self.closed = True
@@ -129,6 +132,18 @@ class FakeSuite:
         if self.refuses is not None:
             raise self.refuses
         return (ReleaseResult("xtts", None, "stopped", "xtts stopped"),)
+
+    async def gpu_holders(self) -> list[GpuHolder]:
+        self.calls.append(("gpu_holders", ()))
+        return [GpuHolder("xtts", ("GPU-a",), {"GPU-a": 4000}, False)]
+
+    async def gpu_release(
+        self, items: tuple[str, ...] | Literal["all"], *, force: bool, reason: str
+    ) -> tuple[GpuReleaseResult, ...]:
+        self.calls.append(("gpu_release", (items, force, reason)))
+        if self.refuses is not None:
+            raise self.refuses
+        return self.gpu_results
 
     async def reload(self) -> tuple[list[str], list[str]]:
         self.calls.append(("reload", ()))

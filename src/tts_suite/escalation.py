@@ -37,6 +37,7 @@ from .api import (
     InvalidRequest,
     NoEngineAvailable,
     Overloaded,
+    ReadingAborted,
     SkipReason,
     SpeakRequest,
     SuiteConfig,
@@ -314,11 +315,31 @@ class SpeechRun:
         # The entries this run holds (their containers are in use) while streams are attached to it.
         self._attached = 0
         self._held: dict[str, EscalationEntry] = {}
+        # Why the reading was ended from outside: the card of an engine it holds is needed (a forced GPU release).
+        self._aborted: str | None = None
 
     @property
     def attached(self) -> bool:
         """Whether a stream uses this run right now."""
         return self._attached > 0
+
+    @property
+    def aborted(self) -> bool:
+        return self._aborted is not None
+
+    def holds(self, label: str) -> bool:
+        """Whether this run holds the entry's container right now."""
+        return label in self._held
+
+    def abort(self, reason: str) -> None:
+        """End the reading because the card of an engine it holds is needed. Every unit not yet spoken
+        fails with :class:`ReadingAborted` naming ``reason``, also a synthesis that fails because its
+        container goes down: an aborted reading does not move on to the next entry."""
+        self._aborted = reason
+
+    def _raise_if_aborted(self) -> None:
+        if self._aborted is not None:
+            raise ReadingAborted(f"reading aborted, the GPU is needed: {self._aborted}")
 
     def attach(self) -> None:
         """A stream starts to use this run (several streams may share one under a run ID)."""
@@ -378,6 +399,7 @@ class SpeechRun:
         """The entry that speaks now — chosen at the first call. An entry without a voice for this
         request fails BEFORE anything is started for it. :class:`NoEngineAvailable` when none can."""
         async with self._lock:
+            self._raise_if_aborted()
             if self._current is not None and self._current.label not in self._failed:
                 self._hold(self._current)  # a later stream of this run holds it again (idempotent)
                 return self._current
@@ -423,13 +445,16 @@ class SpeechRun:
             try:
                 audio = await self._synthesize(entry, text, request)
             except TTSFailure as failure:
+                self._raise_if_aborted()  # its container was taken down on purpose: no next entry
                 self._fail(entry, failure.reason, failure.detail)
                 continue
             except SuiteError:
                 raise
             except Exception as exc:  # noqa: BLE001 — any other error is a software error of this entry: next entry
+                self._raise_if_aborted()
                 self._fail(entry, "software", f"{type(exc).__name__}: {exc}")
                 continue
+            self._raise_if_aborted()  # spoken by a container that is being taken down: the reading has ended
             self._record_spoken(entry)
             return Spoken(audio, entry)
 
@@ -486,7 +511,8 @@ class RunTable:
     def get_or_create(self, key: RunKey, create: Callable[[], SpeechRun]) -> SpeechRun:
         now = self._clock()
         self._runs = {k: (run, expires) for k, (run, expires) in self._runs.items() if run.attached or expires > now}
-        run = self._runs[key][0] if key in self._runs else create()
+        # An aborted reading has ended: a new request with its run ID starts a new one.
+        run = self._runs[key][0] if key in self._runs and not self._runs[key][0].aborted else create()
         self._runs[key] = (run, now + self._ttl_s)
         return run
 

@@ -474,3 +474,68 @@ def test_the_skip_detail_of_the_launcher_reaches_the_trace(tmp_path: Path, monke
     with pytest.raises(NoEngineAvailable) as error:
         run_async(scenario())
     assert error.value.trace == (TraceStep("a", "skipped", "no_vram", "needs 4512 MiB, most free 1000 MiB on GPU 0"),)
+
+
+# ── Stopping with proof, the cards of a container, why it is busy ───
+
+
+def test_a_local_stop_counts_only_when_the_container_is_down(tmp_path: Path) -> None:
+    engine = ContainerEngine("a")
+    engine.up = True
+    launcher = _launcher(tmp_path)
+    run_async(launcher.stop(local_entry(engine)))
+    assert engine.stops == 1 and engine.kills == 0 and not engine.up
+
+
+def test_a_container_that_survives_the_stop_gets_docker_kill(tmp_path: Path) -> None:
+    engine = ContainerEngine("a")
+    engine.up = True
+    engine.survives_stop = True
+    run_async(_launcher(tmp_path).stop(local_entry(engine)))
+    assert engine.stops == 1 and engine.kills == 1 and not engine.up
+
+
+def test_a_container_that_survives_docker_kill_is_a_failed_stop(tmp_path: Path) -> None:
+    engine = ContainerEngine("a")
+    engine.up = True
+    engine.survives_stop = engine.survives_kill = True
+    with pytest.raises(EngineControlFailed, match="still running after docker kill"):
+        run_async(_launcher(tmp_path).stop(local_entry(engine)))
+
+
+def test_a_forced_stop_takes_a_held_container_down_but_not_a_starting_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = ContainerEngine("a", ready_delay_s=0.3)
+    install(monkeypatch, engine)
+    launcher = _launcher(tmp_path)
+
+    async def scenario() -> None:
+        entry = local_entry(engine)
+        launcher.hold(entry)
+        assert launcher.busy(entry) == "in_use"
+        engine.up = True
+        await launcher.stop(entry, force=True)
+        assert not engine.up
+        launcher.release(entry)
+        assert launcher.busy(entry) is None
+        with pytest.raises(EngineStarting):
+            await launcher.ensure_serving(entry, wait=False)
+        assert launcher.busy(entry) == "starting"
+        with pytest.raises(EngineInUse, match="starting"):
+            await launcher.stop(entry, force=True)
+        await launcher.aclose()
+
+    run_async(scenario())
+
+
+def test_the_cards_of_a_running_container_come_from_its_configuration(tmp_path: Path) -> None:
+    engine = ContainerEngine("a")
+    launcher = SuiteLauncher(SuiteConfig(voices_dir=tmp_path), gpus=CardList(20000, 20000, 20000), host_command=FakeSsh())
+    entry = local_entry(engine)
+    assert run_async(launcher.gpu_cards(entry)) is None  # its container does not run
+    engine.up = True
+    for configured, cards in ((("GPU-1",), ("GPU-1",)), (("2", "0"), ("GPU-2", "GPU-0")), ("all", ("GPU-0", "GPU-1", "GPU-2"))):
+        engine.gpus = configured
+        assert run_async(launcher.gpu_cards(entry)) == cards
+    engine.gpus = ("GPU-7",)
+    with pytest.raises(EngineControlFailed, match="no card of this machine"):
+        run_async(launcher.gpu_cards(entry))
