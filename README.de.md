@@ -118,4 +118,4 @@ Engine und Rechner) und setzt die laufende lokale Engine an den Anfang seiner ei
 
 ## Lizenz
 
-Kommt mit der ersten Veröffentlichung.
+[PolyForm Noncommercial 1.0.0](LICENSE): Herunterladen und Nutzen für jeden nichtkommerziellen Zweck frei; kommerzielle Nutzung nur mit Erlaubnis des Autors.

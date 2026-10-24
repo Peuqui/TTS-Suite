@@ -116,4 +116,4 @@ engine and machine) and puts the running local engine at the front of its own li
 
 ## License
 
-To be added with the first release.
+[PolyForm Noncommercial 1.0.0](LICENSE): free to download and use for any noncommercial purpose; commercial use needs the author's permission.
