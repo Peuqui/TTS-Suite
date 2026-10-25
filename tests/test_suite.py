@@ -27,6 +27,7 @@ from tts_suite.api import (
     EngineInUse,
     EngineTarget,
     GpuHolder,
+    GpuNeed,
     GpuReleaseResult,
     Host,
     InvalidRequest,
@@ -474,6 +475,17 @@ def test_gpu_holders_are_the_local_gpu_engines_whose_container_runs(tmp_path: Pa
         GpuHolder("lo", ("GPU-1",), {"GPU-1": 3000}, True),
         GpuHolder("re", ("GPU-0", "GPU-1"), None, False),  # nothing measured: memory unknown, not empty
     ]
+
+
+def test_gpu_needs_name_every_local_gpu_engine_with_its_budget_and_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch, ContainerEngine("lo"), ContainerEngine("re"), FakeEngine("nocontainer"))
+    config = make_config(tmp_path, engines={"re": EngineDefaults(vram_budget_mib=2500)}, hosts=(ARAGON,))
+    suite, _ = _suite(config, SlowStopLauncher())
+    needs = {need.item: need for need in suite.gpu_needs()}
+    # ContainerEngine's built-in budget is 4000 MiB; the engine without a container and the hosts are not asked.
+    assert needs["lo"] == GpuNeed("lo", 4000, "estimate") and needs["re"] == GpuNeed("re", 2500, "configured")
+    assert "nocontainer" not in needs
+    assert needs["qwen3local"] == GpuNeed("qwen3local", 6024, "estimate") and needs["xtts"] == GpuNeed("xtts", 3680, "estimate")
 
 
 def test_gpu_release_reports_every_outcome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

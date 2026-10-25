@@ -17,6 +17,7 @@ from .api import (
     EngineTarget,
     EntryStatus,
     GpuHolder,
+    GpuNeed,
     GpuReleaseResult,
     InvalidRequest,
     ReadingAborted,
@@ -30,6 +31,7 @@ from .engines.base import shared_voice_names
 from .engines.registry import reload_engines, require_engine, voice_names
 from .escalation import EscalationEntry
 from .launcher import ManagedLauncher, SuiteLauncher
+from .placement import vram_budget
 from .speaker import Speaker
 from .stream import Stream
 from .vram import VramMeasurementFailed, engine_vram_mib
@@ -223,6 +225,10 @@ class Suite:
         entries = list(self._local_gpu_entries().values())
         holders = await asyncio.gather(*(self._gpu_holder(entry) for entry in entries))
         return [holder for holder in holders if holder is not None]
+
+    def gpu_needs(self) -> list[GpuNeed]:
+        config = self._speaker.config
+        return [GpuNeed(key, *vram_budget(entry.engine, config)) for key, entry in self._local_gpu_entries().items()]
 
     async def _gpu_holder(self, entry: EscalationEntry) -> GpuHolder | None:
         cards = await self._launcher.gpu_cards(entry)

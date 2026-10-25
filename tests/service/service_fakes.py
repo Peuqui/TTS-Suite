@@ -12,6 +12,7 @@ from tts_suite.api import (
     EngineInfo,
     EngineTarget,
     GpuHolder,
+    GpuNeed,
     GpuReleaseResult,
     ReleaseResult,
     SpeakRequest,
@@ -136,6 +137,10 @@ class FakeSuite:
     async def gpu_holders(self) -> list[GpuHolder]:
         self.calls.append(("gpu_holders", ()))
         return [GpuHolder("xtts", ("GPU-a",), {"GPU-a": 4000}, False)]
+
+    def gpu_needs(self) -> list[GpuNeed]:
+        self.calls.append(("gpu_needs", ()))
+        return [GpuNeed("xtts", 3680, "estimate")]
 
     async def gpu_release(
         self, items: tuple[str, ...] | Literal["all"], *, force: bool, reason: str

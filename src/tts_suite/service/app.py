@@ -29,6 +29,7 @@ from .wire import (
     error_answer,
     gpu_holders_to_json,
     gpu_items_from_json,
+    gpu_needs_to_json,
     gpu_releases_to_json,
     releases_to_json,
     request_from_json,
@@ -202,6 +203,11 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
     async def gpu_holders(request: Request) -> Any:
         check(request, False)
         return gpu_holders_to_json(await suite.gpu_holders())
+
+    @app.get("/gpu/needs")
+    async def gpu_needs(request: Request) -> Any:
+        check(request, False)
+        return gpu_needs_to_json(suite.gpu_needs())
 
     @app.post("/gpu/release")
     async def gpu_release(request: Request) -> Any:

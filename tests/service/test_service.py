@@ -493,6 +493,13 @@ def test_gpu_holders_without_a_token_on_this_machine(tmp_path: Path) -> None:
     assert answer.json() == {"holders": [{"item": "xtts", "gpu_uuids": ["GPU-a"], "memory_mib": {"GPU-a": 4000}, "busy": False}]}
 
 
+def test_gpu_needs_without_a_token_on_this_machine(tmp_path: Path) -> None:
+    client, _, _ = build(tmp_path)
+    answer = client.get("/gpu/needs")
+    assert answer.status_code == 200
+    assert answer.json() == {"needs": [{"item": "xtts", "need_mib": 3680, "source": "estimate"}]}
+
+
 @pytest.mark.parametrize(
     ("outcomes", "status"),
     [(("released", "not_running"), 200), (("released", "busy"), 409), (("busy", "failed"), 500)],

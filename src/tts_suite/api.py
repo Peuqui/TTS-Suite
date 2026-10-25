@@ -209,6 +209,19 @@ class GpuHolder:
     busy: bool
 
 
+GpuNeedSource = Literal["measured", "configured", "estimate", "unknown"]
+
+
+@dataclass(frozen=True)
+class GpuNeed:
+    """What a local GPU engine needs on a card, for GPU-Orc's plan: the configured budget, else the engine's
+    built-in value (an estimate here); ``None`` with ``unknown`` when neither exists."""
+
+    item: str
+    need_mib: int | None
+    source: GpuNeedSource
+
+
 @dataclass(frozen=True)
 class GpuReleaseResult:
     """What :meth:`TTSSuite.gpu_release` did for one engine."""
@@ -460,6 +473,10 @@ class TTSSuite(Protocol):
 
     async def gpu_holders(self) -> list[GpuHolder]:
         """What the suite holds on this machine's GPUs: every local GPU engine whose container runs."""
+        ...
+
+    def gpu_needs(self) -> list[GpuNeed]:
+        """What each local GPU engine needs on a card, whether it runs or not."""
         ...
 
     async def gpu_release(

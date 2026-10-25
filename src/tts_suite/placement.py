@@ -13,7 +13,7 @@ import subprocess
 import urllib.request
 from dataclasses import dataclass, replace
 
-from .api import SuiteConfig
+from .api import GpuNeedSource, SuiteConfig
 from .constants import GPU_ORC_STATUS_TIMEOUT_S, NVIDIA_SMI_QUERY_TIMEOUT_S
 from .engines.base import TTSEngine
 
@@ -91,13 +91,20 @@ def with_room_from_gpu_orc(cards: list[GpuInfo], url: str) -> list[GpuInfo]:
     return [replace(card, free_mib=min(card.free_mib, available)) for card, available in free]
 
 
-def vram_budget_mib(engine: TTSEngine, config: SuiteConfig) -> int | None:
-    """The VRAM an engine may use: the configured budget, else the engine's own (burn-in) value;
-    ``None`` when neither exists."""
+def vram_budget(engine: TTSEngine, config: SuiteConfig) -> tuple[int | None, GpuNeedSource]:
+    """The VRAM an engine may use and where the number comes from: the configured budget, else the engine's
+    own (burn-in) value; ``None`` when neither exists."""
     configured = config.engines.get(engine.key)
     if configured is not None and configured.vram_budget_mib is not None:
-        return configured.vram_budget_mib
-    return engine.default_vram_budget_mib
+        return configured.vram_budget_mib, "configured"
+    if engine.default_vram_budget_mib is not None:
+        return engine.default_vram_budget_mib, "estimate"
+    return None, "unknown"
+
+
+def vram_budget_mib(engine: TTSEngine, config: SuiteConfig) -> int | None:
+    """The VRAM an engine may use (see :func:`vram_budget`)."""
+    return vram_budget(engine, config)[0]
 
 
 def _candidates(cards: list[GpuInfo], config: SuiteConfig) -> list[tuple[GpuInfo, int]]:

@@ -15,6 +15,7 @@ from ..api import (
     EngineStarting,
     EngineTarget,
     GpuHolder,
+    GpuNeed,
     GpuReleaseResult,
     InvalidRequest,
     NoEngineAvailable,
@@ -39,6 +40,7 @@ _SUMMARY = TypeAdapter(SpeakSummary)
 _TARGETS: TypeAdapter[tuple[EngineTarget, ...] | Literal["all"]] = TypeAdapter(tuple[EngineTarget, ...] | Literal["all"])
 _RELEASES = TypeAdapter(tuple[ReleaseResult, ...])
 _GPU_HOLDERS = TypeAdapter(list[GpuHolder])
+_GPU_NEEDS = TypeAdapter(list[GpuNeed])
 _GPU_RELEASES = TypeAdapter(tuple[GpuReleaseResult, ...])
 _GPU_ITEMS: TypeAdapter[tuple[str, ...] | Literal["all"]] = TypeAdapter(tuple[str, ...] | Literal["all"])
 
@@ -88,6 +90,10 @@ def releases_to_json(results: tuple[ReleaseResult, ...]) -> Any:
 
 def gpu_holders_to_json(holders: list[GpuHolder]) -> Any:
     return {"holders": _GPU_HOLDERS.dump_python(holders, mode="json")}
+
+
+def gpu_needs_to_json(needs: list[GpuNeed]) -> Any:
+    return {"needs": _GPU_NEEDS.dump_python(needs, mode="json")}
 
 
 def gpu_items_from_json(data: Any) -> tuple[str, ...] | Literal["all"]:
