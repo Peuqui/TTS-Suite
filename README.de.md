@@ -117,6 +117,12 @@ neben sich ein, der Aufbau ist also auf jedem Rechner gleich.
 Ein Programm, das sich an bereits Geladenes hängen will, fragt den Katalog (`GET /engines`: Zustand `running` je
 Engine und Rechner) und setzt die laufende lokale Engine an den Anfang seiner eigenen Liste.
 
+## Star History
+
+![Star History](https://raw.githubusercontent.com/Peuqui/Traffic/main/data/TTS-Suite/star-history.svg)
+
+<sub>Täglich erhoben in [Peuqui/Traffic](https://github.com/Peuqui/Traffic), zusammen mit Aufrufen und Klonen. GitHub hat die Stargazer-API am 30.06.2026 auf Repo-Admins beschränkt, deshalb brauchen externe Diagramm-Dienste jetzt ein Token mit Schreibrechten.</sub>
+
 ## Lizenz
 
 [PolyForm Noncommercial 1.0.0](LICENSE): Herunterladen und Nutzen für jeden nichtkommerziellen Zweck frei; kommerzielle Nutzung nur mit Erlaubnis des Autors.

@@ -115,6 +115,12 @@ the layout is the same on every machine.
 A program that wants to hang on to what is already loaded asks the catalog (`GET /engines`: state `running` per
 engine and machine) and puts the running local engine at the front of its own list.
 
+## Star History
+
+![Star History](https://raw.githubusercontent.com/Peuqui/Traffic/main/data/TTS-Suite/star-history.svg)
+
+<sub>Recorded daily in [Peuqui/Traffic](https://github.com/Peuqui/Traffic), together with views and clones. GitHub restricted the stargazer API to repo admins on 2026-06-30, so external chart services now need a token with write access.</sub>
+
 ## License
 
 [PolyForm Noncommercial 1.0.0](LICENSE): free to download and use for any noncommercial purpose; commercial use needs the author's permission.
