@@ -257,6 +257,8 @@ TTS_HOST_SSH_COMMAND_TIMEOUT_S = 60
 #: ``nvidia-smi`` queries: the card list, the processes using a card, and ``docker compose ps`` /
 #: ``docker top`` (the host PIDs of a container).
 NVIDIA_SMI_QUERY_TIMEOUT_S = 5
+#: GPU-Orc's ``GET /status`` before a start; it asks every consumer of the cards, this suite included.
+GPU_ORC_STATUS_TIMEOUT_S = 30
 NVIDIA_SMI_APPS_TIMEOUT_S = 10
 DOCKER_PIDS_TIMEOUT_S = 10
 
