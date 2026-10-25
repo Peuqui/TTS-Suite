@@ -628,7 +628,7 @@ def test_a_forced_gpu_release_withdraws_a_start_and_ends_the_readings_waiting_fo
     assert took < 5  # not the 30 s the model would load
     for error in errors:  # the second one did not start the engine again
         assert isinstance(error, ReadingAborted) and error.reason == "GPU-Orc: loading X"
-    assert engine.ready_calls == 1 and engine.stops == 1 and not engine.up and not engine.loading
+    assert engine.ready_calls == 1 and engine.kills == 1 and not engine.up and not engine.loading
     assert launcher.start_failure(EscalationEntry(engine, None, engine.default_speech_unit)) is None  # not a failure
 
 

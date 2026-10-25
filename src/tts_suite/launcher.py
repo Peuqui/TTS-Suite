@@ -68,9 +68,10 @@ class ManagedLauncher(EngineLauncher, Protocol):
         ...
 
     async def withdraw_start(self, entry: EscalationEntry, reason: str) -> None:
-        """End the start of a local entry that is under way and wait until it gave up; whoever waits for it
-        gets :class:`ReadingAborted` naming ``reason``. Its container is not taken down here: ``stop`` does
-        that afterwards. Nothing to do when no start is under way."""
+        """End the start of a local entry that is under way: wait until it gave up, then ``docker kill`` its
+        container (a model that is still loading has nothing to wind down). Whoever waits for the start gets
+        :class:`ReadingAborted` naming ``reason``. ``stop`` afterwards proves the container down. Nothing to do
+        when no start is under way."""
         ...
 
     def busy(self, entry: EscalationEntry) -> Busy | None:
@@ -300,9 +301,12 @@ class SuiteLauncher:
         withdrawal = self._withdrawals[entry.label]
         withdrawal.reason = reason
         withdrawal.event.set()
-        # Wait for the thread to give up: a `docker compose up` still running would bring the container
-        # back after the stop that follows.
+        # Wait for the thread to give up (at the next poll, a few seconds): a `docker compose up` still running
+        # would bring the container back after the kill.
         await asyncio.wait({task})
+        killed, message = await asyncio.to_thread(entry.engine.kill_container)
+        if not killed:
+            logger.warning("TTS: docker kill of the withdrawn start of %s: %s", entry.label, message)
 
     async def stop(self, entry: EscalationEntry, *, force: bool = False) -> None:
         engine = entry.engine

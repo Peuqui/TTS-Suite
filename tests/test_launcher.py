@@ -543,11 +543,12 @@ def test_a_withdrawn_start_ends_its_waiters_and_is_no_failure(tmp_path: Path, mo
         await launcher.withdraw_start(entry, "GPU-Orc: loading X")
         assert time.monotonic() - started < 5  # the start gave up, it did not load for 30 s
         assert launcher.busy(entry) is None
+        assert engine.kills == 1 and not engine.loading  # shot down, not wound down
         with pytest.raises(ReadingAborted, match="GPU-Orc: loading X"):
             await waiter
         assert launcher.start_failure(entry) is None
-        await launcher.stop(entry, force=True)  # its container was still there
-        assert engine.stops == 1 and not engine.loading
+        await launcher.stop(entry, force=True)
+        assert engine.stops == 1
         engine.ready_delay_s = 0
         assert await launcher.ensure_serving(entry, wait=True) is None  # the next request starts it again
         await launcher.aclose()
