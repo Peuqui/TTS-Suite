@@ -505,6 +505,39 @@ def test_forced_gpu_release_takes_a_held_and_a_starting_engine_down(
     assert launcher.forced == ["held", "starting"]
 
 
+def test_a_forced_release_also_ends_a_reading_that_holds_an_engine_while_it_starts_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Its container went away under the reading, a second reading starts it again: busy says "starting".
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+    install(monkeypatch, ContainerEngine("starting"))
+    launcher.cards = {"starting": ("GPU-0",)}
+    launcher.busy_reasons = {"starting": "starting"}
+    aborted: list[tuple[str, str]] = []
+
+    def abort_readings(label: str, reason: str) -> int:
+        aborted.append((label, reason))
+        return 1
+
+    monkeypatch.setattr(suite._speaker, "abort_readings", abort_readings)
+    results = run_async(suite.gpu_release(("starting",), force=True, reason="loading X"))
+    assert [(r.item, r.outcome) for r in results] == [("starting", "released")]
+    assert launcher.withdrawn == [("starting", "loading X")] and aborted == [("starting", "loading X")]
+
+
+def test_an_explicit_start_that_a_forced_release_withdraws_is_a_failed_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    suite, launcher = _release_setup(tmp_path, monkeypatch)
+
+    async def start_on_gpu(entry: EscalationEntry, gpu: str) -> Skip | None:
+        raise ReadingAborted("loading X")
+
+    monkeypatch.setattr(launcher, "start_on_gpu", start_on_gpu)
+    with pytest.raises(EngineControlFailed, match=r"lo not started \(withdrawn\): the GPU is needed: loading X"):
+        run_async(suite.start("lo", gpu="0"))
+
+
 def test_gpu_release_all_takes_the_holders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     suite, launcher = _release_setup(tmp_path, monkeypatch)
     launcher.cards = {"lo": ("GPU-0",)}

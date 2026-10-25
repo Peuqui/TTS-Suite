@@ -19,6 +19,7 @@ from .api import (
     GpuHolder,
     GpuReleaseResult,
     InvalidRequest,
+    ReadingAborted,
     ReleaseResult,
     SpeakRequest,
     SuiteConfig,
@@ -169,12 +170,17 @@ class Suite:
         if gpu is not None and (entry.host is not None or not entry.engine.needs_gpu):
             raise InvalidRequest(f"{entry.label}: a card can only be named for a local GPU engine")
         self._launcher.clear_failures(entry)  # an explicit start tries again, whatever happened before
-        if gpu is not None:
-            skip = await self._launcher.start_on_gpu(entry, gpu)
-        elif await self._launcher.is_serving(entry):
-            return
-        else:
-            skip = await self._launcher.ensure_serving(entry, wait=True)
+        try:
+            if gpu is not None:
+                skip = await self._launcher.start_on_gpu(entry, gpu)
+            elif await self._launcher.is_serving(entry):
+                return
+            else:
+                skip = await self._launcher.ensure_serving(entry, wait=True)
+        except ReadingAborted as withdrawn:  # no reading here: for this caller the start just did not happen
+            raise EngineControlFailed(
+                f"{entry.label} not started (withdrawn): the GPU is needed: {withdrawn.reason}"
+            ) from withdrawn
         if skip is not None:
             raise EngineControlFailed(f"{entry.label} not started ({skip.reason}): {skip.detail}")
 
@@ -252,15 +258,15 @@ class Suite:
         except EngineControlFailed as unknown:
             return GpuReleaseResult(key, "failed", str(unknown))
         busy = self._launcher.busy(entry)
+        if busy is not None and not force:
+            what = "is starting" if busy == "starting" else "is in use by a reading"
+            return GpuReleaseResult(key, "busy", f"{entry.label} {what}")
         if busy == "starting":
-            if not force:
-                return GpuReleaseResult(key, "busy", f"{entry.label} is starting")
             await self._launcher.withdraw_start(entry, reason)
             logger.warning("TTS: start of %s withdrawn, the GPU is needed: %s", entry.label, reason)
-        if busy == "in_use":
-            if not force:
-                return GpuReleaseResult(key, "busy", f"{entry.label} is in use by a reading")
-            aborted = self._speaker.abort_readings(entry.label, reason)
+        # Also after a withdrawn start: a reading may hold the engine while a new start of it runs
+        # (its container went away under it); it must end too, not move on to the next entry.
+        if force and (aborted := self._speaker.abort_readings(entry.label, reason)):
             logger.warning("TTS: %d reading(s) on %s aborted, the GPU is needed: %s", aborted, entry.label, reason)
         try:
             await self._launcher.stop(entry, force=force)
