@@ -53,7 +53,8 @@ beim ersten Start); jede Frage hat eine Umgebungsvariable für Installationen oh
 Skript lässt sich später erneut ausführen. Edge (Cloud) und die Browser-Stimme brauchen nichts. Einmal `tts-suite serve` starten (`--voices-dir <Ordner>` für einen anderen Stimmenordner als `voices/` im Repository), damit die Konfiguration entsteht,
 dann beenden und `systemctl --user enable --now tts-suite`. Wo andere Programme (eine Dienst-Seite, AIfred) den
 Dienst starten und stoppen sollen, läuft er stattdessen als System-Unit `tts-suite@<Benutzer>`:
-`sudo deploy/switch-to-system-unit.sh` (beendet zuerst die Benutzer-Unit; beide nutzen Port 5090).
+`sudo deploy/switch-to-system-unit.sh` (beendet zuerst die Benutzer-Unit; beide nutzen Port 5090). Dafür braucht
+es polkit (Debian/Ubuntu: `polkitd`); fehlt es, bricht das Skript ab, bevor es etwas ändert.
 
 Die Seite des Dienstes, `http://127.0.0.1:5090/ui/`, zeigt den Katalog (Zustand, Starten und Stoppen jeder Engine
 auf jedem Rechner), bearbeitet die Konfiguration, listet die Stimmen (mit dem Abgleich einer Cloud-Engine) und
