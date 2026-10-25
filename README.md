@@ -27,7 +27,9 @@ text spoken without implementing speech output itself. The sister project is
 
 ## Requirements
 
-- Docker with Compose; for local GPU engines an NVIDIA GPU with the NVIDIA Container Toolkit.
+- Python 3.12 with venv (Debian/Ubuntu: `python3-venv`).
+- For the container engines (Qwen3-TTS, XTTS): Docker with Compose and an NVIDIA GPU with the NVIDIA Container
+  Toolkit. Piper, eSpeak, Edge, the cloud engines and the browser voice need neither.
 
 ## Start
 
@@ -50,8 +52,8 @@ the compose files of the engines live here), links `tts-suite` into `~/.local/bi
 `tts-suite.service`, then `deploy/install-engines.sh` asks which engines to set up: the Piper voices Thorsten and Ramona (download),
 eSpeak (package `espeak-ng`) and, with an NVIDIA GPU, the Docker images of Qwen3-TTS and XTTS (their models download on the
 first start); every question has an environment variable for unattended installs (listed in the script), and you can run the
-script again later. Edge (cloud) and the browser voice need nothing. Once, run `tts-suite serve` (`--voices-dir <folder>` for another voices folder than `voices/` of the repository) so the configuration is written, stop
-it, then `systemctl --user enable --now tts-suite`. On a machine where other programs (a service control page,
+script again later. Edge (cloud) and the browser voice need nothing. `install.sh` writes the first configuration itself
+(voices from `voices/` of this clone); then `systemctl --user enable --now tts-suite`. On a machine where other programs (a service control page,
 AIfred) must start and stop the service, run it as the system unit `tts-suite@<user>` instead:
 `sudo deploy/switch-to-system-unit.sh` (it stops the user unit first; both use port 5090). It needs polkit
 (Debian/Ubuntu: `polkitd`); without it the script stops before changing anything.

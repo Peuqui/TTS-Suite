@@ -27,7 +27,9 @@ Programm Text sprechen, ohne selbst Sprachausgabe zu bauen. Das Schwesterprojekt
 
 ## Voraussetzungen
 
-- Docker mit Compose; für lokale GPU-Engines eine NVIDIA-Grafikkarte mit dem NVIDIA Container Toolkit.
+- Python 3.12 mit venv (Debian/Ubuntu: `python3-venv`).
+- Für die Container-Engines (Qwen3-TTS, XTTS): Docker mit Compose und eine NVIDIA-Grafikkarte mit dem NVIDIA Container
+  Toolkit. Piper, eSpeak, Edge, die Cloud-Engines und die Browser-Stimme brauchen beides nicht.
 
 ## Start
 
@@ -50,8 +52,8 @@ Compose-Dateien der Engines liegen hier), verlinkt `tts-suite` nach `~/.local/bi
 `tts-suite.service`, danach fragt `deploy/install-engines.sh`, welche Engines eingerichtet werden: die Piper-Stimmen Thorsten und Ramona
 (Download), eSpeak (Paket `espeak-ng`) und, mit NVIDIA-Karte, die Docker-Images von Qwen3-TTS und XTTS (ihre Modelle laden
 beim ersten Start); jede Frage hat eine Umgebungsvariable für Installationen ohne Rückfragen (im Skript aufgelistet), und das
-Skript lässt sich später erneut ausführen. Edge (Cloud) und die Browser-Stimme brauchen nichts. Einmal `tts-suite serve` starten (`--voices-dir <Ordner>` für einen anderen Stimmenordner als `voices/` im Repository), damit die Konfiguration entsteht,
-dann beenden und `systemctl --user enable --now tts-suite`. Wo andere Programme (eine Dienst-Seite, AIfred) den
+Skript lässt sich später erneut ausführen. Edge (Cloud) und die Browser-Stimme brauchen nichts. Die erste Konfiguration
+(Stimmen aus `voices/` dieses Klons) schreibt `install.sh` selbst; danach `systemctl --user enable --now tts-suite`. Wo andere Programme (eine Dienst-Seite, AIfred) den
 Dienst starten und stoppen sollen, läuft er stattdessen als System-Unit `tts-suite@<Benutzer>`:
 `sudo deploy/switch-to-system-unit.sh` (beendet zuerst die Benutzer-Unit; beide nutzen Port 5090). Dafür braucht
 es polkit (Debian/Ubuntu: `polkitd`); fehlt es, bricht das Skript ab, bevor es etwas ändert.
