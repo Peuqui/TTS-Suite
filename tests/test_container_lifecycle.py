@@ -4,6 +4,7 @@ from __future__ import annotations
 import errno
 import socket
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -38,7 +39,7 @@ def test_ensure_ready_returns_without_starting_when_model_is_loaded(monkeypatch:
     engine = Qwen3LocalEngine()
     monkeypatch.setattr(engine, "_health", lambda timeout=None: {"model_loaded": True, "device": "cuda:0"})
     monkeypatch.setattr(engine, "_start_local", lambda: pytest.fail("must not start"))
-    assert engine.ensure_ready() == (True, "Qwen3-TTS already ready (cuda:0)", "cuda:0")
+    assert engine.ensure_ready(threading.Event()) == (True, "Qwen3-TTS already ready (cuda:0)", "cuda:0")
 
 
 def test_ensure_ready_starts_and_waits_for_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,7 +54,7 @@ def test_ensure_ready_starts_and_waits_for_the_model(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(engine, "_health", lambda timeout=None: next(answers))
     monkeypatch.setattr(engine, "_start_local", start)
     monkeypatch.setattr("time.sleep", lambda _s: None)
-    assert engine.ensure_ready() == (True, "XTTS ready (cuda)", "cuda")
+    assert engine.ensure_ready(threading.Event()) == (True, "XTTS ready (cuda)", "cuda")
     assert started == [True]
 
 
@@ -62,7 +63,7 @@ def test_ensure_ready_reports_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(engine, "_health", lambda timeout=None: None)
     monkeypatch.setattr(engine, "_start_local", lambda: (True, "up"))
     monkeypatch.setattr("time.sleep", lambda _s: None)
-    ok, message, device = engine.ensure_ready(timeout=3)
+    ok, message, device = engine.ensure_ready(threading.Event(), timeout=3)
     assert (ok, device) == (False, "")
     assert "Timeout after 3s" in message
 
@@ -92,9 +93,32 @@ def _waiting_engine(
     return engine, sleeps, asked
 
 
+def test_a_withdrawn_start_does_not_start_the_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = XTTSEngine()
+    monkeypatch.setattr(engine, "_health", lambda timeout=None: None)
+    monkeypatch.setattr(engine, "_start_local", lambda: pytest.fail("must not start"))
+    withdrawn = threading.Event()
+    withdrawn.set()
+    assert engine.ensure_ready(withdrawn) == (False, "XTTS: start withdrawn", "")
+
+
+def test_a_start_withdrawn_while_the_model_loads_gives_up_at_the_next_poll(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine, sleeps, _asked = _waiting_engine(monkeypatch, ["running"] * 10)
+    withdrawn = threading.Event()
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) == 2:
+            withdrawn.set()  # a forced GPU release, while the model loads
+
+    monkeypatch.setattr("time.sleep", sleep)
+    assert engine.ensure_ready(withdrawn, timeout=1000) == (False, "XTTS: start withdrawn", "")
+    assert len(sleeps) == 2  # not the 1000 s of the limit
+
+
 def test_ensure_ready_stops_waiting_when_the_container_exited(monkeypatch: pytest.MonkeyPatch) -> None:
     engine, sleeps, asked = _waiting_engine(monkeypatch, ["exited"], log_tail="OutOfMemoryError")
-    ok, message, device = engine.ensure_ready(timeout=1000)
+    ok, message, device = engine.ensure_ready(threading.Event(), timeout=1000)
     assert (ok, device) == (False, "")
     assert "container exited while the model loaded" in message and message.endswith(": OutOfMemoryError")
     assert asked == ["xtts"]  # the container name, asked once
@@ -103,7 +127,7 @@ def test_ensure_ready_stops_waiting_when_the_container_exited(monkeypatch: pytes
 
 def test_ensure_ready_stops_waiting_when_the_container_is_gone(monkeypatch: pytest.MonkeyPatch) -> None:
     engine, _sleeps, _asked = _waiting_engine(monkeypatch, ["absent"], log_tail="never asked for")
-    ok, message, _device = engine.ensure_ready(timeout=1000)
+    ok, message, _device = engine.ensure_ready(threading.Event(), timeout=1000)
     assert not ok
     assert message == "XTTS: container exited while the model loaded (state: absent)"
 
@@ -114,7 +138,7 @@ def test_ensure_ready_keeps_polling_while_the_container_is_there(
 ) -> None:
     limit = 3 * TTS_READY_STATE_CHECK_INTERVAL_S
     engine, sleeps, asked = _waiting_engine(monkeypatch, [alive_state] * 10)
-    ok, message, _device = engine.ensure_ready(timeout=limit)
+    ok, message, _device = engine.ensure_ready(threading.Event(), timeout=limit)
     assert not ok and f"Timeout after {limit}s" in message
     assert len(sleeps) == limit
     assert len(asked) == 2  # at 5 and 10 s; the poll at 15 s does not exist (the range ends at 14)
@@ -122,7 +146,7 @@ def test_ensure_ready_keeps_polling_while_the_container_is_there(
 
 def test_ensure_ready_stops_when_docker_cannot_tell(monkeypatch: pytest.MonkeyPatch) -> None:
     engine, sleeps, _asked = _waiting_engine(monkeypatch, docker_ctl.ContainerStateUnreadable("docker unavailable: x"))
-    ok, message, _device = engine.ensure_ready(timeout=1000)
+    ok, message, _device = engine.ensure_ready(threading.Event(), timeout=1000)
     assert not ok and "cannot tell whether the container is alive: docker unavailable: x" in message
     assert len(sleeps) == TTS_READY_STATE_CHECK_INTERVAL_S
 
@@ -131,7 +155,7 @@ def test_ensure_ready_reports_a_failed_start(monkeypatch: pytest.MonkeyPatch) ->
     engine = XTTSEngine()
     monkeypatch.setattr(engine, "_health", lambda timeout=None: None)
     monkeypatch.setattr(engine, "_start_local", lambda: (False, "no docker"))
-    assert engine.ensure_ready() == (False, "no docker", "")
+    assert engine.ensure_ready(threading.Event()) == (False, "no docker", "")
 
 
 def test_remote_engine_is_never_started_or_stopped() -> None:
@@ -145,7 +169,7 @@ def test_remote_engine_is_never_started_or_stopped() -> None:
 def test_remote_ensure_ready_only_checks_health(monkeypatch: pytest.MonkeyPatch) -> None:
     remote = XTTSEngine().at_host("192.0.2.2")
     monkeypatch.setattr(type(remote), "is_running", lambda self: False)
-    ok, message, _device = remote.ensure_ready()
+    ok, message, _device = remote.ensure_ready(threading.Event())
     assert not ok
     assert "192.0.2.2" in message
 
@@ -162,7 +186,7 @@ def test_lightweight_engines_have_nothing_to_start() -> None:
     assert engine is not None
     assert engine.start() == (True, "no-op")
     assert engine.stop() == (True, "no-op")
-    assert engine.ensure_ready() == (True, "ready", "")
+    assert engine.ensure_ready(threading.Event()) == (True, "ready", "")
 
 
 # ── docker_ctl (docker itself is replaced) ─────────────────────────

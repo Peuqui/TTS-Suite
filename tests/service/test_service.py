@@ -521,7 +521,7 @@ def test_gpu_release_refuses_a_malformed_body(tmp_path: Path, body: dict[str, ob
 
 def test_a_reading_aborted_for_the_gpu_ends_with_its_own_error_code(tmp_path: Path) -> None:
     client, suite, _ = build(tmp_path)
-    suite.stream = FakeStream([audio(data=b"one"), ReadingAborted("reading aborted, the GPU is needed: loading X")])
+    suite.stream = FakeStream([audio(data=b"one"), ReadingAborted("loading X")])
     answer = client.post("/speak", json={"text": "Hi", "language": "en", "engines": ENGINES, "paragraph_pause_ms": 0})
     frames = decode_frames(answer.content)
     assert [header["kind"] for header, _ in frames] == ["audio", "error"]

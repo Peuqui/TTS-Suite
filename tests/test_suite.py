@@ -491,15 +491,18 @@ def test_gpu_release_reports_every_outcome(tmp_path: Path, monkeypatch: pytest.M
     assert launcher.stopped == ["free"] and launcher.forced == []
 
 
-def test_forced_gpu_release_takes_a_held_engine_down_but_not_a_starting_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_forced_gpu_release_takes_a_held_and_a_starting_engine_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     suite, launcher = _release_setup(tmp_path, monkeypatch)
     for key in ("held", "starting"):
         install(monkeypatch, ContainerEngine(key))
     launcher.cards = {"held": ("GPU-0",), "starting": ("GPU-1",)}
     launcher.busy_reasons = {"held": "in_use", "starting": "starting"}
     results = run_async(suite.gpu_release(("held", "starting"), force=True, reason="loading X"))
-    assert [(r.item, r.outcome) for r in results] == [("held", "released"), ("starting", "busy")]
-    assert launcher.forced == ["held"]
+    assert [(r.item, r.outcome) for r in results] == [("held", "released"), ("starting", "released")]
+    assert launcher.withdrawn == [("starting", "loading X")]  # the start first, then the stop
+    assert launcher.forced == ["held", "starting"]
 
 
 def test_gpu_release_all_takes_the_holders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -558,6 +561,42 @@ def test_a_forced_gpu_release_ends_the_reading_with_its_reason_and_proves_the_co
     results = run_async(scenario())
     assert [(r.item, r.outcome) for r in results] == [("a", "released")]
     assert engine.stops == 1 and engine.kills == 0 and not engine.up
+
+
+def test_a_forced_gpu_release_withdraws_a_start_and_ends_the_readings_waiting_for_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Found live (25.10.): XTTS needs ~30 s to load; a forced release in that time stayed "busy".
+    engine = ContainerEngine("a", ready_delay_s=30)
+    for key in list(registry.TTS_ENGINES):  # only the fake: the registry's own engines would ask Docker
+        monkeypatch.delitem(registry.TTS_ENGINES, key)
+    install(monkeypatch, engine)
+    config = make_config(tmp_path)
+    launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh())
+    suite = Suite(config, launcher)
+
+    async def scenario() -> tuple[tuple[GpuReleaseResult, ...], float, list[Exception | None]]:
+        # Two streams of one reading (a run ID): the second waits for the selection the first one makes.
+        readings = [
+            asyncio.ensure_future(_collect_until_error(suite.speak(text, request("a", run="r1"))))
+            for text in ("Ein Satz.", "Noch einer.")
+        ]
+        await asyncio.sleep(0.05)
+        assert await suite.gpu_holders() == [GpuHolder("a", ("GPU-0",), None, True)]  # its start counts as busy
+        started = time.monotonic()
+        results = await suite.gpu_release(("a",), force=True, reason="GPU-Orc: loading X")
+        took = time.monotonic() - started
+        errors = [await reading for reading in readings]
+        await launcher.aclose()
+        return results, took, errors
+
+    results, took, errors = run_async(scenario())
+    assert [(r.item, r.outcome) for r in results] == [("a", "released")]
+    assert took < 5  # not the 30 s the model would load
+    for error in errors:  # the second one did not start the engine again
+        assert isinstance(error, ReadingAborted) and error.reason == "GPU-Orc: loading X"
+    assert engine.ready_calls == 1 and engine.stops == 1 and not engine.up and not engine.loading
+    assert launcher.start_failure(EscalationEntry(engine, None, engine.default_speech_unit)) is None  # not a failure
 
 
 def test_reload_rereads_the_engine_folders_and_binds_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

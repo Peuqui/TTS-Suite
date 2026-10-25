@@ -38,6 +38,7 @@ class ContainerEngine(FakeEngine):
     ) -> None:
         super().__init__(key, remote=remote, **kwargs)
         self.up = False
+        self.loading = False  # its container is there, the model is not loaded yet (``ensure_ready`` waits)
         self.installed = installed
         self.ready_delay_s = ready_delay_s
         self.ready_ok = ready_ok
@@ -64,10 +65,18 @@ class ContainerEngine(FakeEngine):
         self.placements.append((gpu_uuid, vram_budget_mib))
         return self
 
-    def ensure_ready(self, timeout: int | None = None) -> tuple[bool, str, str]:
+    def ensure_ready(self, withdrawn: threading.Event, timeout: int | None = None) -> tuple[bool, str, str]:
         self.ready_calls += 1
         self.started_at = time.monotonic()
-        time.sleep(self.ready_delay_s)
+        if withdrawn.is_set():
+            return False, "start withdrawn", ""
+        self.loading = True
+        # Like the real wait: the model loads for ``ready_delay_s``, a withdrawal ends the wait at the next poll
+        # and leaves the container there.
+        if withdrawn.wait(self.ready_delay_s):
+            self.finished_at = time.monotonic()
+            return False, "start withdrawn", ""
+        self.loading = False
         self.up = self.ready_ok
         self.finished_at = time.monotonic()
         return (True, "ready", "cuda:0") if self.ready_ok else (False, "model did not load", "")
@@ -75,20 +84,20 @@ class ContainerEngine(FakeEngine):
     def stop(self) -> tuple[bool, str]:
         self.stops += 1
         if not self.survives_stop:
-            self.up = False
+            self.up = self.loading = False
         return True, "stopped"
 
     def container_state(self) -> ContainerState:
-        return "running" if self.up else "absent"
+        return "running" if self.up or self.loading else "absent"
 
     def kill_container(self) -> tuple[bool, str]:
         self.kills += 1
         if not self.survives_kill:
-            self.up = False
+            self.up = self.loading = False
         return True, "killed"
 
     def container_gpus(self) -> Any:
-        return self.gpus if self.up else None
+        return self.gpus if self.up or self.loading else None
 
 
 class CardList:
@@ -169,6 +178,7 @@ class FakeManagedLauncher(FakeLauncher):
         self.failures: dict[str, Skip] = {}  # label -> why its last start failed
         self.stop_error: Exception | None = None
         self.forced: list[str] = []  # labels stopped with force
+        self.withdrawn: list[tuple[str, str]] = []  # (label, reason) of each start withdrawn
         self.busy_reasons: dict[str, Busy] = {}  # label -> why it must not be taken down now
         self.cards: dict[str, tuple[str, ...] | None] = {}  # label -> the cards of its running container (None = down)
         self.closed = False
@@ -197,6 +207,10 @@ class FakeManagedLauncher(FakeLauncher):
         if force:
             self.forced.append(entry.label)
         self.cards[entry.label] = None
+
+    async def withdraw_start(self, entry: EscalationEntry, reason: str) -> None:
+        self.withdrawn.append((entry.label, reason))
+        self.busy_reasons.pop(entry.label, None)
 
     def busy(self, entry: EscalationEntry) -> Busy | None:
         return self.busy_reasons.get(entry.label)

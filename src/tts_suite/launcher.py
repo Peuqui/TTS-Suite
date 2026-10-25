@@ -3,7 +3,9 @@
 Ported from AIfred Intelligence (``tts_escalation``): a local GPU engine starts on the card the
 rules choose (one local GPU start at a time), an engine on another host starts over SSH, an engine
 without a container (cloud, Piper, eSpeak, Edge) is only checked. Starts run as one task per entry,
-shared by everyone who waits for it and by a ``wait=False`` request that only begins it.
+shared by everyone who waits for it and by a ``wait=False`` request that only begins it. A forced
+GPU release withdraws a start of a local entry: the readings waiting for it end with
+:class:`~tts_suite.api.ReadingAborted`.
 
 Every system call (``nvidia-smi``, Docker, SSH, HTTP) sits behind a function handed to the
 constructor, so tests replace it.
@@ -13,8 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from .api import (
@@ -23,6 +27,7 @@ from .api import (
     EngineStarting,
     EntryStatus,
     Host,
+    ReadingAborted,
     SuiteConfig,
 )
 from .constants import START_WAIT_RESERVE_S, TTS_READY_POLL_INTERVAL_S
@@ -62,6 +67,12 @@ class ManagedLauncher(EngineLauncher, Protocol):
         as stopped only when Docker reports it down (after ``docker kill`` if the stop did not do it)."""
         ...
 
+    async def withdraw_start(self, entry: EscalationEntry, reason: str) -> None:
+        """End the start of a local entry that is under way and wait until it gave up; whoever waits for it
+        gets :class:`ReadingAborted` naming ``reason``. Its container is not taken down here: ``stop`` does
+        that afterwards. Nothing to do when no start is under way."""
+        ...
+
     def busy(self, entry: EscalationEntry) -> Busy | None:
         """Why the entry's container must not be taken down now; ``None`` = it may."""
         ...
@@ -85,6 +96,15 @@ class ManagedLauncher(EngineLauncher, Protocol):
     async def aclose(self) -> None: ...
 
 
+@dataclass
+class _Withdrawal:
+    """How a forced GPU release ends a start under way: the start's thread looks at ``event`` while the
+    model loads, ``reason`` goes to the readings that waited for the start."""
+
+    event: threading.Event = field(default_factory=threading.Event)
+    reason: str = ""
+
+
 class SuiteLauncher:
     """The real :class:`ManagedLauncher`."""
 
@@ -103,6 +123,7 @@ class SuiteLauncher:
         self._holds = holds or EngineHolds()
         self._clock = clock
         self._starts: dict[str, asyncio.Task[Skip | None]] = {}
+        self._withdrawals: dict[str, _Withdrawal] = {}  # label -> how its start under way can be ended
         # Why an entry is out: its last start did not work. Kept until an explicit start, a new
         # configuration or a reload. Not remembered: ``no_vram`` of the card choice, which passes
         # as soon as a card has room again.
@@ -180,7 +201,8 @@ class SuiteLauncher:
         return task if task is not None and not task.done() else None
 
     def _begin_start(self, entry: EscalationEntry, gpu: str | None = None) -> asyncio.Task[Skip | None]:
-        task = asyncio.get_running_loop().create_task(self._start(entry, gpu))
+        withdrawal = self._withdrawals[entry.label] = _Withdrawal()
+        task = asyncio.get_running_loop().create_task(self._start(entry, gpu, withdrawal))
         self._starts[entry.label] = task
         task.add_done_callback(lambda done: self._start_finished(entry.label, done))
         return task
@@ -189,9 +211,12 @@ class SuiteLauncher:
         """Remember how the start ended, so that status and a later ``wait=False`` request can tell."""
         if self._starts.get(label) is task:
             del self._starts[label]
+            del self._withdrawals[label]
         if task.cancelled():
             return
         error = task.exception()  # also marks it as retrieved: a background start has no one awaiting it
+        if isinstance(error, ReadingAborted):
+            return  # ended on purpose, nothing is wrong with the entry: the next request starts it again
         if error is not None:
             logger.error("TTS start of %s failed: %r", label, error)
             self._failures[label] = Skip("stopped", f"start failed: {type(error).__name__}: {error}")
@@ -222,14 +247,14 @@ class SuiteLauncher:
             return Skip("stopped", "docker image not built")
         return None
 
-    async def _start(self, entry: EscalationEntry, gpu: str | None) -> Skip | None:
+    async def _start(self, entry: EscalationEntry, gpu: str | None, withdrawal: _Withdrawal) -> Skip | None:
         if entry.host is not None:
             return await self._start_remote(entry.engine, entry.host)
-        return await self._start_local(entry.engine, gpu)
+        return await self._start_local(entry.engine, gpu, withdrawal)
 
-    async def _start_local(self, engine: TTSEngine, gpu: str | None) -> Skip | None:
+    async def _start_local(self, engine: TTSEngine, gpu: str | None, withdrawal: _Withdrawal) -> Skip | None:
         """Start the container on this machine — on the card the rules choose when it needs a GPU, or on
-        ``gpu`` — and wait until its model is loaded."""
+        ``gpu`` — and wait until its model is loaded. :class:`ReadingAborted` when the start is withdrawn."""
         async with self._local_gpu_start, program_lock(self._config.placement_lock_file):
             if await asyncio.to_thread(engine.is_running):
                 if gpu is not None:  # started by whoever held the lock before us, on a card of its own choice
@@ -246,7 +271,9 @@ class SuiteLauncher:
                     engine.key, placement.gpu.index, placement.budget_mib, placement.gpu.free_mib,
                 )
                 engine = engine.on_gpu(placement.gpu.uuid, placement.budget_mib)
-            ready, message, _device = await asyncio.to_thread(engine.ensure_ready)
+            ready, message, _device = await asyncio.to_thread(engine.ensure_ready, withdrawal.event)
+        if withdrawal.event.is_set():
+            raise ReadingAborted(withdrawal.reason)
         return None if ready else Skip("stopped", f"start failed: {message}")
 
     async def _start_remote(self, engine: TTSEngine, host: Host) -> Skip | None:
@@ -265,6 +292,17 @@ class SuiteLauncher:
         return None
 
     # ── Stopping and status ─────────────────────────────────────────
+
+    async def withdraw_start(self, entry: EscalationEntry, reason: str) -> None:
+        task = self._in_flight(entry.label)
+        if task is None:
+            return
+        withdrawal = self._withdrawals[entry.label]
+        withdrawal.reason = reason
+        withdrawal.event.set()
+        # Wait for the thread to give up: a `docker compose up` still running would bring the container
+        # back after the stop that follows.
+        await asyncio.wait({task})
 
     async def stop(self, entry: EscalationEntry, *, force: bool = False) -> None:
         engine = entry.engine

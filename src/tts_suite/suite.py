@@ -253,7 +253,10 @@ class Suite:
             return GpuReleaseResult(key, "failed", str(unknown))
         busy = self._launcher.busy(entry)
         if busy == "starting":
-            return GpuReleaseResult(key, "busy", f"{entry.label} is starting")
+            if not force:
+                return GpuReleaseResult(key, "busy", f"{entry.label} is starting")
+            await self._launcher.withdraw_start(entry, reason)
+            logger.warning("TTS: start of %s withdrawn, the GPU is needed: %s", entry.label, reason)
         if busy == "in_use":
             if not force:
                 return GpuReleaseResult(key, "busy", f"{entry.label} is in use by a reading")

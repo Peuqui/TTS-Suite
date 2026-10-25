@@ -7,6 +7,7 @@ import logging
 import socket
 import subprocess
 import sys
+import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
@@ -468,16 +469,18 @@ class TTSEngine(ABC):
         self._require_local("inspect")
         return container_gpus(self.service_dir)
 
-    def ensure_ready(self, timeout: int | None = None) -> tuple[bool, str, str]:
+    def ensure_ready(self, withdrawn: threading.Event, timeout: int | None = None) -> tuple[bool, str, str]:
         """Ensure the engine is up and serving. Returns
         ``(success, status_message, device)``. ``device`` is the engine's
         compute target ("cuda:0", "cpu", "") — empty for engines that
-        don't expose one. A remote engine is not started, only checked."""
+        don't expose one. A remote engine is not started, only checked.
+        ``withdrawn`` set = give up at once: before the container is started, or at the
+        next poll while its model loads (a forced GPU release takes it down afterwards)."""
         if self.is_remote:
             if self.is_running():
                 return True, f"{self.label_short} ready on {self.address}", ""
             return False, f"{self.label_short} not serving on {self.address}", ""
-        return self._ensure_ready_local(timeout)
+        return self._ensure_ready_local(timeout, withdrawn)
 
     def _require_local(self, action: str) -> None:
         if self.is_remote:
@@ -502,7 +505,7 @@ class TTSEngine(ABC):
             self.docker_compose_path, "down", self.label_short, voices_dir=self.shared_voices_dir,
         )
 
-    def _ensure_ready_local(self, timeout: int | None) -> tuple[bool, str, str]:
+    def _ensure_ready_local(self, timeout: int | None, withdrawn: threading.Event) -> tuple[bool, str, str]:
         """Start the container if needed and wait until its model is loaded."""
         if not self.runs_in_container:
             return True, "ready", ""
@@ -512,6 +515,8 @@ class TTSEngine(ABC):
             device = self._device(health)
             return True, f"{self.label_short} already ready ({device})", device
 
+        if withdrawn.is_set():
+            return False, f"{self.label_short}: start withdrawn", ""
         success, message = self._start_local()
         if not success:
             return False, message, ""
@@ -519,6 +524,8 @@ class TTSEngine(ABC):
         limit = timeout or self.startup_timeout_s
         logger.info("%s: waiting for model to load...", self.label_short)
         for waited in range(limit):
+            if withdrawn.is_set():
+                return False, f"{self.label_short}: start withdrawn", ""
             health = self._health(timeout=TTS_READY_POLL_TIMEOUT_S)
             if health is not None and self._model_ready(health):
                 device = self._device(health)

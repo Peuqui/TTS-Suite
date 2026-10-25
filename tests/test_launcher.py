@@ -23,6 +23,7 @@ from tts_suite.api import (
     EngineInUse,
     EngineStarting,
     GpuRule,
+    ReadingAborted,
     SuiteConfig,
     TraceStep,
 )
@@ -522,6 +523,33 @@ def test_a_forced_stop_takes_a_held_container_down_but_not_a_starting_one(tmp_pa
         assert launcher.busy(entry) == "starting"
         with pytest.raises(EngineInUse, match="starting"):
             await launcher.stop(entry, force=True)
+        await launcher.aclose()
+
+    run_async(scenario())
+
+
+def test_a_withdrawn_start_ends_its_waiters_and_is_no_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = ContainerEngine("a", ready_delay_s=30)
+    install(monkeypatch, engine)
+    launcher = _launcher(tmp_path)
+
+    async def scenario() -> None:
+        entry = local_entry(engine)
+        await launcher.withdraw_start(entry, "nothing starts")  # no start under way: nothing to do
+        waiter = asyncio.ensure_future(launcher.ensure_serving(entry, wait=True))
+        await asyncio.sleep(0.05)
+        assert launcher.busy(entry) == "starting" and engine.loading
+        started = time.monotonic()
+        await launcher.withdraw_start(entry, "GPU-Orc: loading X")
+        assert time.monotonic() - started < 5  # the start gave up, it did not load for 30 s
+        assert launcher.busy(entry) is None
+        with pytest.raises(ReadingAborted, match="GPU-Orc: loading X"):
+            await waiter
+        assert launcher.start_failure(entry) is None
+        await launcher.stop(entry, force=True)  # its container was still there
+        assert engine.stops == 1 and not engine.loading
+        engine.ready_delay_s = 0
+        assert await launcher.ensure_serving(entry, wait=True) is None  # the next request starts it again
         await launcher.aclose()
 
     run_async(scenario())

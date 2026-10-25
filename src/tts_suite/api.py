@@ -187,7 +187,7 @@ class ReleaseResult:
 GpuReleaseOutcome = Literal["released", "not_running", "busy", "failed"]
 """The common release API of the suites (the STT-Suite has the same; GPU-Orc uses it). ``released`` = the
 container is proven down (Docker reports it gone or exited); ``not_running`` = nothing to release; ``busy`` = a
-reading holds it (only without force) or it is starting; ``failed`` = the end could not be proven (``detail``
+reading holds it or it is starting (both only without force); ``failed`` = the end could not be proven (``detail``
 says why)."""
 
 
@@ -377,8 +377,13 @@ class EngineControlFailed(SuiteError):
 
 
 class ReadingAborted(SuiteError):
-    """A reading ended because the card of an engine it uses is needed (a forced GPU release); the message
-    names the reason. It does not move on to the next entry: clients show it and may read the text again."""
+    """A reading ended because the card of an engine it uses or waits for is needed (a forced GPU release);
+    the message names the reason. It does not move on to the next entry: clients show it and may read the
+    text again."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"reading aborted, the GPU is needed: {reason}")
+        self.reason = reason
 
 
 class ConfigInvalid(SuiteError):
@@ -454,10 +459,10 @@ class TTSSuite(Protocol):
         self, items: tuple[str, ...] | Literal["all"], *, force: bool, reason: str
     ) -> tuple[GpuReleaseResult, ...]:
         """Take local GPU engines off their cards; ``items`` are engine keys, ``"all"`` = every holder.
-        Without ``force`` an engine a reading holds stays (``busy``); with ``force`` those readings end with
-        :class:`ReadingAborted` naming ``reason``, then the container is stopped. An engine that is starting
-        stays ``busy`` either way (its start cannot be called back). ``released`` only once Docker reports the
-        container down; a stop that does not take it down is followed by ``docker kill``.
+        Without ``force`` an engine a reading holds or that is starting stays (``busy``); with ``force`` a start
+        under way is withdrawn and the readings that hold the engine or wait for its start end with
+        :class:`ReadingAborted` naming ``reason``, then the container is stopped. ``released`` only once Docker
+        reports the container down; a stop that does not take it down is followed by ``docker kill``.
         :class:`InvalidRequest` for an unknown or repeated item, an empty list or an empty reason."""
         ...
 

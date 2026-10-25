@@ -332,14 +332,14 @@ class SpeechRun:
         return label in self._held
 
     def abort(self, reason: str) -> None:
-        """End the reading because the card of an engine it holds is needed. Every unit not yet spoken
+        """End the reading because the card of an engine it holds or waits for is needed. Every unit not yet spoken
         fails with :class:`ReadingAborted` naming ``reason``, also a synthesis that fails because its
         container goes down: an aborted reading does not move on to the next entry."""
         self._aborted = reason
 
     def _raise_if_aborted(self) -> None:
         if self._aborted is not None:
-            raise ReadingAborted(f"reading aborted, the GPU is needed: {self._aborted}")
+            raise ReadingAborted(self._aborted)
 
     def attach(self) -> None:
         """A stream starts to use this run (several streams may share one under a run ID)."""
@@ -411,7 +411,13 @@ class SpeechRun:
                 except TTSFailure as failure:
                     self._fail(entry, failure.reason, failure.detail)
                     continue
-                skip = await self._skip(entry, request.wait)
+                try:
+                    skip = await self._skip(entry, request.wait)
+                except ReadingAborted as aborted:
+                    # The start it waited for was withdrawn: a stream of this run that waits for the
+                    # selection must not start it again.
+                    self.abort(aborted.reason)
+                    raise
                 if skip is None:
                     logger.info("TTS escalation: %s speaks", entry.label)
                     self._current = entry
