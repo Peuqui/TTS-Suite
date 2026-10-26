@@ -9,7 +9,7 @@ from concurrent.futures import Executor
 from pathlib import Path
 
 import pytest
-from container_fakes import CardList, ContainerEngine, FakeSsh, install, local_entry, make_config
+from container_fakes import CardList, ContainerEngine, FakePlace, FakeSsh, install, local_entry, make_config
 from speech_fakes import FakeEngine, FakeLauncher, frames_for, request, run_async, wav_bytes
 
 from tts_suite.api import AudioSegment, EngineDefaults, SuiteError
@@ -64,7 +64,7 @@ def test_a_health_check_is_not_starved_by_syntheses_that_fill_the_default_execut
     default_executor_size = min(32, (os.cpu_count() or 1) + 4)
     container = ContainerEngine("container")
     container.up = True
-    launcher = SuiteLauncher(make_config(tmp_path), gpus=CardList(20000), host_command=FakeSsh())
+    launcher = SuiteLauncher(make_config(tmp_path), gpus=CardList(), place=FakePlace(), host_command=FakeSsh())
 
     async def scenario() -> float:
         streams = [speaker.speak(f"Satz Nummer {number} hier.", REQUEST) for number in range(default_executor_size + 2)]

@@ -7,6 +7,7 @@ import io
 import json
 import threading
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ from tts_suite.engines.base import Reachability
 from tts_suite.escalation import EscalationEntry, Skip
 from tts_suite.host_ctl import HostControlError
 from tts_suite.launcher import Busy
-from tts_suite.placement import GpuInfo
+from tts_suite.placement import GpuInfo, PlacementRefused, PlaceRequest
 
 ARAGON = Host("Aragon", "192.0.2.2")
 
@@ -103,11 +104,14 @@ class ContainerEngine(FakeEngine):
         return self.gpus if self.up or self.loading else None
 
 
-class CardList:
-    """What ``nvidia-smi`` lists. ``queries`` counts the calls, ``take`` makes a card fuller."""
+GPU_ORC = "http://gpu-orc.invalid"  # a reserved name: a test that forgets its fake reaches nothing real
 
-    def __init__(self, *free_mib: int, total_mib: int = 24000) -> None:
-        self.cards = [GpuInfo(index, f"GPU-{index}", free, total_mib, total_mib - free) for index, free in enumerate(free_mib)]
+
+class CardList:
+    """What ``nvidia-smi`` lists: ``count`` cards GPU-0, GPU-1, … ``queries`` counts the calls."""
+
+    def __init__(self, count: int = 1) -> None:
+        self.cards = [GpuInfo(index, f"GPU-{index}") for index in range(count)]
         self.queries = 0
         self._lock = threading.Lock()
 
@@ -117,23 +121,45 @@ class CardList:
             return list(self.cards)
 
 
-class FakeGpuOrc:
-    """Replaces ``urlopen`` for GPU-Orc's ``GET /status``: ``available`` per card UUID (``None`` = it cannot
-    say), ``error`` makes it unreachable; ``urls`` records what was asked."""
+class FakePlace:
+    """Replaces GPU-Orc's ``POST /place``: it names ``card`` (or the card the request names), or refuses with
+    ``refusal``; ``requests`` records what was asked, with the address."""
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, available: dict[str, int | None],
-                 errors: list[dict[str, str]] | None = None, error: OSError | None = None) -> None:
-        self.body = {"gpus": [{"uuid": uuid, "available_mib": mib} for uuid, mib in available.items()],
-                     "errors": errors or []}
+    def __init__(self, card: int = 0, refusal: str | None = None) -> None:
+        self.card = card
+        self.refusal = refusal
+        self.requests: list[tuple[str, PlaceRequest]] = []
+        self._lock = threading.Lock()
+
+    def __call__(self, url: str, request: PlaceRequest) -> GpuInfo:
+        with self._lock:
+            self.requests.append((url, request))
+        if self.refusal is not None:
+            raise PlacementRefused(self.refusal)
+        index = self.card if request.card is None else int(request.card)
+        return GpuInfo(index, f"GPU-{index}")
+
+
+class FakeGpuOrc:
+    """Replaces ``urlopen`` for GPU-Orc itself: ``GET /health`` says ``caller_timeout_s``, ``POST /place`` gives
+    ``answer``; ``error`` is raised for the place instead. ``calls`` records (method, url, body, timeout)."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, answer: dict[str, Any] | None = None,
+                 error: OSError | None = None, caller_timeout_s: float = 210.0) -> None:
+        self.answer = answer
         self.error = error
-        self.urls: list[str] = []
+        self.caller_timeout_s = caller_timeout_s
+        self.calls: list[tuple[str, str, Any, float]] = []
         monkeypatch.setattr(placement.urllib.request, "urlopen", self._urlopen)
 
-    def _urlopen(self, url: str, timeout: float) -> io.BytesIO:
-        self.urls.append(url)
+    def _urlopen(self, request: urllib.request.Request, timeout: float) -> io.BytesIO:
+        body = None if request.data is None else json.loads(request.data)  # type: ignore[arg-type]
+        self.calls.append((request.get_method(), request.full_url, body, timeout))
+        if request.full_url.endswith("/health"):
+            return io.BytesIO(json.dumps({"status": "ok", "caller_timeout_s": self.caller_timeout_s}).encode())
         if self.error is not None:
             raise self.error
-        return io.BytesIO(json.dumps(self.body).encode())
+        return io.BytesIO(json.dumps(self.answer).encode())
 
 
 class FakeSsh:
@@ -180,7 +206,7 @@ def install(monkeypatch: pytest.MonkeyPatch, *engines: FakeEngine) -> None:
 
 
 def make_config(tmp_path: Path, engines: dict[str, EngineDefaults] | None = None, **kwargs: Any) -> SuiteConfig:
-    return SuiteConfig(voices_dir=tmp_path, engines=engines or {}, **kwargs)
+    return SuiteConfig(voices_dir=tmp_path, engines=engines or {}, **{"gpu_orc_url": GPU_ORC, **kwargs})
 
 
 class FakeManagedLauncher(FakeLauncher):

@@ -1,23 +1,25 @@
-"""Card choice for a local GPU engine: the rules of ``SuiteConfig`` applied to what ``nvidia-smi`` says.
+"""Where a local GPU engine starts: the GPU-Orc of this machine decides (``POST /place``), the suite starts the
+engine on the card it names.
 
-Ported from AIfred Intelligence (``place_local_gpu_engine``), with the rules in the configuration
-instead of a callback: ``gpu_mode`` (``auto`` = a card nobody uses first, then the one with the most free VRAM; ``list`` = only the cards of
-``gpus``: order = preference, ``reserve_mib`` stays free for other programs),
-``headroom_mib`` (margin on top of the budget) and the budget of the engine.
+GPU-Orc counts what every program may take on a card (a vLLM model its share, an engine its budget), keeps a
+margin on top and promises the room for a while, so two programs that start together never get the same room.
+The suite only knows the cards by index and UUID (``nvidia-smi``), to read which ones a container uses.
 """
 
 from __future__ import annotations
 
 import json
 import subprocess
+import urllib.error
 import urllib.request
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from typing import Any
 
 from .api import GpuNeedSource, SuiteConfig
-from .constants import GPU_ORC_STATUS_TIMEOUT_S, NVIDIA_SMI_QUERY_TIMEOUT_S
+from .constants import GPU_ORC_HEALTH_TIMEOUT_S, NVIDIA_SMI_QUERY_TIMEOUT_S
 from .engines.base import TTSEngine
 
-NVIDIA_SMI_GPU_FIELDS = "index,uuid,memory.free,memory.total,memory.used"
+NVIDIA_SMI_GPU_FIELDS = "index,uuid"
 
 
 class PlacementRefused(Exception):
@@ -28,36 +30,30 @@ class PlacementRefused(Exception):
 class GpuInfo:
     index: int
     uuid: str
-    free_mib: int
-    total_mib: int
-    used_mib: int
-
-    @property
-    def is_unused(self) -> bool:
-        """No program holds memory on the card (not even a CUDA context)."""
-        return self.used_mib == 0
 
 
 @dataclass(frozen=True)
-class Placement:
-    """Where a GPU engine goes: the card, and the budget it is started with."""
+class PlaceRequest:
+    """What the suite asks GPU-Orc before it starts an engine on a card."""
 
-    gpu: GpuInfo
-    budget_mib: int
+    consumer: str  # the suite as GPU-Orc's configuration names it
+    item: str  # the engine as ``/gpu/holders`` names it
+    need_mib: int  # its budget, without margin (GPU-Orc adds its own)
+    reason: str
+    card: str | None = None  # only this card (index or UUID)
 
 
 def parse_gpus(output: str) -> list[GpuInfo]:
-    """The ``nvidia-smi --query-gpu=index,uuid,memory.free,memory.total,memory.used --format=csv,noheader,nounits`` lines."""
+    """The ``nvidia-smi --query-gpu=index,uuid --format=csv,noheader,nounits`` lines."""
     cards = []
     for line in output.strip().splitlines():
-        index, uuid, free, total, used = (value.strip() for value in line.split(","))
-        cards.append(GpuInfo(int(index), uuid, int(free), int(total), int(used)))
+        index, uuid = (value.strip() for value in line.split(","))
+        cards.append(GpuInfo(int(index), uuid))
     return cards
 
 
 def query_gpus() -> list[GpuInfo]:
-    """The cards of this machine with their free VRAM. :class:`PlacementRefused` when ``nvidia-smi``
-    does not answer or lists no card."""
+    """The cards of this machine. :class:`PlacementRefused` when ``nvidia-smi`` does not answer or lists no card."""
     command = ["nvidia-smi", f"--query-gpu={NVIDIA_SMI_GPU_FIELDS}", "--format=csv,noheader,nounits"]
     try:
         result = subprocess.run(
@@ -73,22 +69,48 @@ def query_gpus() -> list[GpuInfo]:
     return cards
 
 
-def with_room_from_gpu_orc(cards: list[GpuInfo], url: str) -> list[GpuInfo]:
-    """The cards with GPU-Orc's ``available_mib`` as their free VRAM where it is less: what a vLLM model
-    may fill while it computes is not free, even where ``nvidia-smi`` shows it so. :class:`PlacementRefused`
-    when GPU-Orc does not answer, or cannot say what is free (a consumer did not report)."""
+def place_with_gpu_orc(url: str, request: PlaceRequest) -> GpuInfo:
+    """The card GPU-Orc gives the engine; its need is promised there until the engine shows in ``/gpu/holders``.
+    Waits as long as GPU-Orc says a caller should (``caller_timeout_s``: making room may take that long).
+    :class:`PlacementRefused` with GPU-Orc's reason when no card has room, or when GPU-Orc gives no usable answer."""
+    base = url.rstrip("/")
+    body: dict[str, Any] = {
+        "consumer": request.consumer, "item": request.item, "need_mib": request.need_mib, "reason": request.reason,
+    }
+    if request.card is not None:
+        body["card"] = int(request.card) if request.card.isdigit() else request.card
     try:
-        with urllib.request.urlopen(f"{url.rstrip('/')}/status", timeout=GPU_ORC_STATUS_TIMEOUT_S) as response:
-            status = json.load(response)
-        room = {gpu["uuid"]: gpu["available_mib"] for gpu in status["gpus"]}
-        free = [(card, room[card.uuid]) for card in cards]
-    except OSError as exc:
-        raise PlacementRefused(f"GPU-Orc at {url} did not answer: {exc}") from exc
-    except (ValueError, KeyError, TypeError) as exc:
-        raise PlacementRefused(f"GPU-Orc at {url} answered in an unknown form: {exc!r}") from exc
-    if any(available is None for _, available in free):
-        raise PlacementRefused(f"GPU-Orc cannot say what is free: {status.get('errors')}")
-    return [replace(card, free_mib=min(card.free_mib, available)) for card, available in free]
+        health = _call(urllib.request.Request(f"{base}/health"), GPU_ORC_HEALTH_TIMEOUT_S)
+        post = urllib.request.Request(
+            f"{base}/place", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST",
+        )
+        answer = _call(post, float(health["caller_timeout_s"]))
+        card = answer["card"]
+        placed = None if card is None else GpuInfo(int(card["index"]), str(card["uuid"]))
+        why = answer["why"]
+    except urllib.error.HTTPError as error:
+        raise PlacementRefused(f"GPU-Orc at {url} refused: {error.code} {_error_text(error)}") from error
+    except OSError as error:
+        raise PlacementRefused(f"GPU-Orc at {url} did not answer: {error}") from error
+    except (ValueError, KeyError, TypeError) as error:
+        raise PlacementRefused(f"GPU-Orc at {url} answered in an unknown form: {error!r}") from error
+    if placed is None:
+        raise PlacementRefused(f"GPU-Orc: {why}")
+    return placed
+
+
+def _call(request: urllib.request.Request, timeout_s: float) -> Any:
+    with urllib.request.urlopen(request, timeout=timeout_s) as response:
+        return json.load(response)
+
+
+def _error_text(error: urllib.error.HTTPError) -> str:
+    """GPU-Orc's ``{"error": ...}``, else the raw body."""
+    raw = error.read().decode(errors="replace")
+    try:
+        return str(json.loads(raw)["error"])
+    except (ValueError, KeyError, TypeError):
+        return raw[:200]
 
 
 def vram_budget(engine: TTSEngine, config: SuiteConfig) -> tuple[int | None, GpuNeedSource]:
@@ -105,44 +127,3 @@ def vram_budget(engine: TTSEngine, config: SuiteConfig) -> tuple[int | None, Gpu
 def vram_budget_mib(engine: TTSEngine, config: SuiteConfig) -> int | None:
     """The VRAM an engine may use (see :func:`vram_budget`)."""
     return vram_budget(engine, config)[0]
-
-
-def _candidates(cards: list[GpuInfo], config: SuiteConfig) -> list[tuple[GpuInfo, int]]:
-    """The cards in the order they are tried, each with the VRAM left after its reserve."""
-    if config.gpu_mode == "auto":
-        # A card nobody uses first (the engines of this suite and the STT suite then spread over the
-        # free cards instead of piling onto the one with the most room), then the most free VRAM.
-        ordered = sorted(cards, key=lambda card: (not card.is_unused, -card.free_mib, card.index))
-        return [(card, card.free_mib) for card in ordered]
-    candidates = []
-    for rule in config.gpus:
-        card = next((card for card in cards if rule.gpu in (str(card.index), card.uuid)), None)
-        if card is not None:  # a listed card that is not there (not plugged in) is simply not an option
-            candidates.append((card, card.free_mib - rule.reserve_mib))
-    return candidates
-
-
-def _named_card(cards: list[GpuInfo], gpu: str) -> list[tuple[GpuInfo, int]]:
-    """The one card a start asks for by index or UUID, with all its free VRAM."""
-    card = next((card for card in cards if gpu in (str(card.index), card.uuid)), None)
-    if card is None:
-        raise PlacementRefused(f"GPU {gpu} is not present")
-    return [(card, card.free_mib)]
-
-
-def choose_gpu(cards: list[GpuInfo], engine: TTSEngine, config: SuiteConfig, gpu: str | None = None) -> Placement:
-    """The first card (in the order of ``config.gpus`` in list mode, else a card nobody uses first, then the most free VRAM)
-    whose free VRAM minus reserve covers the budget plus headroom; with ``gpu`` (index or UUID) only that card,
-    outside the rules of ``gpu_mode``. :class:`PlacementRefused` when none does or the budget is unknown."""
-    budget = vram_budget_mib(engine, config)
-    if budget is None:
-        raise PlacementRefused(f"no VRAM budget for {engine.key} — set engines[{engine.key}].vram_budget_mib")
-    needed = budget + config.headroom_mib
-    candidates = _candidates(cards, config) if gpu is None else _named_card(cards, gpu)
-    if not candidates:
-        raise PlacementRefused("none of the configured GPUs is present")
-    for card, available in candidates:
-        if available >= needed:
-            return Placement(card, budget)
-    card, available = max(candidates, key=lambda candidate: candidate[1])
-    raise PlacementRefused(f"needs {needed} MiB, most free {available} MiB on GPU {card.index}")

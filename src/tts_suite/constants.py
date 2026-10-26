@@ -257,13 +257,10 @@ TTS_HOST_SSH_COMMAND_TIMEOUT_S = 60
 #: ``nvidia-smi`` queries: the card list, the processes using a card, and ``docker compose ps`` /
 #: ``docker top`` (the host PIDs of a container).
 NVIDIA_SMI_QUERY_TIMEOUT_S = 5
-#: GPU-Orc's ``GET /status`` before a start; it asks every consumer of the cards, this suite included.
-GPU_ORC_STATUS_TIMEOUT_S = 30
+#: GPU-Orc's ``GET /health`` before a start (it says how long a ``POST /place`` may take).
+GPU_ORC_HEALTH_TIMEOUT_S = 5
 NVIDIA_SMI_APPS_TIMEOUT_S = 10
 DOCKER_PIDS_TIMEOUT_S = 10
-
-#: Waiting for the card-choice lock another program holds (``placement_lock``): how often to look again.
-PLACEMENT_LOCK_POLL_INTERVAL_S = 0.2
 
 #: Shape of a host address and an SSH user in the configuration. Both end up as the target of an ``ssh``
 #: command; a value starting with ``-`` would be read as an ssh option, so neither may.

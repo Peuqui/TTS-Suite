@@ -36,13 +36,11 @@ class _Run:
 
 
 def test_query_gpus_reads_the_card_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    run = _Run("0, GPU-aaa, 21000, 24576, 3500\n1, GPU-bbb, 900, 16384, 0\n")
+    run = _Run("0, GPU-aaa\n1, GPU-bbb\n")
     monkeypatch.setattr(subprocess, "run", run)
     cards = placement.query_gpus()
-    assert [(c.index, c.uuid, c.free_mib, c.total_mib, c.used_mib) for c in cards] == [(0, "GPU-aaa", 21000, 24576, 3500), (1, "GPU-bbb", 900, 16384, 0)]
-    assert run.calls[0]["command"] == [
-        "nvidia-smi", "--query-gpu=index,uuid,memory.free,memory.total,memory.used", "--format=csv,noheader,nounits",
-    ]
+    assert [(c.index, c.uuid) for c in cards] == [(0, "GPU-aaa"), (1, "GPU-bbb")]
+    assert run.calls[0]["command"] == ["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader,nounits"]
 
 
 @pytest.mark.parametrize(

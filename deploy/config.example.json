@@ -9,9 +9,8 @@
     }
   ],
   "engines": {},
-  "gpu_mode": "auto",
-  "gpus": [],
-  "headroom_mib": 512,
+  "gpu_orc_url": "http://127.0.0.1:5070",
+  "gpu_orc_consumer": "tts-suite",
   "pronunciations": {
     "AIfred": "Alfred",
     "AIfreds": "Alfreds",

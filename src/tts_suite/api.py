@@ -22,7 +22,6 @@ from typing import Literal, Protocol
 Unit = Literal["sentence", "paragraph", "whole"]
 """How much text an engine takes at once. The client cuts the text by it."""
 
-GpuMode = Literal["auto", "list"]
 EntryStatus = Literal["running", "stopped", "starting", "unreachable"]
 """``running`` = speaks; ``starting`` = a start is under way; ``stopped`` = nothing runs, the host (if any)
 is up, so it can be started; ``unreachable`` = the host does not answer, or a cloud engine has no access."""
@@ -74,22 +73,13 @@ class EngineDefaults:
     # Speed and pitch per voice name (as the voice list shows it): they apply whenever that voice
     # speaks, after what the request itself says and before the defaults of the engine above.
     voice_tuning: Mapping[str, VoiceTuning] = field(default_factory=dict)
-    vram_budget_mib: int | None = None  # GPU engines: VRAM the engine may use (card choice + cap in the container)
+    vram_budget_mib: int | None = None  # GPU engines: VRAM the engine may use (its need at GPU-Orc + cap in the container)
     max_parallel: int | None = None  # requests running at once; None = the engine's own default
     max_queue: int | None = None  # requests waiting beyond that, then ``Overloaded``; None = engine default
 
 
-@dataclass(frozen=True)
-class GpuRule:
-    """One card the suite may put GPU engines on (order = preference)."""
-
-    gpu: str  # index as ``nvidia-smi`` lists it, or the card's UUID
-    reserve_mib: int = 0  # VRAM that stays free for other programs on this card
-
-
-HEADROOM_MIB_DEFAULT = 512
-"""Safety margin on top of an engine's budget when a card is chosen; the value AIfred
-Intelligence has used for its burn-in peaks so far."""
+GPU_ORC_CONSUMER_DEFAULT = "tts-suite"
+"""The name of this suite among the consumers of GPU-Orc's configuration."""
 
 
 @dataclass(frozen=True)
@@ -99,28 +89,18 @@ class SuiteConfig:
     Secrets: the keys of cloud engines are NOT part of this object (they live in
     the environment or in files only the user can read).
 
-    GPU placement is a rule set, not a callback: the suite owns the cards' use for all
-    programs that talk to it. The suite offers every engine it knows (the catalog,
-    :meth:`TTSSuite.engines`); it keeps NO escalation list: each request brings its own, so no
-    program owns a list the others share. ``gpu_mode`` ``auto`` puts an engine on a card no program uses
-    (``memory.used`` 0) that fits, else on the card with the most free VRAM that fits (the default); ``list`` only on the cards of ``gpus``, the first
-    one whose free VRAM (``nvidia-smi``) minus ``reserve_mib`` covers the engine's ``vram_budget_mib``
-    plus ``headroom_mib``. The container gets the budget itself as its cap; the headroom
-    only keeps a card from being filled to the last MiB. The cap counts PyTorch memory only,
-    so it is an outlier guard, not an exact limit; the suite does not watch the use or stop an
-    engine for it (``EngineInfo.vram_mib`` only reports it). In ``auto`` mode ``gpus`` is not
-    used (and kept for the next switch to ``list``). No card fits: the entry is skipped with
-    ``no_vram`` (not remembered: the next request chooses again).
+    The suite offers every engine it knows (the catalog, :meth:`TTSSuite.engines`); it keeps NO
+    escalation list: each request brings its own, so no program owns a list the others share.
 
-    ``placement_lock_file`` names a file that every program placing models on the cards locks (``flock``)
-    while it chooses a card and loads onto it (the STT suite does); programs that start together then do
-    not choose the same card. ``None`` = the suite is alone on the cards.
-
-    ``gpu_orc_url`` names the GPU-Orc of this machine (``http://127.0.0.1:5070``). Its ``available_mib``
-    per card then counts as the free VRAM where it is less than what ``nvidia-smi`` shows: a vLLM model
-    may fill its share of a card (``--gpu-memory-utilization``) while it computes, and an engine placed
-    in that gap left the model without memory (25.10.2026). A GPU-Orc that does not answer or cannot say
-    what is free refuses the start (``no_vram``). ``None`` = no GPU-Orc on this machine, ``nvidia-smi`` alone.
+    A local GPU engine starts only on the card the GPU-Orc of this machine names (``gpu_orc_url``, for
+    example ``http://127.0.0.1:5070``; ``POST /place`` as ``gpu_orc_consumer`` with the engine's
+    ``vram_budget_mib`` as its need). GPU-Orc counts what every program may take on a card, adds its
+    margin and promises the room until the engine shows in ``/gpu/holders``, so programs that start
+    together do not choose the same room. The container gets the budget as its cap. The cap counts
+    PyTorch memory only, so it is an outlier guard, not an exact limit; the suite does not watch the
+    use or stop an engine for it (``EngineInfo.vram_mib`` only reports it). GPU-Orc finds no room or
+    does not answer: the entry is skipped with ``no_vram`` (not remembered: the next request asks again).
+    ``gpu_orc_url`` ``None``: no GPU engine starts on this machine (``stopped``, until a new configuration).
 
     ``pronunciations`` maps a word to the form that is spoken instead (whole words, case as
     written; for example "AIfred" -> "Alfred"). The text cleaning of every unit applies it; it is
@@ -130,11 +110,8 @@ class SuiteConfig:
     voices_dir: Path
     hosts: tuple[Host, ...] = ()  # optional other machines (SSH keys are the service's); empty = this machine only
     engines: Mapping[str, EngineDefaults] = field(default_factory=dict)
-    gpu_mode: GpuMode = "auto"
-    gpus: tuple[GpuRule, ...] = ()
-    headroom_mib: int = HEADROOM_MIB_DEFAULT
-    placement_lock_file: Path | None = None  # shared with other programs that place models on the cards
-    gpu_orc_url: str | None = None  # the GPU-Orc of this machine: what is really free on a card
+    gpu_orc_url: str | None = None  # the GPU-Orc of this machine: it names the card of every GPU engine
+    gpu_orc_consumer: str = GPU_ORC_CONSUMER_DEFAULT
     pronunciations: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -455,10 +432,9 @@ class TTSSuite(Protocol):
 
     async def start(self, engine: str, host: str | None = None, gpu: str | None = None) -> None:
         """Start the container of any catalog row and wait until it serves. Forgets why an earlier start
-        of it failed. ``gpu`` (index or UUID) puts a local GPU engine on that card, outside the rules of
-        ``gpu_mode`` (for a measurement on a given card): :class:`InvalidRequest` for an engine on a host or
-        without GPU, :class:`EngineInUse` while it runs or starts, :class:`EngineControlFailed` when the card
-        is not there or has too little room."""
+        of it failed. ``gpu`` (index or UUID) asks GPU-Orc for that card only (for a measurement on a given
+        card): :class:`InvalidRequest` for an engine on a host or without GPU, :class:`EngineInUse` while it
+        runs or starts, :class:`EngineControlFailed` when the card is not there or has too little room."""
         ...
 
     async def stop(self, engine: str, host: str | None = None) -> None: ...

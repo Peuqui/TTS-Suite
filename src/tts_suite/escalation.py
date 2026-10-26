@@ -147,11 +147,6 @@ def _check_pronunciations(config: SuiteConfig) -> None:
             raise ConfigInvalid("pronunciations: a word must not be empty")
 
 
-def _check_gpus(config: SuiteConfig) -> None:
-    if config.gpu_mode == "list" and not config.gpus:
-        raise ConfigInvalid("gpu_mode list needs at least one card in gpus")
-
-
 def check_config(config: SuiteConfig) -> dict[str, Host]:
     """THE check of a configuration: whatever cannot work (a missing ``voices_dir``, a bad host,
     defaults for an unknown engine or with bad limits) is :class:`ConfigInvalid`. Returns the hosts
@@ -161,7 +156,6 @@ def check_config(config: SuiteConfig) -> dict[str, Host]:
     hosts = _index_hosts(config)
     _check_defaults(config)
     _check_pronunciations(config)
-    _check_gpus(config)
     return hosts
 
 

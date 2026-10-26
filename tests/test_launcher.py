@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 from container_fakes import (
+    GPU_ORC,
     CardList,
     ContainerEngine,
-    FakeGpuOrc,
+    FakePlace,
     FakeSsh,
     install,
     local_entry,
@@ -23,7 +24,6 @@ from tts_suite.api import (
     EngineControlFailed,
     EngineInUse,
     EngineStarting,
-    GpuRule,
     ReadingAborted,
     SuiteConfig,
     TraceStep,
@@ -31,27 +31,27 @@ from tts_suite.api import (
 from tts_suite.escalation import Skip
 from tts_suite.holds import EngineHolds
 from tts_suite.launcher import SuiteLauncher
-from tts_suite.placement import GpuInfo
+from tts_suite.placement import PlaceRequest
 from tts_suite.speaker import Speaker
 
 
 def _launcher(
-    tmp_path: Path, cards: CardList | None = None, ssh: FakeSsh | None = None, config: SuiteConfig | None = None,
+    tmp_path: Path, place: FakePlace | None = None, ssh: FakeSsh | None = None, config: SuiteConfig | None = None,
     **kwargs: object,
 ) -> SuiteLauncher:
     return SuiteLauncher(
-        config or SuiteConfig(voices_dir=tmp_path), gpus=cards or CardList(20000), host_command=ssh or FakeSsh(),
-        **kwargs,  # type: ignore[arg-type]
+        config or SuiteConfig(voices_dir=tmp_path, gpu_orc_url=GPU_ORC), gpus=CardList(3), place=place or FakePlace(),
+        host_command=ssh or FakeSsh(), **kwargs,  # type: ignore[arg-type]
     )
 
 
 # ── Local GPU start ─────────────────────────────────────────────────
 
 
-def test_a_local_gpu_engine_starts_on_the_chosen_card_with_its_budget(tmp_path: Path) -> None:
+def test_a_local_gpu_engine_starts_on_the_card_gpu_orc_names_with_its_budget(tmp_path: Path) -> None:
     engine = ContainerEngine("a")
-    cards = CardList(3000, 9000, 20000)
-    launcher = _launcher(tmp_path, cards, config=SuiteConfig(voices_dir=tmp_path, gpu_mode="list", gpus=(GpuRule("1"), GpuRule("2"))))
+    place = FakePlace(card=1)
+    launcher = _launcher(tmp_path, place)
 
     async def scenario() -> None:
         assert not await launcher.is_serving(local_entry(engine))
@@ -61,11 +61,20 @@ def test_a_local_gpu_engine_starts_on_the_chosen_card_with_its_budget(tmp_path: 
 
     run_async(scenario())
     assert engine.placements == [("GPU-1", 4000)] and engine.ready_calls == 1
+    assert place.requests == [(GPU_ORC, PlaceRequest("tts-suite", "a", 4000, "engine start"))]
 
 
-def test_a_start_on_a_named_card_ignores_the_rules_and_refuses_a_running_engine(tmp_path: Path) -> None:
+def test_the_name_at_gpu_orc_comes_from_the_configuration(tmp_path: Path) -> None:
+    place = FakePlace()
+    config = SuiteConfig(voices_dir=tmp_path, gpu_orc_url=GPU_ORC, gpu_orc_consumer="tts-suite-2")
+    assert run_async(_launcher(tmp_path, place, config=config).ensure_serving(local_entry(ContainerEngine("a")), wait=True)) is None
+    assert [request.consumer for _, request in place.requests] == ["tts-suite-2"]
+
+
+def test_a_start_on_a_named_card_asks_for_that_card_and_refuses_a_running_engine(tmp_path: Path) -> None:
     engine = ContainerEngine("a")
-    launcher = _launcher(tmp_path, CardList(3000, 9000, 20000))  # auto would take GPU-2
+    place = FakePlace(card=2)
+    launcher = _launcher(tmp_path, place)
 
     async def scenario() -> None:
         assert await launcher.start_on_gpu(local_entry(engine), "1") is None
@@ -75,25 +84,22 @@ def test_a_start_on_a_named_card_ignores_the_rules_and_refuses_a_running_engine(
 
     run_async(scenario())
     assert engine.placements == [("GPU-1", 4000)] and engine.ready_calls == 1
+    assert [request.card for _, request in place.requests] == ["1"]
 
 
-def test_with_gpu_orc_a_start_takes_its_room_not_nvidia_smis(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_without_gpu_orc_no_gpu_engine_starts_until_a_new_configuration(tmp_path: Path) -> None:
     engine = ContainerEngine("a")
-    orc = FakeGpuOrc(monkeypatch, {"GPU-0": 3000, "GPU-1": 9000, "GPU-2": 1000})   # GPU-2: a vLLM model's share
-    launcher = _launcher(tmp_path, CardList(3000, 9000, 20000),
-                         config=SuiteConfig(voices_dir=tmp_path, gpu_orc_url="http://127.0.0.1:5070"))
-
-    async def scenario() -> None:
-        assert await launcher.ensure_serving(local_entry(engine), wait=True) is None
-        await launcher.gpu_cards(local_entry(engine))   # /gpu/holders, which GPU-Orc itself asks: nvidia-smi only
-        await launcher.aclose()
-
-    run_async(scenario())
-    assert engine.placements == [("GPU-1", 4000)] and orc.urls == ["http://127.0.0.1:5070/status"]
+    place = FakePlace()
+    launcher = _launcher(tmp_path, place, config=SuiteConfig(voices_dir=tmp_path))
+    entry = local_entry(engine)
+    skip = run_async(launcher.ensure_serving(entry, wait=True))
+    assert skip is not None and skip.reason == "stopped" and "gpu_orc_url" in skip.detail
+    assert launcher.start_failure(entry) == skip and place.requests == [] and engine.ready_calls == 0
 
 
 def test_a_start_on_a_named_card_without_room_is_no_vram(tmp_path: Path) -> None:
-    skip = run_async(_launcher(tmp_path, CardList(3000, 9000)).start_on_gpu(local_entry(ContainerEngine("a")), "0"))
+    place = FakePlace(refusal="GPU-Orc: needs 4000 MiB and 512 MiB headroom, the most room is 3000 MiB on GPU 0")
+    skip = run_async(_launcher(tmp_path, place).start_on_gpu(local_entry(ContainerEngine("a")), "0"))
     assert skip is not None and skip.reason == "no_vram"
 
 
@@ -103,23 +109,24 @@ def test_a_start_that_does_not_come_up_is_a_skip_with_the_reason(tmp_path: Path)
     assert skip == Skip("stopped", "start failed: model did not load")
 
 
-def test_no_card_that_fits_is_no_vram_with_the_numbers(tmp_path: Path) -> None:
+def test_no_room_at_gpu_orc_is_no_vram_with_its_reason(tmp_path: Path) -> None:
     engine = ContainerEngine("a")
-    skip = run_async(_launcher(tmp_path, CardList(1000, 2000)).ensure_serving(local_entry(engine), wait=True))
-    assert skip == Skip("no_vram", "needs 4512 MiB, most free 2000 MiB on GPU 1") and engine.ready_calls == 0
+    why = "GPU-Orc: needs 4000 MiB and 512 MiB headroom, the most room is 2000 MiB on GPU 1"
+    skip = run_async(_launcher(tmp_path, FakePlace(refusal=why)).ensure_serving(local_entry(engine), wait=True))
+    assert skip == Skip("no_vram", why) and engine.ready_calls == 0
 
 
-def test_no_vram_is_not_remembered_so_the_next_request_chooses_the_card_again(tmp_path: Path) -> None:
+def test_no_vram_is_not_remembered_so_the_next_request_asks_gpu_orc_again(tmp_path: Path) -> None:
     engine = ContainerEngine("a")
-    cards = CardList(1000)
-    launcher = _launcher(tmp_path, cards)
+    place = FakePlace(refusal="GPU-Orc at http://gpu-orc.invalid did not answer: refused")
+    launcher = _launcher(tmp_path, place)
 
     async def scenario() -> None:
         entry = local_entry(engine)
         skip = await launcher.ensure_serving(entry, wait=True)
         assert skip is not None and skip.reason == "no_vram" and engine.ready_calls == 0
         assert launcher.start_failure(entry) is None
-        cards.cards[0] = GpuInfo(0, "GPU-0", 20000, 24000, 4000)  # room again, no explicit start
+        place.refusal = None  # room again, no explicit start
         assert await launcher.ensure_serving(entry, wait=True) is None
         assert engine.ready_calls == 1
 
@@ -129,39 +136,16 @@ def test_no_vram_is_not_remembered_so_the_next_request_chooses_the_card_again(tm
 def test_an_engine_without_a_budget_is_no_vram(tmp_path: Path) -> None:
     engine = ContainerEngine("a")
     engine.default_vram_budget_mib = None  # type: ignore[assignment]
-    skip = run_async(_launcher(tmp_path).ensure_serving(local_entry(engine), wait=True))
+    place = FakePlace()
+    skip = run_async(_launcher(tmp_path, place).ensure_serving(local_entry(engine), wait=True))
     assert skip is not None and skip.reason == "no_vram" and "no VRAM budget for a" in skip.detail
-
-
-def test_nvidia_smi_failing_is_no_vram_with_its_message(tmp_path: Path) -> None:
-    from tts_suite.placement import PlacementRefused
-
-    def broken() -> list[object]:
-        raise PlacementRefused("nvidia-smi unavailable: gone")
-
-    launcher = SuiteLauncher(SuiteConfig(voices_dir=tmp_path), gpus=broken)  # type: ignore[arg-type]
-    skip = run_async(launcher.ensure_serving(local_entry(ContainerEngine("a")), wait=True))
-    assert skip == Skip("no_vram", "nvidia-smi unavailable: gone")
+    assert place.requests == []
 
 
 def test_an_image_that_is_not_built_is_a_skip_and_nothing_starts(tmp_path: Path) -> None:
     engine = ContainerEngine("a", installed=False)
     skip = run_async(_launcher(tmp_path).ensure_serving(local_entry(engine), wait=True))
     assert skip == Skip("stopped", "docker image not built") and engine.ready_calls == 0
-
-
-def test_only_one_local_gpu_start_runs_at_a_time(tmp_path: Path) -> None:
-    first, second = ContainerEngine("a", ready_delay_s=0.05), ContainerEngine("b", ready_delay_s=0.05)
-
-    async def scenario() -> None:
-        launcher = _launcher(tmp_path)
-        await asyncio.gather(
-            launcher.ensure_serving(local_entry(first), wait=True), launcher.ensure_serving(local_entry(second), wait=True),
-        )
-
-    run_async(scenario())
-    assert first.ready_calls == second.ready_calls == 1
-    assert first.finished_at <= second.started_at or second.finished_at <= first.started_at  # no overlap
 
 
 def test_parallel_requests_for_the_same_entry_start_it_once(tmp_path: Path) -> None:
@@ -405,7 +389,7 @@ def test_a_reading_holds_its_container_until_the_stream_has_ended(tmp_path: Path
     engine.up = True
     install(monkeypatch, engine)
     config = make_config(tmp_path)
-    launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh())
+    launcher = SuiteLauncher(config, gpus=CardList(), place=FakePlace(), host_command=FakeSsh())
     speaker = Speaker(config, launcher)
 
     async def scenario() -> None:
@@ -429,7 +413,7 @@ def test_a_second_stream_of_the_same_run_holds_the_container_again(tmp_path: Pat
     engine.up = True
     install(monkeypatch, engine)
     config = make_config(tmp_path)
-    launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh())
+    launcher = SuiteLauncher(config, gpus=CardList(), place=FakePlace(), host_command=FakeSsh())
     speaker = Speaker(config, launcher)
     named = request("a", run="r-1")
 
@@ -454,7 +438,7 @@ def test_an_aborted_stream_lets_go_of_the_container(tmp_path: Path, monkeypatch:
     engine.up = True
     install(monkeypatch, engine)
     config = make_config(tmp_path)
-    launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh())
+    launcher = SuiteLauncher(config, gpus=CardList(), place=FakePlace(), host_command=FakeSsh())
     speaker = Speaker(config, launcher)
 
     async def scenario() -> None:
@@ -482,7 +466,8 @@ def test_the_skip_detail_of_the_launcher_reaches_the_trace(tmp_path: Path, monke
     engine = ContainerEngine("a")
     install(monkeypatch, engine)
     config = make_config(tmp_path)
-    launcher = SuiteLauncher(config, gpus=CardList(1000), host_command=FakeSsh())
+    why = "GPU-Orc: needs 4000 MiB and 512 MiB headroom, the most room is 1000 MiB on GPU 0"
+    launcher = SuiteLauncher(config, gpus=CardList(), place=FakePlace(refusal=why), host_command=FakeSsh())
     speaker = Speaker(config, launcher)
 
     async def scenario() -> None:
@@ -490,7 +475,7 @@ def test_the_skip_detail_of_the_launcher_reaches_the_trace(tmp_path: Path, monke
 
     with pytest.raises(NoEngineAvailable) as error:
         run_async(scenario())
-    assert error.value.trace == (TraceStep("a", "skipped", "no_vram", "needs 4512 MiB, most free 1000 MiB on GPU 0"),)
+    assert error.value.trace == (TraceStep("a", "skipped", "no_vram", why),)
 
 
 # ── Stopping with proof, the cards of a container, why it is busy ───
@@ -574,7 +559,7 @@ def test_a_withdrawn_start_ends_its_waiters_and_is_no_failure(tmp_path: Path, mo
 
 def test_the_cards_of_a_running_container_come_from_its_configuration(tmp_path: Path) -> None:
     engine = ContainerEngine("a")
-    launcher = SuiteLauncher(SuiteConfig(voices_dir=tmp_path), gpus=CardList(20000, 20000, 20000), host_command=FakeSsh())
+    launcher = SuiteLauncher(SuiteConfig(voices_dir=tmp_path), gpus=CardList(3), host_command=FakeSsh())
     entry = local_entry(engine)
     assert run_async(launcher.gpu_cards(entry)) is None  # its container does not run
     engine.up = True

@@ -35,13 +35,6 @@ export function configView({ show, fail }) {
     return h('input', { type: 'number', min: 0, step, autocomplete: 'off', value: value ?? '', placeholder, onchange: (event) => onchange(numberOrNull(event.target.value)) })
   }
 
-  function move(list, index, delta) {
-    const target = index + delta
-    if (target < 0 || target >= list.length) return
-    list.splice(target, 0, list.splice(index, 1)[0])
-    render()
-  }
-
   function hostsTable() {
     return h('div', {}, h('h3', {}, t('hosts')),
       cardTable(['hostName', 'hostAddress', 'sshUser', 'sshPort', ''].map((key) => (key ? t(key) : '')), config.hosts.map((host, index) => [
@@ -53,21 +46,11 @@ export function configView({ show, fail }) {
       h('div', { class: 'actions' }, h('button', { class: 'small', onclick: () => { config.hosts.push({ name: '', address: '', ssh_port: 22, ssh_user: '' }); render() } }, t('add'))))
   }
 
-  function gpusTable() {
-    const mode = h('select', { onchange: (event) => { config.gpu_mode = event.target.value; render() } },
-      ['auto', 'list'].map((value) => h('option', { value, selected: config.gpu_mode === value }, t(value === 'auto' ? 'gpuModeAuto' : 'gpuModeList'))))
-    // The list is only used in the mode "list"; it stays in the configuration while the mode is "auto".
-    const list = config.gpu_mode === 'auto' ? [] : [
-      cardTable(['gpu', 'reserve', ''].map((key) => (key ? t(key) : '')), config.gpus.map((rule, index) => [
-        textInput(rule.gpu, (value) => (rule.gpu = value)),
-        numberInput(rule.reserve_mib, (value) => (rule.reserve_mib = value ?? 0)),
-        h('div', { class: 'row' },
-          h('button', { class: 'small', onclick: () => move(config.gpus, index, -1) }, '↑'),
-          h('button', { class: 'small', onclick: () => move(config.gpus, index, 1) }, '↓'),
-          h('button', { class: 'small', onclick: () => { config.gpus.splice(index, 1); render() } }, t('remove')))])),
-      h('div', { class: 'actions' }, h('button', { class: 'small', onclick: () => { config.gpus.push({ gpu: '', reserve_mib: 0 }); render() } }, t('add'))),
-    ]
-    return h('div', {}, h('h3', {}, t('gpus')), h('p', { class: 'muted' }, t('gpuModeHint')), mode, list)
+  // Every GPU engine starts on the card GPU-Orc names; without its address no GPU engine starts.
+  function gpuOrcFields() {
+    return h('div', {}, h('h3', {}, t('gpuOrc')), h('p', { class: 'muted' }, t('gpuOrcHint')),
+      field(t('gpuOrcUrl'), textInput(config.gpu_orc_url, (value) => (config.gpu_orc_url = value.trim() || null), 'http://127.0.0.1:5070')),
+      field(t('gpuOrcConsumer'), textInput(config.gpu_orc_consumer, (value) => (config.gpu_orc_consumer = value.trim()))))
   }
 
   // What a request that does not say otherwise gets from an engine: its voice, speed and pitch (the
@@ -132,8 +115,7 @@ export function configView({ show, fail }) {
     replaceChildren(root, 
       h('h2', {}, t('tabConfig')),
       field(t('voicesDir'), textInput(config.voices_dir, (value) => (config.voices_dir = value))),
-      field(t('headroom'), numberInput(config.headroom_mib, (value) => (config.headroom_mib = value ?? 0))),
-      hostsTable(), gpusTable(), defaultsTable(), pronunciationsTable(),
+      hostsTable(), gpuOrcFields(), defaultsTable(), pronunciationsTable(),
       h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: save }, t('save')), h('button', { onclick: load }, t('reload'))),
     )
   }

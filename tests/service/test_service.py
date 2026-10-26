@@ -147,13 +147,12 @@ def test_a_new_configuration_is_set_and_kept(tmp_path: Path) -> None:
     client, suite, store = build(tmp_path)
     wanted = {
         "voices_dir": str(tmp_path / "other"),
-        "gpu_mode": "list",
-        "gpus": [{"gpu": "0", "reserve_mib": 2048}],
+        "gpu_orc_url": "http://127.0.0.1:5070",
         "pronunciations": {"AIfred": "Alfred"},
     }
     answer = client.post("/config", json=wanted, headers=TOKEN_HEADERS)
     assert answer.status_code == 200
-    assert answer.json()["gpus"] == [{"gpu": "0", "reserve_mib": 2048}]
+    assert answer.json()["gpu_orc_url"] == "http://127.0.0.1:5070" and answer.json()["gpu_orc_consumer"] == "tts-suite"
     saved = store.load()
     assert saved is not None and saved.voices_dir == tmp_path / "other"
     assert saved.pronunciations == {"AIfred": "Alfred"}
@@ -376,9 +375,9 @@ def test_the_suite_is_closed_when_the_service_ends(tmp_path: Path) -> None:
 
 def test_the_configuration_survives_a_restart(tmp_path: Path) -> None:
     client, _, store = build(tmp_path)
-    client.post("/config", json={"voices_dir": str(tmp_path / "v"), "headroom_mib": 256}, headers=TOKEN_HEADERS)
+    client.post("/config", json={"voices_dir": str(tmp_path / "v"), "gpu_orc_consumer": "tts-suite-2"}, headers=TOKEN_HEADERS)
     again = ConfigStore(store.path).load()
-    assert again is not None and again.headroom_mib == 256
+    assert again is not None and again.gpu_orc_consumer == "tts-suite-2"
     assert list(store.path.parent.iterdir()) == [store.path]
 
 

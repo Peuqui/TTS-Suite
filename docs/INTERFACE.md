@@ -40,7 +40,7 @@ agents (which agent has which voice). The service gets text and answers with aud
 | `POST /voices/push` | Hands the voices directory to every configured host (`receive-voices` of `scripts/tts-host-ctl.sh`; the host adds and overwrites, nothing is deleted). Needs the token. Answers `{"hosts": [names]}`; a host that does not take it is an error naming it. |
 | `POST /speak` | Door 1: the whole text; the answer is the stream of frames (below). |
 | `WS /speak/stream` | Door 2: the text arrives in pieces (a language model is still writing); the frames run back as they exist. |
-| `POST /engines/{engine}/start`, `POST /engines/{engine}/stop` | Starts or stops the container of a row of the catalog (query `host`: the machine's name; none: this one). On start, the query `gpu` (index or UUID) puts a GPU engine of this machine on exactly that card, past the rules of `gpu_mode` (for a measurement on a given card): `422` for an engine on a host or without GPU, `409` while it runs or starts, `502` with the reason when the card is missing or has too little room. |
+| `POST /engines/{engine}/start`, `POST /engines/{engine}/stop` | Starts or stops the container of a row of the catalog (query `host`: the machine's name; none: this one). On start, the query `gpu` (index or UUID) asks GPU-Orc for exactly that card for a GPU engine of this machine (for a measurement on a given card): `422` for an engine on a host or without GPU, `409` while it runs or starts, `502` with the reason when the card is missing or has too little room. |
 | `POST /release` | A client asks for room on the cards of OTHER hosts. Body `{"targets": "all"}` (every container row on the hosts) or `{"targets": [{"engine", "host"}]}`. Shuts the containers down (not only unloads) and answers per target `{engine, host, outcome, detail}`: `stopped`, `not_running`, `in_use` (a reading holds it, left alone), `unreachable` (host does not answer), `failed`. Engines on this machine: `422` `invalid_request`, they go through `/gpu/release` (one way). A request like `/speak`: no token on this machine. |
 | `GET /gpu/holders` | The common GPU release API of the suites (the STT-Suite has the same; [GPU-Orc](https://github.com/Peuqui/GPU-Orc) uses it): `{"holders": [{item, gpu_uuids, memory_mib, busy, need_mib}]}`, every GPU engine of this machine whose container runs. `gpu_uuids` comes from the container's configuration (`DeviceRequests` or `NVIDIA_VISIBLE_DEVICES`, as UUIDs), so it is always known; `memory_mib` per card is `null` when it cannot be measured here; `busy` = a reading holds it or it is starting; `need_mib` = what it needs on a card, as in `/gpu/needs` (`null` = unknown). |
 | `GET /gpu/needs` | What each local GPU engine needs on a card, running or not, for GPU-Orc's plan: `{"needs": [{item, need_mib, source}]}`. `need_mib` is the configured `vram_budget_mib` (`source: configured`), else the engine's built-in value (`estimate`), else `null` (`unknown`). No token on this machine. |
@@ -70,19 +70,21 @@ a request may not name it, the client decides whether and how it speaks.
 One object: `voices_dir`; `hosts` (optional, the machines requests refer to by name: `name`, `address`,
 `ssh_port`, `ssh_user`); `engines` (defaults per engine key: `voice` with `voice`, `speed`, `pitch`; `voice_tuning`, speed and pitch per
 voice name, which apply whenever that voice speaks, after the request's own values and before the engine's defaults;
-`vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` and `headroom_mib` (see below); `placement_lock_file` (a file every program placing models on the cards locks with `flock` while it chooses a card and loads onto it, the STT suite among them; `null` = the suite is alone on the cards); `gpu_orc_url` (the GPU-Orc of this machine, `http://127.0.0.1:5070`: its `available_mib` per card counts as the free VRAM where it is less than nvidia-smi's, because a vLLM model may fill its share of a card while it computes; a GPU-Orc that does not answer or cannot say refuses the start with `no_vram`; `null` = no GPU-Orc, nvidia-smi alone);
+`vram_budget_mib`, `max_parallel`, `max_queue`); `gpu_orc_url` and `gpu_orc_consumer` (see below);
 `pronunciations` (a word to the form spoken instead). `POST` validates once, in the engine package; a changed `voices_dir` releases the running containers (one a reading holds is logged and keeps the old folder), the next request starts them with the new one;
 what cannot work is `400` with the reason. There is no list of entries: who speaks, in which order, is the
 request's business. Cloud keys are not part of it (below).
 
-**GPU placement is a rule set**, no callback to a program. `gpu_mode` `auto` (the default) puts an engine on a card no program
-uses that fits, else on the card with the most free VRAM that fits; `list` only on the first card of `gpus` that fits
-(`gpu` = index as `nvidia-smi` lists it, or UUID; `reserve_mib` = VRAM that stays free for other programs)
-whose free VRAM minus the reserve covers the engine's `vram_budget_mib` plus `headroom_mib` (a margin so a
-card is not filled to the last MiB). The container gets the budget as its cap; the suite does not watch the
-use or stop an engine for it (`GET /engines` reports what an engine holds as `vram_mib`, for display). An
-`gpus` is not used in `auto` mode (it is kept for the next switch to `list`; `list` needs at least one card). No card fits: the entry is skipped
-with `no_vram` (not remembered: the next request chooses again).
+**The card of a GPU engine comes from [GPU-Orc](https://github.com/Peuqui/GPU-Orc).** Before it starts one, the
+suite asks the GPU-Orc of this machine (`gpu_orc_url`, for example `http://127.0.0.1:5070`) with `POST /place`, as
+`gpu_orc_consumer` (default `tts-suite`, its name among GPU-Orc's consumers), the engine as the item and its
+`vram_budget_mib` as the need; a start on a named card (`gpu` above) asks for that card only. GPU-Orc counts what
+every program may take on a card (a vLLM model its share, an engine its budget), adds its margin and promises the
+room until the engine shows in `/gpu/holders`; the suite waits as long as GPU-Orc's `/health` says
+(`caller_timeout_s`). The container gets the budget as its cap; the suite does not watch the use or stop an engine
+for it (`GET /engines` reports what an engine holds as `vram_mib`, for display). No card, or GPU-Orc does not
+answer: the entry is skipped with `no_vram` and GPU-Orc's reason (not remembered: the next request asks again).
+Without `gpu_orc_url` no GPU engine starts on this machine (`stopped`, until a new configuration).
 
 ### The request: the head of a reading
 

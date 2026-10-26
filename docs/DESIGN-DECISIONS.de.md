@@ -59,16 +59,19 @@ Konfiguration) bleiben immer tokenpflichtig.
 
 ## Kartenwahl und Speichergrenze
 
-Die Wahl der Karte folgt Regeln der Konfiguration (`gpus`: Reihenfolge und Reserve je
-Karte, `headroom_mib`), nicht einem Rückruf an ein Programm. Jede Engine hat ein Budget
-(`vram_budget_mib`, Startwert aus dem Burn-in der Engine, die Konfiguration überschreibt
-es). Eine Karte kommt in Frage, wenn ihr freier Speicher abzüglich Reserve das Budget plus
-Aufschlag deckt (Standard 512 MiB, derselbe wie bei AIfred bisher).
+Die Karte nennt der GPU-Orc des Rechners (`POST /place`), nicht die Suite: Bis zum 26.10.2026
+wählte die Suite nach eigenen Regeln (`gpus` mit Reihenfolge und Reserve je Karte,
+`headroom_mib`, eine mit der STT-Suite geteilte Sperrdatei) und sah weder den Anteil, den ein
+vLLM-Modell noch füllen darf, noch was die andere Suite gerade startete (archiviert als Zweig
+`archive/eigene-kartenwahl`). Jede Engine hat ein Budget (`vram_budget_mib`, Startwert aus dem
+Burn-in der Engine, die Konfiguration überschreibt es); GPU-Orc rechnet seinen Puffer dazu, zählt
+die Ansprüche aller Programme auf der Karte und hält den Platz frei, bis die Engine läuft. Ohne
+GPU-Orc startet keine GPU-Engine.
 
-Das Budget dient der Kartenwahl und ist zugleich die Kappe im Container
+Das Budget ist der Bedarf, mit dem die Suite GPU-Orc fragt, und zugleich die Kappe im Container
 (`TTS_VRAM_BUDGET_MIB`, beim `up` durchgereicht). Der Dienst beobachtet den Verbrauch nicht
 und stoppt keine Engine; `EngineInfo.vram_mib` meldet ihn nur zur Anzeige. Eine Karte ohne
-Platz ergibt `no_vram`, das nicht gemerkt wird: der nächste Lauf wählt neu.
+Platz ergibt `no_vram`, das nicht gemerkt wird: der nächste Lauf fragt neu.
 Gemessen am 11.10.2026 auf einer V100 mit einer Einhängedatei (`sitecustomize.py`, setzt
 beim ersten CUDA-Zugriff `set_per_process_memory_fraction`): Qwen3-TTS und XTTS laufen
 unter einer Grenze knapp über ihrem Bedarf unverändert, bei einer Grenze unter dem

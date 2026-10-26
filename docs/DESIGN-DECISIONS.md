@@ -55,16 +55,18 @@ otherwise; the commands that change the service (start, stop, configuration) alw
 
 ## Card choice and memory limit
 
-The card is chosen by rules in the configuration (`gpus`: order and reserve per card,
-`headroom_mib`), not by a callback to a program. Every engine has a budget
-(`vram_budget_mib`, a starting value from the engine's burn-in; the configuration
-overrides it). A card qualifies when its free memory minus the reserve covers the budget
-plus the headroom (default 512 MiB, the same AIfred has used so far).
+The card comes from the GPU-Orc of the machine (`POST /place`), not from the suite: until 26.10.2026
+the suite chose by its own rules (`gpus` with order and reserve per card, `headroom_mib`, a lock
+file shared with the STT suite) and saw neither the share a vLLM model may still fill nor what the
+other suite was about to start (archived as branch `archive/eigene-kartenwahl`). Every engine has a
+budget (`vram_budget_mib`, a starting value from the engine's burn-in; the configuration overrides it);
+GPU-Orc adds its margin, counts the claims of every program on the card and promises the room until
+the engine runs. Without GPU-Orc no GPU engine starts.
 
-The budget serves the card choice and is also the cap in the container
+The budget is the need the suite asks GPU-Orc with and also the cap in the container
 (`TTS_VRAM_BUDGET_MIB`, passed on at `up`). The service does not watch the use and stops no
 engine; `EngineInfo.vram_mib` reports it for display only. A card without room gives
-`no_vram`, which is not remembered: the next run chooses again. Measured on 2026-10-11 on a V100 with a mounted
+`no_vram`, which is not remembered: the next run asks again. Measured on 2026-10-11 on a V100 with a mounted
 file (`sitecustomize.py`, which calls `set_per_process_memory_fraction` on the first CUDA
 access): Qwen3-TTS and XTTS run unchanged under a limit slightly above their need, and loading
 fails with `OutOfMemoryError` under a limit below the model's need. The limit counts only

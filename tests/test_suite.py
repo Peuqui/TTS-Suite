@@ -12,6 +12,7 @@ from container_fakes import (
     CardList,
     ContainerEngine,
     FakeManagedLauncher,
+    FakePlace,
     FakeSsh,
     install,
     make_config,
@@ -66,7 +67,7 @@ def _suite(config: SuiteConfig, launcher: FakeManagedLauncher | None = None) -> 
 
 def test_the_configuration_is_replaced_for_the_speaker_and_the_launcher(tmp_path: Path) -> None:
     suite, launcher = _suite(make_config(tmp_path))
-    new = make_config(tmp_path, headroom_mib=100)
+    new = make_config(tmp_path, gpu_orc_consumer="tts-suite-2")
 
     async def scenario() -> SuiteConfig:
         await suite.set_config(new)
@@ -587,7 +588,7 @@ def test_a_forced_gpu_release_ends_the_reading_with_its_reason_and_proves_the_co
         monkeypatch.delitem(registry.TTS_ENGINES, key)
     install(monkeypatch, engine)
     config = make_config(tmp_path)
-    launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh())
+    launcher = SuiteLauncher(config, gpus=CardList(), place=FakePlace(), host_command=FakeSsh())
     suite = Suite(config, launcher)
 
     async def scenario() -> tuple[GpuReleaseResult, ...]:
@@ -617,7 +618,7 @@ def test_a_forced_gpu_release_withdraws_a_start_and_ends_the_readings_waiting_fo
         monkeypatch.delitem(registry.TTS_ENGINES, key)
     install(monkeypatch, engine)
     config = make_config(tmp_path)
-    launcher = SuiteLauncher(config, gpus=CardList(20000), host_command=FakeSsh())
+    launcher = SuiteLauncher(config, gpus=CardList(), place=FakePlace(), host_command=FakeSsh())
     suite = Suite(config, launcher)
 
     async def scenario() -> tuple[tuple[GpuReleaseResult, ...], float, list[Exception | None]]:
@@ -725,7 +726,7 @@ def test_a_new_voices_folder_releases_the_running_containers_and_the_same_one_do
     suite, launcher = _release_setup(tmp_path, monkeypatch)
     other = tmp_path / "other"
     other.mkdir()
-    run_async(suite.set_config(make_config(tmp_path, hosts=(ARAGON,), headroom_mib=100)))
+    run_async(suite.set_config(make_config(tmp_path, hosts=(ARAGON,), gpu_orc_consumer="tts-suite-2")))
     assert launcher.stopped == []  # same voices_dir: nothing is released
     run_async(suite.set_config(make_config(other, hosts=(ARAGON,))))
     assert {"lo", "re", "re@Aragon"} <= set(launcher.stopped)

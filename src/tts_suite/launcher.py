@@ -1,13 +1,13 @@
 """The launcher: brings the containers of the entries up and down.
 
 Ported from AIfred Intelligence (``tts_escalation``): a local GPU engine starts on the card the
-rules choose (one local GPU start at a time), an engine on another host starts over SSH, an engine
+GPU-Orc of this machine names, an engine on another host starts over SSH, an engine
 without a container (cloud, Piper, eSpeak, Edge) is only checked. Starts run as one task per entry,
 shared by everyone who waits for it and by a ``wait=False`` request that only begins it. A forced
 GPU release withdraws a start of a local entry: the readings waiting for it end with
 :class:`~tts_suite.api.ReadingAborted`.
 
-Every system call (``nvidia-smi``, Docker, SSH, HTTP) sits behind a function handed to the
+Every system call (``nvidia-smi``, GPU-Orc, Docker, SSH, HTTP) sits behind a function handed to the
 constructor, so tests replace it.
 """
 
@@ -36,8 +36,7 @@ from .engines.base import TTSEngine
 from .escalation import EngineLauncher, EscalationEntry, Skip
 from .holds import EngineHolds
 from .host_ctl import HostCommand, HostControlError, pack_voices, run_host_command
-from .placement import GpuInfo, PlacementRefused, choose_gpu, query_gpus, with_room_from_gpu_orc
-from .placement_lock import program_lock
+from .placement import GpuInfo, PlacementRefused, PlaceRequest, place_with_gpu_orc, query_gpus, vram_budget_mib
 
 logger = logging.getLogger(__name__)
 
@@ -114,12 +113,14 @@ class SuiteLauncher:
         config: SuiteConfig,
         *,
         gpus: Callable[[], list[GpuInfo]] = query_gpus,
+        place: Callable[[str, PlaceRequest], GpuInfo] = place_with_gpu_orc,
         host_command: HostCommand = run_host_command,
         holds: EngineHolds | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._config = config
         self._gpus = gpus
+        self._place = place
         self._host_command = host_command
         self._holds = holds or EngineHolds()
         self._clock = clock
@@ -129,17 +130,6 @@ class SuiteLauncher:
         # configuration or a reload. Not remembered: ``no_vram`` of the card choice, which passes
         # as soon as a card has room again.
         self._failures: dict[str, Skip] = {}
-        # One local GPU start at a time: a container takes its VRAM only while the model loads, so a
-        # second start chosen before that would see the first one's card as still free. The service
-        # has exactly one event loop, so an asyncio lock is enough.
-        self._local_gpu_start = asyncio.Lock()
-
-    def _cards_for_a_start(self) -> list[GpuInfo]:
-        """The cards with their free VRAM as GPU-Orc sees it, where one is configured. Only for a start:
-        GPU-Orc asks this suite's ``/gpu/holders`` (``gpu_cards``), which therefore reads ``nvidia-smi``."""
-        cards = self._gpus()
-        url = self._config.gpu_orc_url
-        return with_room_from_gpu_orc(cards, url) if url else cards
 
     def set_config(self, config: SuiteConfig) -> None:
         self._config = config
@@ -261,25 +251,23 @@ class SuiteLauncher:
         return await self._start_local(entry.engine, gpu, withdrawal)
 
     async def _start_local(self, engine: TTSEngine, gpu: str | None, withdrawal: _Withdrawal) -> Skip | None:
-        """Start the container on this machine — on the card the rules choose when it needs a GPU, or on
-        ``gpu`` — and wait until its model is loaded. :class:`ReadingAborted` when the start is withdrawn."""
-        async with self._local_gpu_start, program_lock(self._config.placement_lock_file):
-            if await asyncio.to_thread(engine.is_running):
-                if gpu is not None:  # started by whoever held the lock before us, on a card of its own choice
-                    return Skip("stopped", f"{engine.key} was started meanwhile, not on GPU {gpu}")
-                return None  # started by whoever held the lock before us
-            if engine.needs_gpu:
-                try:
-                    cards = await asyncio.to_thread(self._cards_for_a_start)
-                    placement = choose_gpu(cards, engine, self._config, gpu)
-                except PlacementRefused as refused:
-                    return Skip("no_vram", str(refused))  # transient: ``_start_finished`` does not remember it
-                logger.info(
-                    "TTS: starting %s on GPU %d (budget %d MiB, %d MiB free)",
-                    engine.key, placement.gpu.index, placement.budget_mib, placement.gpu.free_mib,
-                )
-                engine = engine.on_gpu(placement.gpu.uuid, placement.budget_mib)
-            ready, message, _device = await asyncio.to_thread(engine.ensure_ready, withdrawal.event)
+        """Start the container on this machine — on the card GPU-Orc names when it needs a GPU (with ``gpu``
+        only that card) — and wait until its model is loaded. :class:`ReadingAborted` when the start is withdrawn."""
+        if engine.needs_gpu:
+            url = self._config.gpu_orc_url
+            if url is None:
+                return Skip("stopped", "no GPU-Orc configured (gpu_orc_url): it names the card of a GPU engine")
+            budget = vram_budget_mib(engine, self._config)
+            if budget is None:
+                return Skip("no_vram", f"no VRAM budget for {engine.key} — set engines[{engine.key}].vram_budget_mib")
+            request = PlaceRequest(self._config.gpu_orc_consumer, engine.key, budget, "engine start", gpu)
+            try:
+                card = await asyncio.to_thread(self._place, url, request)
+            except PlacementRefused as refused:
+                return Skip("no_vram", str(refused))  # transient: ``_start_finished`` does not remember it
+            logger.info("TTS: starting %s on GPU %d (budget %d MiB)", engine.key, card.index, budget)
+            engine = engine.on_gpu(card.uuid, budget)
+        ready, message, _device = await asyncio.to_thread(engine.ensure_ready, withdrawal.event)
         if withdrawal.event.is_set():
             raise ReadingAborted(withdrawal.reason)
         return None if ready else Skip("stopped", f"start failed: {message}")
