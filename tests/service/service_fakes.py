@@ -136,7 +136,7 @@ class FakeSuite:
 
     async def gpu_holders(self) -> list[GpuHolder]:
         self.calls.append(("gpu_holders", ()))
-        return [GpuHolder("xtts", ("GPU-a",), {"GPU-a": 4000}, False)]
+        return [GpuHolder("xtts", ("GPU-a",), {"GPU-a": 4000}, False, 3680)]
 
     def gpu_needs(self) -> list[GpuNeed]:
         self.calls.append(("gpu_needs", ()))

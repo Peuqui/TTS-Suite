@@ -472,8 +472,8 @@ def test_gpu_holders_are_the_local_gpu_engines_whose_container_runs(tmp_path: Pa
     launcher.busy_reasons = {"lo": "in_use"}
     holders = run_async(suite.gpu_holders())
     assert holders == [
-        GpuHolder("lo", ("GPU-1",), {"GPU-1": 3000}, True),
-        GpuHolder("re", ("GPU-0", "GPU-1"), None, False),  # nothing measured: memory unknown, not empty
+        GpuHolder("lo", ("GPU-1",), {"GPU-1": 3000}, True, 4000),  # ContainerEngine's built-in budget
+        GpuHolder("re", ("GPU-0", "GPU-1"), None, False, 4000),  # nothing measured: memory unknown, not empty
     ]
 
 
@@ -595,7 +595,7 @@ def test_a_forced_gpu_release_ends_the_reading_with_its_reason_and_proves_the_co
         stream = suite.speak("Der Satz mit zwei Wörtern kommt hier.", request("a"))
         reading = asyncio.ensure_future(_collect_until_error(stream))
         await asyncio.sleep(0.05)
-        assert await suite.gpu_holders() == [GpuHolder("a", ("GPU-0",), None, True)]  # the reading holds it
+        assert await suite.gpu_holders() == [GpuHolder("a", ("GPU-0",), None, True, 4000)]  # the reading holds it
         results = await suite.gpu_release(("a",), force=True, reason="GPU-Orc: loading X")
         gate.set()  # the synthesis that was running comes back after the container went down
         error = await reading
@@ -627,7 +627,7 @@ def test_a_forced_gpu_release_withdraws_a_start_and_ends_the_readings_waiting_fo
             for text in ("Ein Satz.", "Noch einer.")
         ]
         await asyncio.sleep(0.05)
-        assert await suite.gpu_holders() == [GpuHolder("a", ("GPU-0",), None, True)]  # its start counts as busy
+        assert await suite.gpu_holders() == [GpuHolder("a", ("GPU-0",), None, True, 4000)]  # its start counts as busy
         started = time.monotonic()
         results = await suite.gpu_release(("a",), force=True, reason="GPU-Orc: loading X")
         took = time.monotonic() - started

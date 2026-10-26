@@ -31,7 +31,7 @@ from .engines.base import shared_voice_names
 from .engines.registry import reload_engines, require_engine, voice_names
 from .escalation import EscalationEntry
 from .launcher import ManagedLauncher, SuiteLauncher
-from .placement import vram_budget
+from .placement import vram_budget, vram_budget_mib
 from .speaker import Speaker
 from .stream import Stream
 from .vram import VramMeasurementFailed, engine_vram_mib
@@ -235,7 +235,8 @@ class Suite:
         if cards is None:
             return None
         memory = await self._vram_mib(entry, "running")
-        return GpuHolder(entry.engine.key, cards, memory or None, self._launcher.busy(entry) is not None)
+        need = vram_budget_mib(entry.engine, self._speaker.config)
+        return GpuHolder(entry.engine.key, cards, memory or None, self._launcher.busy(entry) is not None, need)
 
     async def gpu_release(
         self, items: tuple[str, ...] | Literal["all"], *, force: bool, reason: str

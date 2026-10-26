@@ -201,12 +201,14 @@ says why)."""
 @dataclass(frozen=True)
 class GpuHolder:
     """A local GPU engine whose container runs: the cards the container may use (from its configuration, so
-    always known), the memory it holds per card (``None`` = not measurable here) and whether it works now."""
+    always known), the memory it holds per card (``None`` = not measurable here), whether it works now, and
+    what it needs on each card (its budget, as in :class:`GpuNeed`; ``None`` = unknown)."""
 
     item: str
     gpu_uuids: tuple[str, ...]
     memory_mib: Mapping[str, int] | None
     busy: bool
+    need_mib: int | None
 
 
 GpuNeedSource = Literal["measured", "configured", "estimate", "unknown"]
