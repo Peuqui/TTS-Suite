@@ -276,3 +276,6 @@ HOST_SSH_USER_PATTERN = r"[A-Za-z0-9_][A-Za-z0-9_.-]*"
 BRACKET_MAX_CHARS = 200
 LINK_TEXT_MAX_CHARS = 300
 LINK_URL_MAX_CHARS = 2000
+
+#: GPU-Orc's ``GET /loading`` before a start; it answers at once, without asking anyone.
+GPU_ORC_LOADING_TIMEOUT_S = 5

@@ -116,6 +116,13 @@ class SuiteConfig:
     while it chooses a card and loads onto it (the STT suite does); programs that start together then do
     not choose the same card. ``None`` = the suite is alone on the cards.
 
+    ``gpu_orc_url`` names the GPU-Orc of this machine (``http://127.0.0.1:5070``). Before a start on a card
+    the suite asks it whether a big model is loading (``GET /loading``): the cards then look emptier than
+    they are about to be, and an engine placed there would take the model's room. While one loads, or when
+    GPU-Orc gives no usable answer, the start is refused (``no_vram``), so the reading goes to the next
+    entry of its list. The free VRAM still comes from ``nvidia-smi`` alone. ``None`` = no GPU-Orc on this
+    machine.
+
     ``pronunciations`` maps a word to the form that is spoken instead (whole words, case as
     written; for example "AIfred" -> "Alfred"). The text cleaning of every unit applies it; it is
     the one program-specific part of the cleaning that is configuration.
@@ -127,6 +134,7 @@ class SuiteConfig:
     gpu_mode: GpuMode = "auto"
     gpus: tuple[GpuRule, ...] = ()
     headroom_mib: int = HEADROOM_MIB_DEFAULT
+    gpu_orc_url: str | None = None  # the GPU-Orc of this machine: is a big model loading?
     placement_lock_file: Path | None = None  # shared with other programs that place models on the cards
     pronunciations: Mapping[str, str] = field(default_factory=dict)
 

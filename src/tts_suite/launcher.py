@@ -36,7 +36,14 @@ from .engines.base import TTSEngine
 from .escalation import EngineLauncher, EscalationEntry, Skip
 from .holds import EngineHolds
 from .host_ctl import HostCommand, HostControlError, pack_voices, run_host_command
-from .placement import GpuInfo, PlacementRefused, choose_gpu, choose_gpu_for_burn_in, query_gpus
+from .placement import (
+    GpuInfo,
+    PlacementRefused,
+    choose_gpu,
+    choose_gpu_for_burn_in,
+    query_gpus,
+    refuse_while_a_model_loads,
+)
 from .placement_lock import program_lock
 
 logger = logging.getLogger(__name__)
@@ -277,6 +284,7 @@ class SuiteLauncher:
                 return None  # started by whoever held the lock before us
             if engine.needs_gpu:
                 try:
+                    await asyncio.to_thread(refuse_while_a_model_loads, self._config.gpu_orc_url)
                     cards = await asyncio.to_thread(self._gpus)
                     placement = choose_gpu_for_burn_in(cards, self._config) if burn_in else choose_gpu(cards, engine, self._config, gpu)
                 except PlacementRefused as refused:

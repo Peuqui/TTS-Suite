@@ -1,6 +1,10 @@
 """Card choice: order, reserve, headroom, most free VRAM, unknown budget, nothing fits."""
 from __future__ import annotations
 
+import json
+import threading
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -13,6 +17,7 @@ from tts_suite.placement import (
     choose_gpu,
     choose_gpu_for_burn_in,
     parse_gpus,
+    refuse_while_a_model_loads,
     vram_budget_mib,
     vram_needed_mib,
 )
@@ -133,3 +138,55 @@ def test_a_burn_in_keeps_to_the_cards_of_the_list(tmp_path: Path) -> None:
 def test_a_burn_in_refuses_when_every_card_is_in_use(tmp_path: Path) -> None:
     with pytest.raises(PlacementRefused, match="nobody uses"):
         choose_gpu_for_burn_in(CARDS, _config(tmp_path))
+
+
+@pytest.fixture
+def gpu_orc() -> Iterator[tuple[str, dict[str, object]]]:
+    """A GPU-Orc on a loopback port; ``answer["body"]`` is what ``GET /loading`` says."""
+    answer: dict[str, object] = {"status": 200, "body": {"loading": []}}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            assert self.path == "/loading"
+            data = json.dumps(answer["body"]).encode()
+            self.send_response(int(str(answer["status"])))
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}", answer
+    server.shutdown()
+    server.server_close()
+
+
+def test_without_a_gpu_orc_nothing_is_asked() -> None:
+    refuse_while_a_model_loads(None)
+
+
+def test_a_green_light_lets_the_start_go_on(gpu_orc: tuple[str, dict[str, object]]) -> None:
+    refuse_while_a_model_loads(gpu_orc[0])
+
+
+def test_a_loading_model_refuses_the_start_and_is_named(gpu_orc: tuple[str, dict[str, object]]) -> None:
+    url, answer = gpu_orc
+    answer["body"] = {"loading": ["DeepSeek-vllm"]}
+    with pytest.raises(PlacementRefused, match="DeepSeek-vllm is loading"):
+        refuse_while_a_model_loads(url)
+
+
+@pytest.mark.parametrize("status, body", [(502, {"error": "model server unreachable"}), (200, {"other": 1})])
+def test_an_unusable_answer_is_no_green_light(gpu_orc: tuple[str, dict[str, object]], status: int, body: object) -> None:
+    url, answer = gpu_orc
+    answer.update(status=status, body=body)
+    with pytest.raises(PlacementRefused, match="no usable answer"):
+        refuse_while_a_model_loads(url)
+
+
+def test_a_gpu_orc_that_is_down_is_no_green_light() -> None:
+    with pytest.raises(PlacementRefused, match="no usable answer"):
+        refuse_while_a_model_loads("http://127.0.0.1:9")
