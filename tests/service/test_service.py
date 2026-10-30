@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,7 @@ def test_a_command_that_changes_something_needs_the_token_also_here(tmp_path: Pa
         ("POST", "/voices/sync?engine=dashscope"),
         ("POST", "/voices/push"),
         ("POST", "/config"),
+        ("POST", "/burn-in"),
     ]
     for method, path in commands:
         refused = client.request(method, path)
@@ -526,3 +528,60 @@ def test_a_reading_aborted_for_the_gpu_ends_with_its_own_error_code(tmp_path: Pa
     frames = decode_frames(answer.content)
     assert [header["kind"] for header, _ in frames] == ["audio", "error"]
     assert json.loads(frames[1][1]) == {"error": "reading_aborted", "detail": "reading aborted, the GPU is needed: loading X"}
+
+
+# ── Burn-in ─────────────────────────────
+
+
+def _until_ended(client: TestClient) -> dict[str, object]:
+    for _ in range(200):
+        state = client.get("/burn-in").json()
+        if not state["running"]:
+            return state  # type: ignore[no-any-return]
+        time.sleep(0.01)
+    raise AssertionError("the burn-in did not end")
+
+
+def test_a_burn_in_runs_in_the_background_and_the_new_budget_is_saved(tmp_path: Path) -> None:
+    client, suite, store = build(tmp_path)
+    with client:
+        answer = client.post("/burn-in", json={"engine": "xtts"}, headers=TOKEN_HEADERS)
+        assert answer.status_code == 202 and answer.json()["running"] is True and answer.json()["engine"] == "xtts"
+        state = _until_ended(client)
+    assert state["peak_mib"] == 6100 and state["error"] is None and suite.calls == [("burn_in", ("xtts",))]
+    saved = store.load()
+    assert saved is not None and saved.headroom_mib == 6100  # the fake's stand-in for the budget it enters
+
+
+def test_one_burn_in_at_a_time_and_its_progress_can_be_read(tmp_path: Path) -> None:
+    client, suite, _ = build(tmp_path)
+    with client:
+        assert client.portal is not None
+        client.portal.call(suite.burn_in_gate.clear)
+        assert client.post("/burn-in", json={"engine": "xtts"}, headers=TOKEN_HEADERS).status_code == 202
+        second = client.post("/burn-in", json={"engine": "qwen3local"}, headers=TOKEN_HEADERS)
+        assert second.status_code == 409 and second.json()["error"] == "burn_in_running"
+        for _ in range(200):
+            state = client.get("/burn-in").json()
+            if state["round"] == 1:
+                break
+            time.sleep(0.01)
+        assert state == {"running": True, "engine": "xtts", "round": 1, "rounds": 2, "peak_mib": 5000, "error": None}
+        client.portal.call(suite.burn_in_gate.set)
+        _until_ended(client)
+    assert suite.calls == [("burn_in", ("xtts",))]
+
+
+def test_a_failed_burn_in_is_told_on_the_page_and_saves_nothing(tmp_path: Path) -> None:
+    client, suite, store = build(tmp_path)
+    suite.burn_in_error = EngineControlFailed("xtts not started (no_vram): a burn-in needs a GPU nobody uses")
+    with client:
+        client.post("/burn-in", json={"engine": "xtts"}, headers=TOKEN_HEADERS)
+        state = _until_ended(client)
+    assert state["running"] is False and "nobody uses" in str(state["error"]) and store.load() is None
+
+
+def test_a_burn_in_needs_an_engine(tmp_path: Path) -> None:
+    client, suite, _ = build(tmp_path)
+    assert client.post("/burn-in", json={}, headers=TOKEN_HEADERS).status_code == 400
+    assert suite.calls == []

@@ -38,10 +38,10 @@ class GpuInfo:
 
 @dataclass(frozen=True)
 class Placement:
-    """Where a GPU engine goes: the card, and the budget it is started with."""
+    """Where a GPU engine goes: the card, and the budget it is started with (``None``: no limit, a burn-in)."""
 
     gpu: GpuInfo
-    budget_mib: int
+    budget_mib: int | None
 
 
 def parse_gpus(output: str) -> list[GpuInfo]:
@@ -126,3 +126,13 @@ def choose_gpu(cards: list[GpuInfo], engine: TTSEngine, config: SuiteConfig, gpu
             return Placement(card, budget)
     card, available = max(candidates, key=lambda candidate: candidate[1])
     raise PlacementRefused(f"needs {needed} MiB, most free {available} MiB on GPU {card.index}")
+
+
+def choose_gpu_for_burn_in(cards: list[GpuInfo], config: SuiteConfig) -> Placement:
+    """The card of a burn-in: the first one of the usual order that nobody uses, without a limit. The
+    limit would cap what is measured, and without it the engine may grow past its budget, so it shares
+    the card with no one. :class:`PlacementRefused` when every card is in use."""
+    unused = [card for card, _ in _candidates(cards, config) if card.is_unused]
+    if not unused:
+        raise PlacementRefused("a burn-in needs a GPU nobody uses, every GPU is in use")
+    return Placement(unused[0], None)

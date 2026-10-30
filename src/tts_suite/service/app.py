@@ -8,6 +8,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +19,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from ..api import SpeakRequest, SuiteError, TTSSuite
+from ..burn_in import BURN_IN_ROUNDS
 from .auth import Access
 from .config_store import ConfigStore, SpeakTestStore
-from .errors import ServiceError, bad_request, text_too_long
+from .errors import ServiceError, bad_request, burn_in_running, text_too_long
 from .frames import FRAMES_MEDIA_TYPE, audio_frame, error_frame, summary_frame
 from .wire import (
     config_from_json,
@@ -56,6 +58,19 @@ RETRY_AFTER_SECONDS = 5
 REFUSED_CLOSE_CODE = 1008
 
 
+@dataclass
+class _BurnIn:
+    """The burn-in under way or the last one, for the page. ``round`` 0 = the engine is still starting;
+    ``peak_mib`` is the peak so far, at the end the new budget."""
+
+    running: bool = False
+    engine: str | None = None
+    round: int = 0
+    rounds: int = len(BURN_IN_ROUNDS)
+    peak_mib: int = 0
+    error: str | None = None
+
+
 def _answer(error: SuiteError) -> JSONResponse:
     status, body = error_answer(error)
     headers = {"Retry-After": str(RETRY_AFTER_SECONDS)} if body["error"] == "starting" else None
@@ -81,13 +96,31 @@ async def _json_body(request: Request) -> dict[str, Any]:
 
 
 def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_chars: int) -> FastAPI:
+    burn_in = _BurnIn()
+    burn_in_task: asyncio.Task[None] | None = None
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
+        if burn_in_task is not None:
+            burn_in_task.cancel()
         await suite.aclose()
 
     app = FastAPI(title="TTS-Suite", lifespan=lifespan)
     speak_test = SpeakTestStore(store.path.with_name("speak-test.json"))
+
+    def burn_in_progress(current_round: int, peak_mib: int) -> None:
+        burn_in.round, burn_in.peak_mib = current_round, peak_mib
+
+    async def run_burn_in(engine: str) -> None:
+        try:
+            burn_in.peak_mib = await suite.burn_in(engine, burn_in_progress)
+            store.save(await suite.config())
+        except Exception as error:  # noqa: BLE001 — nobody awaits this task: the page shows any failure instead
+            log.error("burn-in of %s failed: %r", engine, error)
+            burn_in.error = str(error)
+        finally:
+            burn_in.running = False
 
     @app.exception_handler(ServiceError)
     async def service_error(_: Request, error: ServiceError) -> JSONResponse:
@@ -156,6 +189,24 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
         await suite.set_config(config)
         store.save(config)
         return config_to_json(config)
+
+    @app.get("/burn-in")
+    async def burn_in_status(request: Request) -> Any:
+        check(request, False)
+        return asdict(burn_in)
+
+    @app.post("/burn-in", status_code=202)
+    async def burn_in_start(request: Request) -> Any:
+        nonlocal burn_in_task
+        check(request, True)
+        engine = (await _json_body(request)).get("engine")
+        if not isinstance(engine, str):
+            raise bad_request("`engine` is missing or no text")
+        if burn_in.running:
+            raise burn_in_running()
+        burn_in.running, burn_in.engine, burn_in.round, burn_in.peak_mib, burn_in.error = True, engine, 0, 0, None
+        burn_in_task = asyncio.create_task(run_burn_in(engine))
+        return asdict(burn_in)
 
     @app.get("/speak-test")
     async def get_speak_test(request: Request) -> Any:

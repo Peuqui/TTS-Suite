@@ -2,10 +2,15 @@ import { service } from './api.js'
 import { cardTable, h, replaceChildren } from './dom.js'
 import { hostLabel, t } from './i18n.js'
 
-// The catalog: every engine on every machine, with its state and a start and stop for each row.
+// How often the page asks for the progress of a running burn-in.
+const BURN_IN_POLL_MS = 1500
+
+// The catalog: every engine on every machine, with its state and a start and stop for each row, and for a
+// GPU engine of this machine a burn-in that measures what it takes and makes that its budget.
 export function catalogView({ show, fail }) {
   const root = h('div')
   let rows = []
+  let burnIn = { running: false }
   // The rows with a command under way: place -> the command. Its buttons stay off until it is done, so a
   // slow start is not pressed twice.
   const busy = new Map()
@@ -14,7 +19,35 @@ export function catalogView({ show, fail }) {
   async function load() {
     try {
       rows = await service.engines()
+      burnIn = await service.burnIn()
       render()
+      if (burnIn.running) followBurnIn()
+    } catch (error) { fail(error) }
+  }
+
+  // Asks until the burn-in has ended, also after a reload of the page; then the new budget is in the catalog.
+  let following = false
+  async function followBurnIn() {
+    if (following) return
+    following = true
+    try {
+      while (burnIn.running) {
+        await new Promise((resolve) => setTimeout(resolve, BURN_IN_POLL_MS))
+        burnIn = await service.burnIn()
+        render()
+      }
+      if (burnIn.error) fail(new Error(burnIn.error))
+      else show(t('burnInDone', { engine: burnIn.engine, peak: burnIn.peak_mib }))
+      await load()
+    } catch (error) { fail(error) } finally { following = false }
+  }
+
+  async function startBurnIn(row) {
+    if (!window.confirm(t('burnInConfirm', { engine: row.engine }))) return
+    try {
+      burnIn = await service.startBurnIn(row.engine)
+      render()
+      followBurnIn()
     } catch (error) { fail(error) }
   }
 
@@ -67,10 +100,12 @@ export function catalogView({ show, fail }) {
       ...(visible.some((row) => memory(row.vram_mib) !== '') ? [{ key: 'gpuMemory', cell: (row) => memory(row.vram_mib) }] : []),
       // The column of the hints only when some row has one.
       ...(hasHint ? [{ key: 'hint', cell: (row) => (row.start_hint ? h('span', { class: 'hint' }, row.start_hint) : '') }] : []),
+      { key: 'memoryNeeded', cell: (row) => row.reserve_mib ?? '' },
       { key: '', cell: (row) => (row.cloud ? '' : h('div', { class: 'buttons' },
         h('button', { class: 'small', onclick: () => control('start', row), disabled: busy.has(place(row)) || row.status === 'running' }, t('start')),
         h('button', { class: 'small', onclick: () => control('stop', row), disabled: busy.has(place(row)) || row.status === 'stopped' }, t('stop')),
-        h('button', { class: 'small', onclick: () => release([{ engine: row.engine, host: row.host }]), disabled: busy.has(place(row)) || row.status === 'stopped' }, t('release')))) },
+        h('button', { class: 'small', onclick: () => release([{ engine: row.engine, host: row.host }]), disabled: busy.has(place(row)) || row.status === 'stopped' }, t('release')),
+        row.reserve_mib !== null && row.installed ? h('button', { class: 'small', onclick: () => startBurnIn(row), disabled: burnIn.running || busy.has(place(row)) }, t('burnIn')) : null)) },
     ]
   }
 
@@ -81,8 +116,14 @@ export function catalogView({ show, fail }) {
       h('h2', {}, t('tabCatalog')),
       h('p', { class: 'muted' }, t('catalogHint')),
       h('div', { class: 'row' }, h('button', { onclick: load }, t('reload')), h('button', { onclick: () => release('all'), disabled: busy.size > 0 }, t('releaseAll'))),
+      burnIn.running ? h('p', { class: 'status starting' }, burnInText()) : null,
       cardTable(shown.map((column) => (column.key ? t(column.key) : '')), visible.map((row) => shown.map((column) => column.cell(row)))),
     )
+  }
+
+  function burnInText() {
+    if (burnIn.round === 0) return t('burnInStarting', { engine: burnIn.engine })
+    return t('burnInRunning', { engine: burnIn.engine, round: burnIn.round, rounds: burnIn.rounds, peak: burnIn.peak_mib })
   }
 
   // What an engine holds: the sum over its cards; nothing when it holds none or the measurement failed.

@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from typing import Literal
 
 from .api import (
+    BurnInProgress,
     EngineControlFailed,
+    EngineDefaults,
     EngineInfo,
     EngineInUse,
+    EngineRef,
     EngineTarget,
     EntryStatus,
     GpuHolder,
@@ -25,6 +29,7 @@ from .api import (
     SuiteConfig,
     VoiceInfo,
 )
+from .burn_in import measure_peak_mib
 from .constants import LABEL_LANGUAGES
 from .engines.base import shared_voice_names
 from .engines.registry import reload_engines, require_engine, voice_names
@@ -303,6 +308,67 @@ class Suite:
             return ReleaseResult(engine, host, "failed", str(failed))
         return ReleaseResult(engine, host, "stopped", f"{entry.label} stopped")
 
+    # ── Burn-in ─────────────────────────────────────────────────────
+
+    async def burn_in(self, engine: str, progress: BurnInProgress) -> int:
+        entries = self._local_gpu_entries()
+        if engine not in entries:
+            raise InvalidRequest(f"{engine} is no GPU engine of this machine, known: {sorted(entries)}")
+        entry = entries[engine]
+        if await self._launcher.is_serving(entry):
+            await self._launcher.stop(entry)  # it runs under its limit, and the limit would cap the measurement
+        self._launcher.clear_failures(entry)
+        skip = await self._launcher.start_for_burn_in(entry)
+        if skip is not None:
+            raise EngineControlFailed(f"{entry.label} not started ({skip.reason}): {skip.detail}")
+        try:
+            voice = await self._burn_in_voice(entry)
+            peak = await measure_peak_mib(
+                lambda language, text: self._read_for_burn_in(entry, voice, language, text),
+                lambda: self._sample_vram(entry),
+                progress,
+            )
+        finally:
+            released = await self._gpu_release_one(entry, False, "burn-in finished")
+            if released.outcome != "released":
+                logger.warning("TTS: %s stays up after its burn-in (%s): %s", entry.label, released.outcome, released.detail)
+        logger.info("TTS: burn-in of %s measured %d MiB", entry.label, peak)
+        await self.set_config(_with_budget(self._speaker.config, engine, peak))
+        return peak
+
+    async def _burn_in_voice(self, entry: EscalationEntry) -> str | None:
+        """The voice of the readings. A request normally brings one, a burn-in has none: ``None`` when the
+        configuration or the engine names one, else the first the engine has."""
+        engine = entry.engine
+        if self._speaker.config.engines.get(engine.key, EngineDefaults()).voice.voice or engine.default_voice:
+            return None
+        voices = await self.voices(engine.key)
+        if not voices:
+            raise EngineControlFailed(f"{entry.label} has no voice to read with")
+        return voices[0].name
+
+    async def _read_for_burn_in(self, entry: EscalationEntry, voice: str | None, language: str, text: str) -> None:
+        """One reading on the engine alone, as one text: the heaviest unit."""
+        request = SpeakRequest(
+            language=language, engines=(EngineRef(entry.engine.key, "whole", None),), paragraph_pause_ms=0, voice=voice,
+        )
+        stream = self.speak(text, request)
+        delivered = False
+        try:
+            async for segment in stream.segments():
+                delivered = delivered or bool(segment.audio)
+        finally:
+            await stream.aclose()
+        if not delivered:
+            raise EngineControlFailed(f"{entry.label} delivered no audio")
+
+    @staticmethod
+    async def _sample_vram(entry: EscalationEntry) -> int:
+        try:
+            return sum((await asyncio.to_thread(engine_vram_mib, entry.engine)).values())
+        except VramMeasurementFailed as failed:
+            raise EngineControlFailed(f"the VRAM of {entry.label} could not be measured: {failed}") from failed
+
     async def reload(self) -> tuple[list[str], list[str]]:
         removed, added = await asyncio.to_thread(reload_engines)
         self._launcher.clear_failures(None)
@@ -312,6 +378,11 @@ class Suite:
     def _catalog_entry(self, engine: str, host: str | None) -> EscalationEntry:
         """The handle of a catalog row; the same errors as an entry of a request."""
         return self._speaker.entry_for(engine, host, require_engine(engine).default_speech_unit)
+
+
+def _with_budget(config: SuiteConfig, engine: str, budget_mib: int) -> SuiteConfig:
+    defaults = config.engines.get(engine, EngineDefaults())
+    return replace(config, engines={**config.engines, engine: replace(defaults, vram_budget_mib=budget_mib)})
 
 
 def create_suite(config: SuiteConfig, *, launcher: ManagedLauncher | None = None) -> Suite:

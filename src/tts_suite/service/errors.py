@@ -24,3 +24,7 @@ def bad_request(detail: str) -> ServiceError:
 
 def text_too_long(limit: int) -> ServiceError:
     return ServiceError(413, "text_too_long", f"a reading takes at most {limit} characters")
+
+
+def burn_in_running() -> ServiceError:
+    return ServiceError(409, "burn_in_running", "a burn-in is running, one at a time")

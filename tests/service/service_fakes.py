@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
 from tts_suite.api import (
     AudioSegment,
+    BurnInProgress,
     EngineInfo,
     EngineTarget,
     GpuHolder,
@@ -89,6 +91,10 @@ class FakeSuite:
         self.calls: list[tuple[str, tuple[object, ...]]] = []
         self.closed = False
         self.rejects_config: SuiteError | None = None
+        self.burn_in_gate = asyncio.Event()  # a burn-in runs until the test sets it
+        self.burn_in_gate.set()
+        self.burn_in_peak = 6100
+        self.burn_in_error: SuiteError | None = None
         self.gpu_results: tuple[GpuReleaseResult, ...] = (GpuReleaseResult("xtts", "released", "xtts container down"),)
 
     async def aclose(self) -> None:
@@ -145,6 +151,15 @@ class FakeSuite:
         if self.refuses is not None:
             raise self.refuses
         return self.gpu_results
+
+    async def burn_in(self, engine: str, progress: BurnInProgress) -> int:
+        self.calls.append(("burn_in", (engine,)))
+        progress(1, 5000)
+        await self.burn_in_gate.wait()
+        if self.burn_in_error is not None:
+            raise self.burn_in_error
+        self._config = replace(self._config, headroom_mib=self.burn_in_peak)  # stands for the budget it enters
+        return self.burn_in_peak
 
     async def reload(self) -> tuple[list[str], list[str]]:
         self.calls.append(("reload", ()))

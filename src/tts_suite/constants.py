@@ -259,6 +259,8 @@ TTS_HOST_SSH_COMMAND_TIMEOUT_S = 60
 NVIDIA_SMI_QUERY_TIMEOUT_S = 5
 NVIDIA_SMI_APPS_TIMEOUT_S = 10
 DOCKER_PIDS_TIMEOUT_S = 10
+#: How often a burn-in samples the VRAM of its engine.
+BURN_IN_SAMPLE_INTERVAL_S = 0.3
 
 #: Waiting for the card-choice lock another program holds (``placement_lock``): how often to look again.
 PLACEMENT_LOCK_POLL_INTERVAL_S = 0.2

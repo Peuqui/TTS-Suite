@@ -36,7 +36,7 @@ from .engines.base import TTSEngine
 from .escalation import EngineLauncher, EscalationEntry, Skip
 from .holds import EngineHolds
 from .host_ctl import HostCommand, HostControlError, pack_voices, run_host_command
-from .placement import GpuInfo, PlacementRefused, choose_gpu, query_gpus
+from .placement import GpuInfo, PlacementRefused, choose_gpu, choose_gpu_for_burn_in, query_gpus
 from .placement_lock import program_lock
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,11 @@ class ManagedLauncher(EngineLauncher, Protocol):
     async def start_on_gpu(self, entry: EscalationEntry, gpu: str) -> Skip | None:
         """Start a local GPU entry on the card ``gpu`` (index or UUID) and wait until it serves; ``None`` = it
         serves now, else why not. :class:`EngineInUse` while it runs or starts (its card is chosen already)."""
+        ...
+
+    async def start_for_burn_in(self, entry: EscalationEntry) -> Skip | None:
+        """Start a local GPU entry without its VRAM limit, on a card nobody uses, and wait until it serves;
+        ``None`` = it serves now, else why not. :class:`EngineInUse` while it runs or starts."""
         ...
 
     async def stop(self, entry: EscalationEntry, *, force: bool = False) -> None:
@@ -180,6 +185,13 @@ class SuiteLauncher:
             return unstartable
         return await self._wait_for_start(entry, self._begin_start(entry, gpu))
 
+    async def start_for_burn_in(self, entry: EscalationEntry) -> Skip | None:
+        if self._in_flight(entry.label) or await self.is_serving(entry):
+            raise EngineInUse(f"{entry.label} is already running or starting, a burn-in starts it itself")
+        if (unstartable := await self._unstartable(entry)) is not None:
+            return unstartable
+        return await self._wait_for_start(entry, self._begin_start(entry, burn_in=True))
+
     async def _wait_for_start(self, entry: EscalationEntry, task: asyncio.Task[Skip | None]) -> Skip | None:
         limit_s = entry.engine.startup_timeout_s + START_WAIT_RESERVE_S
         try:
@@ -201,9 +213,11 @@ class SuiteLauncher:
         task = self._starts.get(label)
         return task if task is not None and not task.done() else None
 
-    def _begin_start(self, entry: EscalationEntry, gpu: str | None = None) -> asyncio.Task[Skip | None]:
+    def _begin_start(
+        self, entry: EscalationEntry, gpu: str | None = None, *, burn_in: bool = False,
+    ) -> asyncio.Task[Skip | None]:
         withdrawal = self._withdrawals[entry.label] = _Withdrawal()
-        task = asyncio.get_running_loop().create_task(self._start(entry, gpu, withdrawal))
+        task = asyncio.get_running_loop().create_task(self._start(entry, gpu, withdrawal, burn_in))
         self._starts[entry.label] = task
         task.add_done_callback(lambda done: self._start_finished(entry.label, done))
         return task
@@ -248,12 +262,12 @@ class SuiteLauncher:
             return Skip("stopped", "docker image not built")
         return None
 
-    async def _start(self, entry: EscalationEntry, gpu: str | None, withdrawal: _Withdrawal) -> Skip | None:
+    async def _start(self, entry: EscalationEntry, gpu: str | None, withdrawal: _Withdrawal, burn_in: bool) -> Skip | None:
         if entry.host is not None:
             return await self._start_remote(entry.engine, entry.host)
-        return await self._start_local(entry.engine, gpu, withdrawal)
+        return await self._start_local(entry.engine, gpu, withdrawal, burn_in)
 
-    async def _start_local(self, engine: TTSEngine, gpu: str | None, withdrawal: _Withdrawal) -> Skip | None:
+    async def _start_local(self, engine: TTSEngine, gpu: str | None, withdrawal: _Withdrawal, burn_in: bool) -> Skip | None:
         """Start the container on this machine — on the card the rules choose when it needs a GPU, or on
         ``gpu`` — and wait until its model is loaded. :class:`ReadingAborted` when the start is withdrawn."""
         async with self._local_gpu_start, program_lock(self._config.placement_lock_file):
@@ -264,11 +278,11 @@ class SuiteLauncher:
             if engine.needs_gpu:
                 try:
                     cards = await asyncio.to_thread(self._gpus)
-                    placement = choose_gpu(cards, engine, self._config, gpu)
+                    placement = choose_gpu_for_burn_in(cards, self._config) if burn_in else choose_gpu(cards, engine, self._config, gpu)
                 except PlacementRefused as refused:
                     return Skip("no_vram", str(refused))  # transient: ``_start_finished`` does not remember it
                 logger.info(
-                    "TTS: starting %s on GPU %d (budget %d MiB, %d MiB free)",
+                    "TTS: starting %s on GPU %d (budget %s MiB, %d MiB free)",
                     engine.key, placement.gpu.index, placement.budget_mib, placement.gpu.free_mib,
                 )
                 engine = engine.on_gpu(placement.gpu.uuid, placement.budget_mib)

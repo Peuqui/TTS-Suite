@@ -62,6 +62,28 @@ def test_a_local_gpu_engine_starts_on_the_chosen_card_with_its_budget(tmp_path: 
     assert engine.placements == [("GPU-1", 4000)] and engine.ready_calls == 1
 
 
+def test_a_burn_in_starts_the_engine_on_an_unused_card_without_its_limit(tmp_path: Path) -> None:
+    engine = ContainerEngine("a")
+    cards = [GpuInfo(0, "GPU-used", 20000, 24000, 4000), GpuInfo(1, "GPU-free", 8000, 8000, 0)]
+    launcher = _launcher(tmp_path, lambda: cards)  # type: ignore[arg-type]
+
+    async def scenario() -> None:
+        assert await launcher.start_for_burn_in(local_entry(engine)) is None
+        with pytest.raises(EngineInUse):  # it serves now: a second one would not measure anything else
+            await launcher.start_for_burn_in(local_entry(engine))
+
+    run_async(scenario())
+    assert engine.placements == [("GPU-free", None)]
+
+
+def test_a_burn_in_without_an_unused_card_is_skipped_and_no_failure_of_the_engine(tmp_path: Path) -> None:
+    engine = ContainerEngine("a")
+    launcher = _launcher(tmp_path, lambda: [GpuInfo(0, "GPU-used", 20000, 24000, 4000)])  # type: ignore[arg-type]
+    skip = run_async(launcher.start_for_burn_in(local_entry(engine)))
+    assert skip is not None and skip.reason == "no_vram" and "nobody uses" in skip.detail
+    assert engine.placements == [] and launcher.start_failure(local_entry(engine)) is None
+
+
 def test_a_start_on_a_named_card_ignores_the_rules_and_refuses_a_running_engine(tmp_path: Path) -> None:
     engine = ContainerEngine("a")
     launcher = _launcher(tmp_path, CardList(3000, 9000, 20000))  # auto would take GPU-2

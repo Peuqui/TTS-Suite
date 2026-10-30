@@ -75,6 +75,8 @@ export const service = {
   stop: (engine, host) => json(`../engines/${encodeURIComponent(engine)}/stop${query({ host })}`, { method: 'POST' }),
   release: (targets) => json('../release', { method: 'POST', body: { targets } }),
   gpuRelease,
+  burnIn: () => json('../burn-in'),
+  startBurnIn: (engine) => json('../burn-in', { method: 'POST', body: { engine } }),
   voices: (engine) => json(`../voices${query({ engine })}`),
   pushVoices: () => json('../voices/push', { method: 'POST' }),
   syncVoices: (engine) => json(`../voices/sync${query({ engine })}`, { method: 'POST' }),

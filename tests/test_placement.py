@@ -11,6 +11,7 @@ from tts_suite.placement import (
     GpuInfo,
     PlacementRefused,
     choose_gpu,
+    choose_gpu_for_burn_in,
     parse_gpus,
     vram_budget_mib,
     vram_needed_mib,
@@ -116,3 +117,19 @@ def test_a_named_card_that_is_missing_or_too_small_refuses_the_placement(tmp_pat
         choose_gpu(CARDS, ContainerEngine("x"), _config(tmp_path), gpu="7")
     with pytest.raises(PlacementRefused, match="needs 4500 MiB, most free 4000 MiB on GPU 0"):
         choose_gpu([GpuInfo(0, "GPU-a", 4000, 24000, 20000), *CARDS[1:]], ContainerEngine("x"), _config(tmp_path), gpu="0")
+
+
+def test_a_burn_in_takes_a_card_nobody_uses_and_starts_without_a_limit(tmp_path: Path) -> None:
+    cards = [GpuInfo(0, "GPU-a", 9000, 24000, 15000), GpuInfo(1, "GPU-b", 7000, 8000, 0), GpuInfo(2, "GPU-c", 20000, 24000, 0)]
+    placement = choose_gpu_for_burn_in(cards, _config(tmp_path))
+    assert placement.gpu.uuid == "GPU-c" and placement.budget_mib is None
+
+
+def test_a_burn_in_keeps_to_the_cards_of_the_list(tmp_path: Path) -> None:
+    cards = [GpuInfo(0, "GPU-a", 24000, 24000, 0), GpuInfo(1, "GPU-b", 8000, 8000, 0)]
+    assert choose_gpu_for_burn_in(cards, _config(tmp_path, GpuRule("1"))).gpu.uuid == "GPU-b"
+
+
+def test_a_burn_in_refuses_when_every_card_is_in_use(tmp_path: Path) -> None:
+    with pytest.raises(PlacementRefused, match="nobody uses"):
+        choose_gpu_for_burn_in(CARDS, _config(tmp_path))

@@ -32,16 +32,19 @@ from tts_suite.api import (
     InvalidRequest,
     ReadingAborted,
     SuiteConfig,
+    SuiteError,
     TTSSuite,
     UnknownEngine,
     UnknownHost,
     VoiceInfo,
+    VoiceSettings,
 )
 from tts_suite.engines import registry
 from tts_suite.engines.base import Reachability, TTSEngine
 from tts_suite.escalation import EscalationEntry, Skip
 from tts_suite.launcher import SuiteLauncher
 from tts_suite.suite import Suite, create_suite
+from tts_suite.vram import VramMeasurementFailed
 
 
 @pytest.fixture(autouse=True)
@@ -750,3 +753,128 @@ def test_a_host_that_refuses_the_voices_is_an_engine_control_failure(tmp_path: P
     suite, _ = _suite(config, SuiteLauncher(config, gpus=list, host_command=FakeSsh(fail="no route")))  # type: ignore[arg-type]
     with pytest.raises(EngineControlFailed, match="no route"):
         run_async(suite.push_voices())
+
+
+# ── Burn-in ─────────────────────────────
+
+
+def _burn_in_suite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine: ContainerEngine, samples: list[int] | None = None,
+) -> tuple[Suite, FakeManagedLauncher]:
+    install(monkeypatch, engine)
+    readings = iter(samples or [4000, 6100, 5000])
+    last = {"mib": 0}
+
+    def sample(_engine: Any) -> dict[str, int]:
+        last["mib"] = next(readings, last["mib"])
+        return {"GPU-0": last["mib"] - 100, "GPU-1": 100}
+
+    monkeypatch.setattr(suite_module, "engine_vram_mib", sample)
+    return _suite(make_config(tmp_path))
+
+
+def test_a_burn_in_makes_the_peak_the_budget_and_takes_the_engine_down(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = ContainerEngine("lo")
+    suite, launcher = _burn_in_suite(tmp_path, monkeypatch, engine)
+    launcher.cards["lo"] = ("GPU-0",)
+    told: list[tuple[int, int]] = []
+
+    async def scenario() -> SuiteConfig:
+        assert await suite.burn_in("lo", lambda current, peak: told.append((current, peak))) == 6100
+        return await suite.config()
+
+    config = run_async(scenario())
+    assert config.engines["lo"].vram_budget_mib == 6100
+    assert launcher.burn_in_starts == ["lo"] and launcher.stopped == ["lo"] and launcher.cleared[0] == "lo"
+    assert len(engine.texts) >= 2 and {voice for voice, _, _ in engine.settings} == {"V"}   # both texts, whole
+    assert any(text.startswith("Die schnelle") for text in engine.texts) and any(text.startswith("The quick") for text in engine.texts)
+    assert told[0] == (0, 4000) or told[0][0] in (0, 1)
+
+
+def test_a_burn_in_keeps_what_else_the_engine_has_configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = ContainerEngine("lo")
+    suite, _ = _burn_in_suite(tmp_path, monkeypatch, engine)
+    run_async(suite.set_config(make_config(tmp_path, {"lo": EngineDefaults(max_parallel=1, vram_budget_mib=9)})))
+
+    async def scenario() -> SuiteConfig:
+        await suite.burn_in("lo", lambda current, peak: None)
+        return await suite.config()
+
+    defaults = run_async(scenario()).engines["lo"]
+    assert defaults.vram_budget_mib == 6100 and defaults.max_parallel == 1
+
+
+def test_a_running_engine_is_stopped_first_because_its_limit_would_cap_the_measurement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    suite, launcher = _burn_in_suite(tmp_path, monkeypatch, ContainerEngine("lo"))
+    run_async(suite.burn_in("lo", lambda current, peak: None))
+    assert launcher.stopped[0] == "lo" and launcher.burn_in_starts == ["lo"]
+
+
+def test_a_burn_in_needs_a_local_gpu_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch, FakeEngine("cpufake"))
+    suite, launcher = _suite(make_config(tmp_path))
+    with pytest.raises(InvalidRequest, match="no GPU engine"):
+        run_async(suite.burn_in("cpufake", lambda current, peak: None))
+    assert launcher.burn_in_starts == []
+
+
+def test_a_burn_in_that_cannot_start_says_why_and_changes_no_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, launcher = _burn_in_suite(tmp_path, monkeypatch, ContainerEngine("lo"))
+    launcher.burn_in_skip = Skip("no_vram", "a burn-in needs a GPU nobody uses")
+    with pytest.raises(EngineControlFailed, match="nobody uses"):
+        run_async(suite.burn_in("lo", lambda current, peak: None))
+    assert "lo" not in run_async(suite.config()).engines
+
+
+def test_a_reading_that_fails_ends_the_burn_in_the_engine_goes_down_and_the_budget_stays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = ContainerEngine("lo", fail="internal", fail_after=0)
+    suite, launcher = _burn_in_suite(tmp_path, monkeypatch, engine)
+    launcher.cards["lo"] = ("GPU-0",)
+    with pytest.raises(SuiteError):
+        run_async(suite.burn_in("lo", lambda current, peak: None))
+    assert launcher.stopped[-1] == "lo" and "lo" not in run_async(suite.config()).engines
+
+
+def test_a_vram_that_cannot_be_measured_ends_the_burn_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite, _ = _burn_in_suite(tmp_path, monkeypatch, ContainerEngine("lo"))
+
+    def blind(_engine: Any) -> dict[str, int]:
+        raise VramMeasurementFailed("nvidia-smi did not answer")
+
+    monkeypatch.setattr(suite_module, "engine_vram_mib", blind)
+    with pytest.raises(EngineControlFailed, match="could not be measured"):
+        run_async(suite.burn_in("lo", lambda current, peak: None))
+
+
+def test_a_burn_in_reads_with_the_first_voice_when_nothing_names_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = ContainerEngine("lo")
+    engine.default_voice = None
+    suite, _ = _burn_in_suite(tmp_path, monkeypatch, engine)
+    monkeypatch.setattr(suite_module, "voice_names", lambda bound: ["Alice", "Bob"])
+    run_async(suite.burn_in("lo", lambda current, peak: None))
+    assert {voice for voice, _, _ in engine.settings} == {"Alice"}
+
+
+def test_a_burn_in_keeps_the_configured_voice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = ContainerEngine("lo")
+    engine.default_voice = None
+    suite, _ = _burn_in_suite(tmp_path, monkeypatch, engine)
+    monkeypatch.setattr(suite_module, "voice_names", lambda bound: ["Alice", "Bob"])
+    run_async(suite.set_config(make_config(tmp_path, {"lo": EngineDefaults(voice=VoiceSettings(voice="Bob"))})))
+    run_async(suite.burn_in("lo", lambda current, peak: None))
+    assert {voice for voice, _, _ in engine.settings} == {"Bob"}
+
+
+def test_an_engine_without_a_voice_ends_the_burn_in_and_goes_down(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = ContainerEngine("lo")
+    engine.default_voice = None
+    suite, launcher = _burn_in_suite(tmp_path, monkeypatch, engine)
+    launcher.cards["lo"] = ("GPU-0",)
+    monkeypatch.setattr(suite_module, "voice_names", lambda bound: [])
+    with pytest.raises(EngineControlFailed, match="no voice"):
+        run_async(suite.burn_in("lo", lambda current, peak: None))
+    assert launcher.stopped[-1] == "lo"

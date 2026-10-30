@@ -12,7 +12,7 @@ no imports from a client program.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
@@ -398,6 +398,10 @@ class ConfigInvalid(SuiteError):
 # ── The entry point ─────────────────────────────────────────────────
 
 
+#: Told how far a burn-in is: the round (1-based, 0 = the engine is still starting) and the peak so far in MiB.
+BurnInProgress = Callable[[int, int], None]
+
+
 class TTSSuite(Protocol):
     """The engine layer. The service wraps it; programs may embed it."""
 
@@ -467,6 +471,14 @@ class TTSSuite(Protocol):
         :class:`ReadingAborted` naming ``reason``, then the container is stopped. ``released`` only once Docker
         reports the container down; a stop that does not take it down is followed by ``docker kill``.
         :class:`InvalidRequest` for an unknown or repeated item, an empty list or an empty reason."""
+        ...
+
+    async def burn_in(self, engine: str, progress: BurnInProgress) -> int:
+        """Measure what a local GPU engine takes and make it its budget (``EngineDefaults.vram_budget_mib``;
+        the caller saves the configuration). The engine is restarted without its VRAM limit on a card nobody
+        uses, reads the worst-case texts and is taken down again. Returns the peak in MiB.
+        :class:`InvalidRequest` for an engine that is no local GPU engine, :class:`EngineInUse` while a
+        reading holds it, :class:`EngineControlFailed` when it cannot be started or measured."""
         ...
 
     async def reload(self) -> tuple[list[str], list[str]]:
