@@ -3,8 +3,6 @@ that need no Docker, ``nvidia-smi``, network or GPU."""
 from __future__ import annotations
 
 import asyncio
-import io
-import json
 import threading
 import time
 from pathlib import Path
@@ -13,7 +11,6 @@ from typing import Any
 import pytest
 from speech_fakes import FakeEngine, FakeLauncher
 
-from tts_suite import placement
 from tts_suite.api import EngineDefaults, EntryStatus, Host, SuiteConfig
 from tts_suite.docker_ctl import ContainerState
 from tts_suite.engines import registry
@@ -115,25 +112,6 @@ class CardList:
         with self._lock:
             self.queries += 1
             return list(self.cards)
-
-
-class FakeGpuOrc:
-    """Replaces ``urlopen`` for GPU-Orc's ``GET /status``: ``available`` per card UUID (``None`` = it cannot
-    say), ``error`` makes it unreachable; ``urls`` records what was asked."""
-
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, available: dict[str, int | None],
-                 errors: list[dict[str, str]] | None = None, error: OSError | None = None) -> None:
-        self.body = {"gpus": [{"uuid": uuid, "available_mib": mib} for uuid, mib in available.items()],
-                     "errors": errors or []}
-        self.error = error
-        self.urls: list[str] = []
-        monkeypatch.setattr(placement.urllib.request, "urlopen", self._urlopen)
-
-    def _urlopen(self, url: str, timeout: float) -> io.BytesIO:
-        self.urls.append(url)
-        if self.error is not None:
-            raise self.error
-        return io.BytesIO(json.dumps(self.body).encode())
 
 
 class FakeSsh:

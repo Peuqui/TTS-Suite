@@ -36,7 +36,7 @@ from .engines.base import TTSEngine
 from .escalation import EngineLauncher, EscalationEntry, Skip
 from .holds import EngineHolds
 from .host_ctl import HostCommand, HostControlError, pack_voices, run_host_command
-from .placement import GpuInfo, PlacementRefused, choose_gpu, query_gpus, with_room_from_gpu_orc
+from .placement import GpuInfo, PlacementRefused, choose_gpu, query_gpus
 from .placement_lock import program_lock
 
 logger = logging.getLogger(__name__)
@@ -133,13 +133,6 @@ class SuiteLauncher:
         # second start chosen before that would see the first one's card as still free. The service
         # has exactly one event loop, so an asyncio lock is enough.
         self._local_gpu_start = asyncio.Lock()
-
-    def _cards_for_a_start(self) -> list[GpuInfo]:
-        """The cards with their free VRAM as GPU-Orc sees it, where one is configured. Only for a start:
-        GPU-Orc asks this suite's ``/gpu/holders`` (``gpu_cards``), which therefore reads ``nvidia-smi``."""
-        cards = self._gpus()
-        url = self._config.gpu_orc_url
-        return with_room_from_gpu_orc(cards, url) if url else cards
 
     def set_config(self, config: SuiteConfig) -> None:
         self._config = config
@@ -270,7 +263,7 @@ class SuiteLauncher:
                 return None  # started by whoever held the lock before us
             if engine.needs_gpu:
                 try:
-                    cards = await asyncio.to_thread(self._cards_for_a_start)
+                    cards = await asyncio.to_thread(self._gpus)
                     placement = choose_gpu(cards, engine, self._config, gpu)
                 except PlacementRefused as refused:
                     return Skip("no_vram", str(refused))  # transient: ``_start_finished`` does not remember it

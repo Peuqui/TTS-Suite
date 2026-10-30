@@ -8,13 +8,11 @@ instead of a callback: ``gpu_mode`` (``auto`` = a card nobody uses first, then t
 
 from __future__ import annotations
 
-import json
 import subprocess
-import urllib.request
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from .api import SuiteConfig
-from .constants import GPU_ORC_STATUS_TIMEOUT_S, NVIDIA_SMI_QUERY_TIMEOUT_S
+from .constants import NVIDIA_SMI_QUERY_TIMEOUT_S
 from .engines.base import TTSEngine
 
 NVIDIA_SMI_GPU_FIELDS = "index,uuid,memory.free,memory.total,memory.used"
@@ -71,24 +69,6 @@ def query_gpus() -> list[GpuInfo]:
     if not cards:
         raise PlacementRefused("nvidia-smi lists no GPUs")
     return cards
-
-
-def with_room_from_gpu_orc(cards: list[GpuInfo], url: str) -> list[GpuInfo]:
-    """The cards with GPU-Orc's ``available_mib`` as their free VRAM where it is less: what a vLLM model
-    may fill while it computes is not free, even where ``nvidia-smi`` shows it so. :class:`PlacementRefused`
-    when GPU-Orc does not answer, or cannot say what is free (a consumer did not report)."""
-    try:
-        with urllib.request.urlopen(f"{url.rstrip('/')}/status", timeout=GPU_ORC_STATUS_TIMEOUT_S) as response:
-            status = json.load(response)
-        room = {gpu["uuid"]: gpu["available_mib"] for gpu in status["gpus"]}
-        free = [(card, room[card.uuid]) for card in cards]
-    except OSError as exc:
-        raise PlacementRefused(f"GPU-Orc at {url} did not answer: {exc}") from exc
-    except (ValueError, KeyError, TypeError) as exc:
-        raise PlacementRefused(f"GPU-Orc at {url} answered in an unknown form: {exc!r}") from exc
-    if any(available is None for _, available in free):
-        raise PlacementRefused(f"GPU-Orc cannot say what is free: {status.get('errors')}")
-    return [replace(card, free_mib=min(card.free_mib, available)) for card, available in free]
 
 
 def vram_budget_mib(engine: TTSEngine, config: SuiteConfig) -> int | None:

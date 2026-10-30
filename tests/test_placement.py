@@ -1,11 +1,10 @@
 """Card choice: order, reserve, headroom, most free VRAM, unknown budget, nothing fits."""
 from __future__ import annotations
 
-import urllib.error
 from pathlib import Path
 
 import pytest
-from container_fakes import ContainerEngine, FakeGpuOrc
+from container_fakes import ContainerEngine
 
 from tts_suite.api import EngineDefaults, GpuRule, SuiteConfig
 from tts_suite.placement import (
@@ -14,7 +13,6 @@ from tts_suite.placement import (
     choose_gpu,
     parse_gpus,
     vram_budget_mib,
-    with_room_from_gpu_orc,
 )
 
 CARDS = [GpuInfo(0, "GPU-a", 5000, 24000, 19000), GpuInfo(1, "GPU-b", 9000, 24000, 15000), GpuInfo(2, "GPU-c", 7000, 24000, 17000)]
@@ -109,28 +107,3 @@ def test_a_named_card_that_is_missing_or_too_small_refuses_the_placement(tmp_pat
         choose_gpu(CARDS, ContainerEngine("x"), _config(tmp_path), gpu="7")
     with pytest.raises(PlacementRefused, match="needs 4500 MiB, most free 4000 MiB on GPU 0"):
         choose_gpu([GpuInfo(0, "GPU-a", 4000, 24000, 20000), *CARDS[1:]], ContainerEngine("x"), _config(tmp_path), gpu="0")
-
-
-def test_gpu_orc_room_counts_where_it_is_less_than_nvidia_smi(monkeypatch: pytest.MonkeyPatch) -> None:
-    orc = FakeGpuOrc(monkeypatch, {"GPU-a": 1200, "GPU-b": 12000, "GPU-c": 7000})   # GPU-a: a vLLM model's share
-    cards = with_room_from_gpu_orc(CARDS, "http://127.0.0.1:5070/")
-    assert orc.urls == ["http://127.0.0.1:5070/status"]
-    assert [card.free_mib for card in cards] == [1200, 9000, 7000]
-
-
-def test_a_gpu_orc_that_cannot_say_what_is_free_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
-    FakeGpuOrc(monkeypatch, {"GPU-a": None, "GPU-b": None, "GPU-c": None}, errors=[{"consumer": "stt-suite", "detail": "down"}])
-    with pytest.raises(PlacementRefused, match="cannot say what is free.*stt-suite"):
-        with_room_from_gpu_orc(CARDS, "http://127.0.0.1:5070")
-
-
-def test_a_gpu_orc_that_does_not_answer_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
-    FakeGpuOrc(monkeypatch, {}, error=urllib.error.URLError("connection refused"))
-    with pytest.raises(PlacementRefused, match="did not answer"):
-        with_room_from_gpu_orc(CARDS, "http://127.0.0.1:5070")
-
-
-def test_a_card_gpu_orc_does_not_know_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
-    FakeGpuOrc(monkeypatch, {"GPU-a": 5000})
-    with pytest.raises(PlacementRefused, match="unknown form"):
-        with_room_from_gpu_orc(CARDS, "http://127.0.0.1:5070")

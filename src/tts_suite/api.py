@@ -116,12 +116,6 @@ class SuiteConfig:
     while it chooses a card and loads onto it (the STT suite does); programs that start together then do
     not choose the same card. ``None`` = the suite is alone on the cards.
 
-    ``gpu_orc_url`` names the GPU-Orc of this machine (``http://127.0.0.1:5070``). Its ``available_mib``
-    per card then counts as the free VRAM where it is less than what ``nvidia-smi`` shows: a vLLM model
-    may fill its share of a card (``--gpu-memory-utilization``) while it computes, and an engine placed
-    in that gap left the model without memory (25.10.2026). A GPU-Orc that does not answer or cannot say
-    what is free refuses the start (``no_vram``). ``None`` = no GPU-Orc on this machine, ``nvidia-smi`` alone.
-
     ``pronunciations`` maps a word to the form that is spoken instead (whole words, case as
     written; for example "AIfred" -> "Alfred"). The text cleaning of every unit applies it; it is
     the one program-specific part of the cleaning that is configuration.
@@ -134,7 +128,6 @@ class SuiteConfig:
     gpus: tuple[GpuRule, ...] = ()
     headroom_mib: int = HEADROOM_MIB_DEFAULT
     placement_lock_file: Path | None = None  # shared with other programs that place models on the cards
-    gpu_orc_url: str | None = None  # the GPU-Orc of this machine: what is really free on a card
     pronunciations: Mapping[str, str] = field(default_factory=dict)
 
 

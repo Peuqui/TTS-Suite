@@ -10,7 +10,6 @@ import pytest
 from container_fakes import (
     CardList,
     ContainerEngine,
-    FakeGpuOrc,
     FakeSsh,
     install,
     local_entry,
@@ -75,21 +74,6 @@ def test_a_start_on_a_named_card_ignores_the_rules_and_refuses_a_running_engine(
 
     run_async(scenario())
     assert engine.placements == [("GPU-1", 4000)] and engine.ready_calls == 1
-
-
-def test_with_gpu_orc_a_start_takes_its_room_not_nvidia_smis(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    engine = ContainerEngine("a")
-    orc = FakeGpuOrc(monkeypatch, {"GPU-0": 3000, "GPU-1": 9000, "GPU-2": 1000})   # GPU-2: a vLLM model's share
-    launcher = _launcher(tmp_path, CardList(3000, 9000, 20000),
-                         config=SuiteConfig(voices_dir=tmp_path, gpu_orc_url="http://127.0.0.1:5070"))
-
-    async def scenario() -> None:
-        assert await launcher.ensure_serving(local_entry(engine), wait=True) is None
-        await launcher.gpu_cards(local_entry(engine))   # /gpu/holders, which GPU-Orc itself asks: nvidia-smi only
-        await launcher.aclose()
-
-    run_async(scenario())
-    assert engine.placements == [("GPU-1", 4000)] and orc.urls == ["http://127.0.0.1:5070/status"]
 
 
 def test_a_start_on_a_named_card_without_room_is_no_vram(tmp_path: Path) -> None:
