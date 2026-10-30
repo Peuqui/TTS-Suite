@@ -60,7 +60,7 @@ Container (Cloud, CPU) oder läuft auf einem anderen Rechner, sonst wird ihr Doc
 (warum der letzte Start dieses Eintrags scheiterte, bis zum nächsten Start, einer neuen Konfiguration oder
 einem Reload; sonst null), `vram_mib` und `idle_remaining_s` (Sekunden, bis sich ein laufender Container
 wegen Leerlauf selbst beendet, jede Anfrage setzt sie zurück; null = läuft nicht, kein Container oder
-Automatik aus), `reserve_mib` (was der Start einer GPU-Engine auf diesem Rechner auf einer Karte frei braucht:
+Automatik aus), `needed_mib` (was der Start einer GPU-Engine auf diesem Rechner auf einer Karte frei braucht:
 ihr Budget, konfiguriert oder das eigene der Engine, plus `headroom_mib` der Konfiguration; die eine Zahl, nach der
 die Kartenwahl und jeder Client plant; null bei allen anderen Zeilen). Die Zeilen anderer Hosts werden parallel abgefragt: Ein toter Host
 hält die anderen nicht auf.

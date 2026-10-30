@@ -87,7 +87,7 @@ class Suite:
         # One task per row, so a host that does not answer delays only its own rows by the health timeout
         return list(await asyncio.gather(*(self._info(entry) for entry in self._speaker.catalog_entries())))
 
-    def _reserve_mib(self, entry: EscalationEntry) -> int | None:
+    def _needed_mib(self, entry: EscalationEntry) -> int | None:
         """What a start needs free on a card; only for a GPU engine on this machine (another host's
         cards are that host's business)."""
         if entry.host is not None or not entry.engine.needs_gpu:
@@ -114,7 +114,7 @@ class Suite:
             vram_mib=vram_mib,
             idle_remaining_s=idle_remaining_s,
             default_vram_mib=entry.engine.default_vram_budget_mib,
-            reserve_mib=self._reserve_mib(entry),
+            needed_mib=self._needed_mib(entry),
             default_max_parallel=entry.engine.max_parallel_requests,
             default_max_queue=entry.engine.max_queued_requests,
         )

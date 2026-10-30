@@ -82,7 +82,7 @@ def vram_budget_mib(engine: TTSEngine, config: SuiteConfig) -> int | None:
 
 def vram_needed_mib(engine: TTSEngine, config: SuiteConfig) -> int | None:
     """The free VRAM a start needs on a card: the budget plus ``headroom_mib``. The one place the
-    margin is added; the placement and the catalog's ``reserve_mib`` both read it. ``None`` = no budget."""
+    margin is added; the placement and the catalog's ``needed_mib`` both read it. ``None`` = no budget."""
     budget = vram_budget_mib(engine, config)
     return None if budget is None else budget + config.headroom_mib
 

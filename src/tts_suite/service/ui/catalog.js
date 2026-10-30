@@ -100,12 +100,12 @@ export function catalogView({ show, fail }) {
       ...(visible.some((row) => memory(row.vram_mib) !== '') ? [{ key: 'gpuMemory', cell: (row) => memory(row.vram_mib) }] : []),
       // The column of the hints only when some row has one.
       ...(hasHint ? [{ key: 'hint', cell: (row) => (row.start_hint ? h('span', { class: 'hint' }, row.start_hint) : '') }] : []),
-      { key: 'memoryNeeded', cell: (row) => row.reserve_mib ?? '' },
+      { key: 'memoryNeeded', cell: (row) => row.needed_mib ?? '' },
       { key: '', cell: (row) => (row.cloud ? '' : h('div', { class: 'buttons' },
         h('button', { class: 'small', onclick: () => control('start', row), disabled: busy.has(place(row)) || row.status === 'running' }, t('start')),
         h('button', { class: 'small', onclick: () => control('stop', row), disabled: busy.has(place(row)) || row.status === 'stopped' }, t('stop')),
         h('button', { class: 'small', onclick: () => release([{ engine: row.engine, host: row.host }]), disabled: busy.has(place(row)) || row.status === 'stopped' }, t('release')),
-        row.reserve_mib !== null && row.installed ? h('button', { class: 'small', onclick: () => startBurnIn(row), disabled: burnIn.running || busy.has(place(row)) }, t('burnIn')) : null)) },
+        row.needed_mib !== null && row.installed ? h('button', { class: 'small', onclick: () => startBurnIn(row), disabled: burnIn.running || busy.has(place(row)) }, t('burnIn')) : null)) },
     ]
   }
 
