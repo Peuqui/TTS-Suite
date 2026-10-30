@@ -155,6 +155,9 @@ class EngineInfo:
     idle_remaining_s: float | None  # seconds until a running container ends itself for being idle (a request resets it); None = not running, no container, or auto-shutdown off
     # What the engine does when ``EngineDefaults`` leaves a limit empty (for a page that shows them).
     default_vram_mib: int | None  # GPU engines: the budget; None = the engine takes no budget
+    # What a start of this engine needs free on a card: its budget (configured, else the default) plus
+    # ``SuiteConfig.headroom_mib``. The one figure a client plans with; None = no local GPU engine.
+    reserve_mib: int | None
     default_max_parallel: int
     default_max_queue: int
 

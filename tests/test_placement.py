@@ -13,6 +13,7 @@ from tts_suite.placement import (
     choose_gpu,
     parse_gpus,
     vram_budget_mib,
+    vram_needed_mib,
 )
 
 CARDS = [GpuInfo(0, "GPU-a", 5000, 24000, 19000), GpuInfo(1, "GPU-b", 9000, 24000, 15000), GpuInfo(2, "GPU-c", 7000, 24000, 17000)]
@@ -76,6 +77,14 @@ def test_the_configured_budget_beats_the_engines_own(tmp_path: Path) -> None:
     assert vram_budget_mib(engine, _config(tmp_path, x=EngineDefaults(vram_budget_mib=8000))) == 8000
     config = _config(tmp_path, x=EngineDefaults(vram_budget_mib=8000))
     assert choose_gpu(CARDS, engine, config).budget_mib == 8000 and choose_gpu(CARDS, engine, config).gpu.index == 1
+
+
+def test_the_needed_vram_is_budget_plus_headroom_and_the_one_figure_the_placement_uses(tmp_path: Path) -> None:
+    engine = ContainerEngine("x")
+    assert vram_needed_mib(engine, _config(tmp_path, headroom_mib=256)) == 4256
+    assert vram_needed_mib(engine, _config(tmp_path, x=EngineDefaults(vram_budget_mib=8000), headroom_mib=512)) == 8512
+    engine.default_vram_budget_mib = None  # type: ignore[assignment]
+    assert vram_needed_mib(engine, _config(tmp_path)) is None
 
 
 def test_an_unknown_budget_refuses_the_placement(tmp_path: Path) -> None:

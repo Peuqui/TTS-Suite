@@ -30,6 +30,7 @@ from .engines.base import shared_voice_names
 from .engines.registry import reload_engines, require_engine, voice_names
 from .escalation import EscalationEntry
 from .launcher import ManagedLauncher, SuiteLauncher
+from .placement import vram_needed_mib
 from .speaker import Speaker
 from .stream import Stream
 from .vram import VramMeasurementFailed, engine_vram_mib
@@ -81,6 +82,13 @@ class Suite:
         # One task per row, so a host that does not answer delays only its own rows by the health timeout
         return list(await asyncio.gather(*(self._info(entry) for entry in self._speaker.catalog_entries())))
 
+    def _reserve_mib(self, entry: EscalationEntry) -> int | None:
+        """What a start needs free on a card; only for a GPU engine on this machine (another host's
+        cards are that host's business)."""
+        if entry.host is not None or not entry.engine.needs_gpu:
+            return None
+        return vram_needed_mib(entry.engine, self._speaker.config)
+
     async def _info(self, entry: EscalationEntry) -> EngineInfo:
         status = await self._launcher.status(entry)
         vram_mib, installed, idle_remaining_s = await asyncio.gather(
@@ -101,6 +109,7 @@ class Suite:
             vram_mib=vram_mib,
             idle_remaining_s=idle_remaining_s,
             default_vram_mib=entry.engine.default_vram_budget_mib,
+            reserve_mib=self._reserve_mib(entry),
             default_max_parallel=entry.engine.max_parallel_requests,
             default_max_queue=entry.engine.max_queued_requests,
         )

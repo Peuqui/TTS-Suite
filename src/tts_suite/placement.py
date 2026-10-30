@@ -80,6 +80,13 @@ def vram_budget_mib(engine: TTSEngine, config: SuiteConfig) -> int | None:
     return engine.default_vram_budget_mib
 
 
+def vram_needed_mib(engine: TTSEngine, config: SuiteConfig) -> int | None:
+    """The free VRAM a start needs on a card: the budget plus ``headroom_mib``. The one place the
+    margin is added; the placement and the catalog's ``reserve_mib`` both read it. ``None`` = no budget."""
+    budget = vram_budget_mib(engine, config)
+    return None if budget is None else budget + config.headroom_mib
+
+
 def _candidates(cards: list[GpuInfo], config: SuiteConfig) -> list[tuple[GpuInfo, int]]:
     """The cards in the order they are tried, each with the VRAM left after its reserve."""
     if config.gpu_mode == "auto":
@@ -108,9 +115,9 @@ def choose_gpu(cards: list[GpuInfo], engine: TTSEngine, config: SuiteConfig, gpu
     whose free VRAM minus reserve covers the budget plus headroom; with ``gpu`` (index or UUID) only that card,
     outside the rules of ``gpu_mode``. :class:`PlacementRefused` when none does or the budget is unknown."""
     budget = vram_budget_mib(engine, config)
-    if budget is None:
+    needed = vram_needed_mib(engine, config)
+    if budget is None or needed is None:
         raise PlacementRefused(f"no VRAM budget for {engine.key} — set engines[{engine.key}].vram_budget_mib")
-    needed = budget + config.headroom_mib
     candidates = _candidates(cards, config) if gpu is None else _named_card(cards, gpu)
     if not candidates:
         raise PlacementRefused("none of the configured GPUs is present")
