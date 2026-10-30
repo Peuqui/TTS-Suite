@@ -72,7 +72,7 @@ a request may not name it, the client decides whether and how it speaks.
 One object: `voices_dir`; `hosts` (optional, the machines requests refer to by name: `name`, `address`,
 `ssh_port`, `ssh_user`); `engines` (defaults per engine key: `voice` with `voice`, `speed`, `pitch`; `voice_tuning`, speed and pitch per
 voice name, which apply whenever that voice speaks, after the request's own values and before the engine's defaults;
-`vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` and `headroom_mib` (see below); `placement_lock_file` (a file every program placing models on the cards locks with `flock` while it chooses a card and loads onto it, the STT suite among them; `null` = the suite is alone on the cards);
+`vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` and `headroom_mib` (see below); `gpu_orc_url` (the GPU-Orc of this machine: before a start on a card the suite asks `GET /loading`; while a big model loads or without a usable answer the start is refused with `no_vram` and the reading goes to the next entry of its list; empty = no GPU-Orc); `placement_lock_file` (a file every program placing models on the cards locks with `flock` while it chooses a card and loads onto it, the STT suite among them; `null` = the suite is alone on the cards);
 `pronunciations` (a word to the form spoken instead). `POST` validates once, in the engine package; a changed `voices_dir` releases the running containers (one a reading holds is logged and keeps the old folder), the next request starts them with the new one;
 what cannot work is `400` with the reason. There is no list of entries: who speaks, in which order, is the
 request's business. Cloud keys are not part of it (below).

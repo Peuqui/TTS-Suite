@@ -8,11 +8,13 @@ instead of a callback: ``gpu_mode`` (``auto`` = a card nobody uses first, then t
 
 from __future__ import annotations
 
+import json
 import subprocess
+import urllib.request
 from dataclasses import dataclass
 
 from .api import SuiteConfig
-from .constants import NVIDIA_SMI_QUERY_TIMEOUT_S
+from .constants import GPU_ORC_LOADING_TIMEOUT_S, NVIDIA_SMI_QUERY_TIMEOUT_S
 from .engines.base import TTSEngine
 
 NVIDIA_SMI_GPU_FIELDS = "index,uuid,memory.free,memory.total,memory.used"
@@ -85,6 +87,20 @@ def vram_needed_mib(engine: TTSEngine, config: SuiteConfig) -> int | None:
     margin is added; the placement and the catalog's ``needed_mib`` both read it. ``None`` = no budget."""
     budget = vram_budget_mib(engine, config)
     return None if budget is None else budget + config.headroom_mib
+
+
+def refuse_while_a_model_loads(url: str | None) -> None:
+    """GPU-Orc's traffic light before a start. :class:`PlacementRefused` while a big model loads, and when
+    GPU-Orc gives no usable answer: nobody can then say that the cards really are as empty as they look."""
+    if url is None:
+        return
+    try:
+        with urllib.request.urlopen(f"{url.rstrip('/')}/loading", timeout=GPU_ORC_LOADING_TIMEOUT_S) as response:
+            loading = json.load(response)["loading"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise PlacementRefused(f"GPU-Orc at {url} gave no usable answer: {exc!r}") from exc
+    if loading:
+        raise PlacementRefused(f"{', '.join(loading)} is loading")
 
 
 def _candidates(cards: list[GpuInfo], config: SuiteConfig) -> list[tuple[GpuInfo, int]]:
