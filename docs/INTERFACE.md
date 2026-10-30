@@ -59,7 +59,7 @@ A row has `engine`, `host`, `label` and `label_short` (names for a user interfac
 another host, otherwise its Docker image is built), `start_hint` (why the last start of this entry failed,
 until the next start, a new configuration or a reload; otherwise null), `vram_mib` and `idle_remaining_s`
 (seconds until a running container ends itself for being idle, any request resets it; null = not running, no
-container or auto-shutdown off), `reserve_mib` (what a start of a GPU engine on this machine needs free on a card:
+container or auto-shutdown off), `needed_mib` (what a start of a GPU engine on this machine needs free on a card:
 its budget, configured or the engine's own, plus `headroom_mib` of the configuration, the one figure the card choice
 and every client plans with; null for all other rows). Rows of other hosts
 are asked in parallel: a dead host does not delay the others.
