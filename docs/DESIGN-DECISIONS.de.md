@@ -89,13 +89,25 @@ immer als Strom von Teilstücken in Sprechreihenfolge zurück, sobald sie fertig
 ## Textbereinigung im Dienst
 
 Die allgemeine Bereinigung (Markdown, Code und Tabellen als gesprochener Hinweis, LaTeX,
-URLs, Links, HTML, Emojis) läuft im Dienst vor der Zerlegung, mit dem Zustand des Laufs
-(ein Codeblock über mehrere Stücke, Hinweise einmal je Antwort). Aussprache-Ersetzungen
-(zum Beispiel „AIfred“ → „Alfred“) sind eine Konfigurationsliste. Programmspezifische
-Teile bleiben beim Programm: AIfred filtert seine Denk- und Detail-Blöcke selbst, weil ein
-anderer Aufrufer sie sprechen lassen möchte. Die Engine-spezifische Normalisierung
-(Sonderzeichen, die den Tokenizer abstürzen lassen, Satzzeichen gegen Halluzinationen)
-bleibt im Container.
+URLs, Links, HTML, Emojis) läuft im Dienst nach der Zerlegung, Stück für Stück in
+Sprechreihenfolge, mit dem Zustand des Laufs (ein Codeblock über mehrere Stücke, Hinweise
+einmal je Antwort). Aussprache-Ersetzungen (zum Beispiel „AIfred“ → „Alfred“) sind eine
+Konfigurationsliste. Programmspezifische Teile bleiben beim Programm: AIfred filtert seine
+Denk- und Detail-Blöcke selbst, weil ein anderer Aufrufer sie sprechen lassen möchte. Die
+Engine-spezifische Normalisierung (Sonderzeichen, die den Tokenizer abstürzen lassen,
+Satzzeichen gegen Halluzinationen) bleibt im Container.
+
+**Sprechformen im Dienst, für jede Engine (04.11.2026):** Einheiten nach einer Zahl
+(„25 km/h“ → „25 Kilometer pro Stunde“, Einzahl genau bei 1), Beträge wie gesprochen
+(„13,50 €“ → „13 Euro 50“, „0,35 €“ → „35 Cent“), Minus, Bereiche mit Gedankenstrich
+(„5–10“ → „5 bis 10“), §, gängige Abkürzungen („z. B.“ → „zum Beispiel“) und deutsche
+Nachkommastellen ziffernweise („3,14“ → „3 Komma 1 4“). SSOT ist eine Tabelle je Sprache
+(`src/tts_suite/speech_forms.json`, deutsch und englisch, metrisch und imperial), die Logik
+`speech_forms.py`; vorher lebte ein Teil davon nur im XTTS-Container, Qwen3-TTS bekam nichts.
+Eine Einheit zählt nur direkt nach einer Zahl, eine aus einem Buchstaben nur mit Leerzeichen
+(„90s“, „5m Nutzer“ bleiben). Was die Tabelle als Abkürzung erweitert, beendet keinen Satz;
+ein Punkt innerhalb einer mehrteiligen Abkürzung („z.“ in „z. B.“) auch nicht. Kein Container
+erweitert selbst etwas.
 
 ## Vorausschau bei der Satz-Einheit
 

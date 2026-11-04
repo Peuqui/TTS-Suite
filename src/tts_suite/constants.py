@@ -224,6 +224,8 @@ ABBREVIATIONS = (
 
 #: Texts the suite speaks itself (voice-change announcements, hints), in every language it speaks, next to the modules.
 I18N_FILE_NAME = "i18n.json"
+#: Units, amounts, symbols and abbreviations and how they are spoken, per language (speech_forms.py).
+SPEECH_FORMS_FILE_NAME = "speech_forms.json"
 
 # ── Text cleaning ───────────────────────────────────────────────────
 

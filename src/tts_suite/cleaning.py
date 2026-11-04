@@ -2,8 +2,10 @@
 
 Ported from AIfred Intelligence (``clean_text_for_tts``): HTML comments and tags, code
 (hint), Markdown tables (hint), LaTeX (hint), long lists (hint), emojis, Markdown
-formatting, URLs, links (the text stays) and blockquotes. Engine-specific normalization
-(characters that crash a tokenizer, punctuation against hallucinations) stays in the container.
+formatting, URLs, links (the text stays) and blockquotes. Units, amounts, symbols and
+abbreviations become their spoken words (:mod:`~tts_suite.speech_forms`), for every engine.
+Engine-specific normalization (characters that crash a tokenizer, punctuation against
+hallucinations) stays in the container.
 
 Not ported, because it belongs to the calling program: the removal of collapsible blocks
 (``<think>``, ``<details>``, ...), AIfred's own markers (round labels, the performance footer,
@@ -30,6 +32,7 @@ from .constants import (
     TTS_LIST_MAX_ITEMS,
 )
 from .i18n import translate
+from .speech_forms import SpeechForms
 from .splitting import SENTENCE_FINAL_CHARS
 
 HINT_CODE = "tts_hint_code"
@@ -110,6 +113,7 @@ class TextCleaner:
         self._language = language
         self._pronunciations = pronunciations
         self._pronunciation_pattern = _compile_pronunciations(pronunciations)
+        self._speech_forms = SpeechForms(language)
         self._announced: set[str] = set()
         self._list_items = 0  # consecutive list items seen (a unit is one item)
         self._inside_code_block = False
@@ -145,7 +149,11 @@ class TextCleaner:
         cleaned = _BULLET.sub("", cleaned)
         cleaned = _NUMBERED.sub("", cleaned)
         cleaned = _URL.sub("", cleaned)
-        cleaned = _ZERO_WIDTH.sub("", cleaned).translate(_DASHES)
+        cleaned = _ZERO_WIDTH.sub("", cleaned)
+        # After the URLs (an address is no amount), before the dashes (a dash between two numbers is
+        # a range, not a pause) and before the unspeakable characters (², €, § go there).
+        cleaned = self._speech_forms.expand(cleaned)
+        cleaned = cleaned.translate(_DASHES)
         cleaned = _UNSPEAKABLE.sub(" ", cleaned)
         cleaned = _SPACES.sub(" ", cleaned)
         cleaned = _BLANK_LINES.sub("\n\n", cleaned).strip()

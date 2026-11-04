@@ -83,12 +83,24 @@ pieces in speaking order, as soon as each is ready.
 ## Text cleaning in the service
 
 The general cleaning (Markdown, code and tables as a spoken hint, LaTeX, URLs, links, HTML,
-emojis) runs in the service before the cutting, with the state of the run (a code block
-across several pieces, hints once per reply). Pronunciation replacements (for example
-"AIfred" → "Alfred") are a configuration list. Program-specific parts stay with the
-program: AIfred filters its own thinking and detail blocks, because another caller may want
-them spoken. The engine-specific normalization (special characters that crash the
-tokenizer, punctuation against hallucinations) stays in the container.
+emojis) runs in the service after the cutting, piece by piece in speaking order, with the
+state of the run (a code block across several pieces, hints once per reply). Pronunciation
+replacements (for example "AIfred" → "Alfred") are a configuration list. Program-specific
+parts stay with the program: AIfred filters its own thinking and detail blocks, because
+another caller may want them spoken. The engine-specific normalization (special characters
+that crash the tokenizer, punctuation against hallucinations) stays in the container.
+
+**Speech forms in the service, for every engine (2026-11-04):** units after a number
+("25 km/h" → "25 kilometers per hour", singular for exactly 1), amounts as spoken
+("$19.99" → "19 dollars 99", "€0.50" → "50 cents"), minus, ranges with a dash ("5–10" →
+"5 to 10"), §, common abbreviations ("e.g." → "for example") and German decimals digit by
+digit ("3,14" → "3 Komma 1 4"). SSOT is one table per language
+(`src/tts_suite/speech_forms.json`, German and English, metric and imperial), the logic
+`speech_forms.py`; before, part of it lived only in the XTTS container and Qwen3-TTS got
+nothing. A unit counts only right after a number, one of a single letter only with a space
+("90s", "5m users" stay). An abbreviation the table expands ends no sentence, and neither
+does a period inside an abbreviation of several parts ("z." in "z. B."). No container
+expands anything itself.
 
 ## Look-ahead for the sentence unit
 

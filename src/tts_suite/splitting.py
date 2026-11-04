@@ -32,6 +32,7 @@ from .constants import (
     TTS_MIN_SENTENCE_WORDS,
 )
 from .engines.base import SPEECH_UNITS
+from .speech_forms import abbreviations_of_all_languages
 
 SENTENCE_PUNCTUATION = ".!?！？。"
 #: A sentence that ends like this needs no period added when a line break ends it.
@@ -42,6 +43,17 @@ PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
 MIN_SENTENCE_CHARS = 2
 #: An introduction before a list or table ("...Tabelle:\n\n") must be longer than this to count as a sentence.
 MIN_COLON_SENTENCE_CHARS = 11
+#: No sentence ends in these (lowercase): the list of the splitter and what the speech forms expand,
+#: which must reach the cleaner whole ("z. B." in one unit).
+PROTECTED_ABBREVIATIONS = ABBREVIATIONS | abbreviations_of_all_languages()
+#: Each period inside an abbreviation of several parts, with its offset in the abbreviation: the
+#: period after "z" in "z. B." is followed by a capital letter and looked like a sentence end.
+_INNER_PERIODS = tuple(
+    (abbreviation, offset)
+    for abbreviation in PROTECTED_ABBREVIATIONS
+    for offset, char in enumerate(abbreviation[:-1])
+    if char == "."
+)
 
 
 @dataclass(frozen=True)
@@ -84,15 +96,29 @@ def _ends_with_abbreviation(before: str) -> bool:
     return any(
         before.endswith(abbreviation)
         and (len(before) == len(abbreviation) or not before[-len(abbreviation) - 1].isalnum())
-        for abbreviation in ABBREVIATIONS
+        for abbreviation in PROTECTED_ABBREVIATIONS
     )
+
+
+def _inside_abbreviation(text: str, i: int) -> bool:
+    """Whether the period at ``text[i]`` lies inside an abbreviation of several parts ("z. B.", "i.e."),
+    the abbreviation starting a word."""
+    for abbreviation, offset in _INNER_PERIODS:
+        start = i - offset
+        if (
+            start >= 0
+            and text[start:start + len(abbreviation)].lower() == abbreviation
+            and (start == 0 or not text[start - 1].isalnum())
+        ):
+            return True
+    return False
 
 
 def _period_ends_sentence(text: str, i: int) -> bool:
     """Whether the period at ``text[i]`` ends a sentence (not an abbreviation, decimal number, URL part)."""
     before = text[max(0, i - 10):i + 1].lower()
     after = text[i + 1:i + 3]
-    if _ends_with_abbreviation(before):
+    if _ends_with_abbreviation(before) or _inside_abbreviation(text, i):
         return False
     if 0 < i < len(text) - 1 and text[i - 1].isdigit() and text[i + 1].isdigit():
         return False  # decimal number
