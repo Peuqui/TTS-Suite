@@ -21,12 +21,12 @@ EN = SpeechForms("en")
     ("written", "spoken"),
     [
         ("Wind mit 25 km/h", "Wind mit 25 Kilometer pro Stunde"),
-        ("1 h Sonne, 2 h Regen", "1 Stunde Sonne, 2 Stunden Regen"),
-        ("1 t und 3 t", "1 Tonne und 3 Tonnen"),
+        ("1 h Sonne, 2 h Regen", "eine Stunde Sonne, 2 Stunden Regen"),
+        ("1 t und 3 t", "eine Tonne und 3 Tonnen"),
         ("100 m² und 5 m2", "100 Quadratmeter und 5 Quadratmeter"),
-        ("1 kWh, 2,5 kWh", "1 Kilowattstunde, 2 Komma 5 Kilowattstunden"),
+        ("1 kWh, 2,5 kWh", "eine Kilowattstunde, 2 Komma 5 Kilowattstunden"),
         ("48 GiB bei 85 tok/s", "48 Gibibyte bei 85 Token pro Sekunde"),
-        ("5 mph sind 1 mi", "5 Meilen pro Stunde sind 1 Meile"),
+        ("5 mph sind 1 mi", "5 Meilen pro Stunde sind eine Meile"),
         ("72 °F und 20° C", "72 Grad Fahrenheit und 20 Grad Celsius"),
         ("6,5 l/100 km", "6 Komma 5 Liter auf hundert Kilometer"),
         ("100km und 5kWh", "100 Kilometer und 5 Kilowattstunden"),
@@ -35,6 +35,30 @@ EN = SpeechForms("en")
 )
 def test_units_after_a_number_are_spoken_with_their_number(written: str, spoken: str) -> None:
     assert DE.expand(written) == spoken
+
+
+@pytest.mark.parametrize(
+    ("written", "spoken"),
+    [
+        ("Es hat 1 h Sonne", "Es hat eine Stunde Sonne"),  # the gender from the table
+        ("Er wiegt 1 kg", "Er wiegt ein Kilogramm"),
+        ("Das sind 1 km", "Das sind ein Kilometer"),
+        ("Mit 1 kg Mehl", "Mit einem Kilogramm Mehl"),  # the case from the preposition before it
+        ("in 1 min", "in einer Minute"),
+        ("nach 1 km", "nach einem Kilometer"),
+        ("für 1 € mehr", "für einen Euro mehr"),
+        ("um 1 °C wärmer", "um ein Grad Celsius wärmer"),
+        ("mit 1,50 €", "mit einem Euro 50"),
+        ("für 0,01 £", "für einen Penny"),
+        ("Er läuft 1 km", "Er läuft ein Kilometer"),  # the accusative after a verb needs the sentence understood
+    ],
+)
+def test_one_before_a_unit_is_the_article_of_its_gender_and_case(written: str, spoken: str) -> None:
+    assert DE.expand(written) == spoken
+
+
+def test_english_keeps_the_figure_one() -> None:
+    assert EN.expand("It takes 1 h and 1 mi for $1") == "It takes 1 hour and 1 mile for 1 dollar"
 
 
 @pytest.mark.parametrize(
@@ -62,10 +86,10 @@ def test_english_decades_and_millions_stay_and_units_take_the_english_plural() -
     [
         ("13,50 €", "13 Euro 50"),
         ("13,05 €", "13 Euro 5"),
-        ("1,00 €", "1 Euro"),
+        ("1,00 €", "ein Euro"),
         ("0,35 €", "35 Cent"),
         ("$0.35", "35 Cent"),
-        ("0,01 £", "1 Penny"),
+        ("0,01 £", "ein Penny"),
         ("1.234,56 €", "1.234 Euro 56"),
         ("1.000 €", "1.000 Euro"),
         ("CHF 20", "20 Franken"),
@@ -154,6 +178,12 @@ def test_the_table_has_no_duplicate_keys_and_complete_forms() -> None:
     path = Path(__file__).parents[1] / "src" / "tts_suite" / SPEECH_FORMS_FILE_NAME
     tables = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=no_duplicates)
     for language, table in tables.items():
-        assert all(len(forms) == 2 for forms in table["units"].values()), language
-        assert all(len(forms) == 4 for forms in table["currencies"].values()), language
+        genders = "one" in table  # [singular, plural, gender]; currencies also the gender of the minor unit
+        assert all(len(forms) == (3 if genders else 2) for forms in table["units"].values()), language
+        assert all(len(forms) == (6 if genders else 4) for forms in table["currencies"].values()), language
+        if genders:
+            used = {forms[2] for forms in table["units"].values()} | {
+                gender for forms in table["currencies"].values() for gender in forms[4:]
+            }
+            assert used <= set(table["one"]) - {"dative_after", "accusative_after"}, language
         assert all(key.endswith(".") for key in table["abbreviations"]), language

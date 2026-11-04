@@ -5,7 +5,13 @@ of money ("13,50 €" -> "13 Euro 50", "0,35 €" -> "35 Cent", "$5" -> "5 dolla
 without a number becomes its name), a minus before a number, a dash between
 two numbers ("5–10" -> "5 bis 10"; the cleaner would make a pause of it), symbols (§), common
 abbreviations ("z. B." -> "zum Beispiel") and, where the table names a decimal word, the digits after
-the decimal separator one by one ("3,14" -> "3 Komma 1 4", as German reads them). One table per language in ``speech_forms.json``; a
+the decimal separator one by one ("3,14" -> "3 Komma 1 4", as German reads them).
+
+Where the table gives the units a gender (German), a 1 before a unit or amount becomes the article
+form: "1 h" -> "eine Stunde", "1 kg" -> "ein Kilogramm". The case comes from the word right before the
+number, a preposition that always takes it ("mit 1 Stunde" -> "mit einer Stunde", "für 1 €" -> "für
+einen Euro"); otherwise the nominative stays ("er läuft ein Kilometer": the accusative after a verb
+would need the sentence understood). One table per language in ``speech_forms.json``; a
 language without a table is left as it is. SSOT for every engine: no engine container expands
 anything itself.
 
@@ -29,6 +35,7 @@ _NUMBER = r"\d+(?:[.,]\d+)*"  # as written: "1.000", "12,5", "1,234.50"
 _NUMBER_START = r"(?<![\w.,:])"  # not the tail of a word, of another number or of a time ("14:30 h")
 _SPACE = "[   ]"  # space, no-break space, narrow no-break space
 _UNIT_END = r"(?![\w²³/])"  # "km" is not the start of "km/h", "m" not of "m²"
+_WORD_BEFORE = re.compile(rf"(\w+){_SPACE}+$")
 
 
 @cache
@@ -105,9 +112,19 @@ def _thousands(table: dict[str, Any]) -> str:
     return "," if table["decimal_separator"] == "." else "."
 
 
-def _number_form(number: str, forms: list[str]) -> str:
-    """Singular for exactly one, plural otherwise ("1,5 Stunden", "0 Grad")."""
-    return forms[0] if number == "1" else forms[1]
+def _counted(number: str, forms: list[str], before: str, table: dict[str, Any]) -> str:
+    """The number with its word: plural except for exactly one ("1,5 Stunden", "0 Grad"). ``forms`` is
+    ``[singular, plural]`` or, in a table with genders, ``[singular, plural, gender]``: the 1 then
+    becomes the article in the case the word before it asks for (``before`` is the text up to the number)."""
+    if number != "1":
+        return f"{number} {forms[1]}"
+    if len(forms) < 3:  # no genders (English): the engine says "one"
+        return f"{number} {forms[0]}"
+    one = table["one"]
+    word = _WORD_BEFORE.search(before)
+    preceding = word.group(1).lower() if word else ""
+    case = "dat" if preceding in one["dative_after"] else "acc" if preceding in one["accusative_after"] else "nom"
+    return f"{one[forms[2]][case]} {forms[0]}"
 
 
 class SpeechForms:
@@ -137,16 +154,21 @@ class SpeechForms:
 
     @staticmethod
     def _amount(match: re.Match[str], compiled: _Compiled) -> str:
-        """"13,50 €" -> "13 Euro 50", "13,05 €" -> "13 Euro 5", "0,35 €" -> "35 Cent": as said aloud."""
-        forms = compiled.table["currencies"][_key_of(match.group("currency"), compiled.table["currencies"])]
+        """"13,50 €" -> "13 Euro 50", "13,05 €" -> "13 Euro 5", "0,35 €" -> "35 Cent": as said aloud.
+        The forms are ``[unit, units, minor unit, minor units]``, a table with genders adds the gender
+        of each."""
+        table = compiled.table
+        forms = table["currencies"][_key_of(match.group("currency"), table["currencies"])]
+        major, minor = forms[0:2] + forms[4:5], forms[2:4] + forms[5:6]
+        before = match.string[:match.start()]
         number = match.group("number")
         split = compiled.cents.fullmatch(number)
         if split is None:
-            return f"{number} {_number_form(number, forms[:2])}"
+            return _counted(number, major, before, table)
         whole, cents = split.group("whole"), split.group("cents").lstrip("0")
         if whole == "0":
-            return f"{cents or '0'} {_number_form(cents, forms[2:])}"
-        spoken = f"{whole} {_number_form(whole, forms[:2])}"
+            return _counted(cents or "0", minor, before, table)
+        spoken = _counted(whole, major, before, table)
         return f"{spoken} {cents}" if cents else spoken
 
     @staticmethod
@@ -154,8 +176,7 @@ class SpeechForms:
         unit = _key_of(match.group("unit"), table["units"])
         if len(unit) == 1 and unit.isalpha() and not match.group("space"):
             return match.group(0)  # "90s", "5m": a single letter right after the number is no unit
-        number = match.group("number")
-        return f"{number} {_number_form(number, table['units'][unit])}"
+        return _counted(match.group("number"), table["units"][unit], match.string[:match.start()], table)
 
     @staticmethod
     def _abbreviation(match: re.Match[str], table: dict[str, Any]) -> str:
