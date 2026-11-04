@@ -12,7 +12,9 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "requests",
-    "edge-tts",
+    # Microsoft requires the Sec-MS-GEC v2 token since October 2026 (edge-tts 7.3.0); older versions
+    # get "WSServerHandshakeError: 403". 7.3.1 also reads the server date independent of the locale.
+    "edge-tts>=7.3.1",
     # The Piper engine runs the `piper` program of this package, found next to the interpreter of
     # the service (large: it brings onnxruntime).
     "piper-tts==1.3.0",
