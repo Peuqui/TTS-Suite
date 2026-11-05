@@ -62,11 +62,16 @@ The page of the service, `http://127.0.0.1:5090/ui/`, shows the catalog (state, 
 machine), edits the configuration, lists the voices (with the sync of a cloud engine) and tries a reading with a list
 of its own. Enter the token once on the page for what changes something.
 
-While the service listens on `127.0.0.1`, speaking and every `GET` ask for nothing; a command that changes
-something (`POST /config`, starting and stopping containers, uploading voices) always needs the token
-(`X-TTS-Suite-Token: <token>`). On another address everything needs it, and the service does not start
-without one (`--host`, `--token-file`). The hosts, the GPU rules and the defaults per engine are set with
-`POST /config`; see the [interface](docs/INTERFACE.md).
+A client on this machine (loopback) speaks and asks (every `GET`) without a token; a command that changes
+something (`POST /config`, starting and stopping containers, uploading voices) always needs it
+(`X-TTS-Suite-Token: <token>`). A client on another machine needs it for everything. The service listens
+beyond loopback only with a token (`--host` or `TTS_SUITE_HOST` in the unit's env file, `--token-file`),
+e.g. for the GPU-Orc of a host, which releases the containers the suite runs there. The hosts, the GPU
+rules and the defaults per engine are set with `POST /config`; see the [interface](docs/INTERFACE.md).
+
+A host with its own GPU-Orc (`gpu_orc_url`, and its token in `gpu_orc_token_file`) gets asked before
+every start there: while a big model loads on it or somebody holds its cards (`POST /hold` there), the
+suite starts nothing on it and takes the next entry of the list.
 
 ## Working in parallel
 

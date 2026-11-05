@@ -10,14 +10,15 @@ from pathlib import Path
 import pytest
 from container_fakes import ContainerEngine
 
-from tts_suite.api import EngineDefaults, GpuRule, SuiteConfig
+from tts_suite.api import EngineDefaults, GpuRule, Host, SuiteConfig
 from tts_suite.placement import (
     GpuInfo,
     PlacementRefused,
     choose_gpu,
     choose_gpu_for_burn_in,
     parse_gpus,
-    refuse_while_a_model_loads,
+    read_host_token,
+    refuse_unless_the_cards_are_free,
     vram_budget_mib,
     vram_needed_mib,
 )
@@ -143,11 +144,12 @@ def test_a_burn_in_refuses_when_every_card_is_in_use(tmp_path: Path) -> None:
 @pytest.fixture
 def gpu_orc() -> Iterator[tuple[str, dict[str, object]]]:
     """A GPU-Orc on a loopback port; ``answer["body"]`` is what ``GET /loading`` says."""
-    answer: dict[str, object] = {"status": 200, "body": {"loading": []}}
+    answer: dict[str, object] = {"status": 200, "body": {"loading": [], "held": None}, "authorization": None}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             assert self.path == "/loading"
+            answer["authorization"] = self.headers.get("Authorization")
             data = json.dumps(answer["body"]).encode()
             self.send_response(int(str(answer["status"])))
             self.send_header("Content-Length", str(len(data)))
@@ -165,18 +167,18 @@ def gpu_orc() -> Iterator[tuple[str, dict[str, object]]]:
 
 
 def test_without_a_gpu_orc_nothing_is_asked() -> None:
-    refuse_while_a_model_loads(None)
+    refuse_unless_the_cards_are_free(None)
 
 
 def test_a_green_light_lets_the_start_go_on(gpu_orc: tuple[str, dict[str, object]]) -> None:
-    refuse_while_a_model_loads(gpu_orc[0])
+    refuse_unless_the_cards_are_free(gpu_orc[0])
 
 
 def test_a_loading_model_refuses_the_start_and_is_named(gpu_orc: tuple[str, dict[str, object]]) -> None:
     url, answer = gpu_orc
-    answer["body"] = {"loading": ["DeepSeek-vllm"]}
+    answer["body"] = {"loading": ["DeepSeek-vllm"], "held": None}
     with pytest.raises(PlacementRefused, match="DeepSeek-vllm is loading"):
-        refuse_while_a_model_loads(url)
+        refuse_unless_the_cards_are_free(url)
 
 
 @pytest.mark.parametrize("status, body", [(502, {"error": "model server unreachable"}), (200, {"other": 1})])
@@ -184,9 +186,31 @@ def test_an_unusable_answer_is_no_green_light(gpu_orc: tuple[str, dict[str, obje
     url, answer = gpu_orc
     answer.update(status=status, body=body)
     with pytest.raises(PlacementRefused, match="no usable answer"):
-        refuse_while_a_model_loads(url)
+        refuse_unless_the_cards_are_free(url)
 
 
 def test_a_gpu_orc_that_is_down_is_no_green_light() -> None:
     with pytest.raises(PlacementRefused, match="no usable answer"):
-        refuse_while_a_model_loads("http://127.0.0.1:9")
+        refuse_unless_the_cards_are_free("http://127.0.0.1:9")
+
+
+def test_held_cards_refuse_the_start_and_say_why(gpu_orc: tuple[str, dict[str, object]]) -> None:
+    url, answer = gpu_orc
+    answer["body"] = {"loading": [], "held": {"since": "2026-11-05T09:00:00+01:00", "reason": "gaming"}}
+    with pytest.raises(PlacementRefused, match="held: gaming"):
+        refuse_unless_the_cards_are_free(url)
+
+
+def test_the_token_of_another_machines_gpu_orc_is_sent(gpu_orc: tuple[str, dict[str, object]]) -> None:
+    url, answer = gpu_orc
+    refuse_unless_the_cards_are_free(url, "s3cret")
+    assert answer["authorization"] == "Bearer s3cret"
+
+
+def test_a_host_token_is_read_from_its_file(tmp_path: Path) -> None:
+    token_file = tmp_path / "token"
+    token_file.write_text("s3cret\n", encoding="utf-8")
+    assert read_host_token(Host("Box", "10.9.9.9", gpu_orc_url="http://x", gpu_orc_token_file=str(token_file))) == "s3cret"
+    assert read_host_token(Host("Box", "10.9.9.9")) is None
+    with pytest.raises(PlacementRefused, match="unreadable"):
+        read_host_token(Host("Box", "10.9.9.9", gpu_orc_url="http://x", gpu_orc_token_file=str(tmp_path / "missing")))

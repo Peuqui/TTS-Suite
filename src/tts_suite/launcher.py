@@ -42,7 +42,8 @@ from .placement import (
     choose_gpu,
     choose_gpu_for_burn_in,
     query_gpus,
-    refuse_while_a_model_loads,
+    read_host_token,
+    refuse_unless_the_cards_are_free,
 )
 from .placement_lock import program_lock
 
@@ -284,7 +285,7 @@ class SuiteLauncher:
                 return None  # started by whoever held the lock before us
             if engine.needs_gpu:
                 try:
-                    await asyncio.to_thread(refuse_while_a_model_loads, self._config.gpu_orc_url)
+                    await asyncio.to_thread(refuse_unless_the_cards_are_free, self._config.gpu_orc_url)
                     cards = await asyncio.to_thread(self._gpus)
                     placement = choose_gpu_for_burn_in(cards, self._config) if burn_in else choose_gpu(cards, engine, self._config, gpu)
                 except PlacementRefused as refused:
@@ -302,6 +303,12 @@ class SuiteLauncher:
     async def _start_remote(self, engine: TTSEngine, host: Host) -> Skip | None:
         """Start the container over SSH and wait until it serves (the reply waits for it: a fast
         remote card beats a worse entry further down the list)."""
+        if host.gpu_orc_url is not None:
+            try:
+                token = read_host_token(host)
+                await asyncio.to_thread(refuse_unless_the_cards_are_free, host.gpu_orc_url, token)
+            except PlacementRefused as refused:
+                return Skip("no_vram", f"{host.name}: {refused}")  # transient, like on this machine
         logger.info("TTS: starting %s on %s", engine.key, host.name)
         try:
             await asyncio.to_thread(self._host_command, host, "start", engine.service_dir)

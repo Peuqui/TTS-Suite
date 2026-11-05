@@ -36,7 +36,9 @@ def parser() -> argparse.ArgumentParser:
     main = argparse.ArgumentParser(prog="tts-suite", description="The TTS-Suite service.")
     commands = main.add_subparsers(dest="command", required=True)
     serve = commands.add_parser("serve", help="start the service")
-    serve.add_argument("--host", default=DEFAULT_HOST)
+    # TTS_SUITE_HOST (env file of the unit): listen beyond loopback, e.g. 0.0.0.0 for a machine whose
+    # GPU-Orc releases the containers the suite runs there; such a service needs its token.
+    serve.add_argument("--host", default=os.environ.get("TTS_SUITE_HOST", DEFAULT_HOST))
     serve.add_argument("--port", type=int, default=DEFAULT_PORT)
     serve.add_argument("--config", type=Path, default=config_dir() / CONFIG_FILE_NAME)
     serve.add_argument("--token-file", type=Path, default=config_dir() / TOKEN_FILE_NAME)

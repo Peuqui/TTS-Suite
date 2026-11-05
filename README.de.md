@@ -63,11 +63,17 @@ auf jedem Rechner), bearbeitet die Konfiguration, listet die Stimmen (mit dem Ab
 probiert ein Vorlesen mit einer eigenen Liste. Das Token wird einmal auf der Seite eingetragen, für alles, was
 etwas ändert.
 
-Solange der Dienst auf `127.0.0.1` lauscht, verlangen Sprechen und jedes `GET` nichts; ein Befehl, der etwas
-ändert (`POST /config`, Container starten und stoppen, Stimmen hochladen), braucht immer das Token
-(`X-TTS-Suite-Token: <Token>`). Auf einer anderen Adresse braucht alles eines, und der Dienst startet ohne
-keines nicht (`--host`, `--token-file`). Die Rechner, die GPU-Regeln und die Vorgaben je Engine setzt man mit
-`POST /config`; siehe die [Schnittstelle](docs/INTERFACE.de.md).
+Ein Aufrufer auf diesem Rechner (Loopback) spricht und fragt (jedes `GET`) ohne Token; ein Befehl, der etwas
+ändert (`POST /config`, Container starten und stoppen, Stimmen hochladen), braucht es immer
+(`X-TTS-Suite-Token: <Token>`). Ein Aufrufer auf einem anderen Rechner braucht es für alles. Über Loopback
+hinaus lauscht der Dienst nur mit Token (`--host` oder `TTS_SUITE_HOST` in der Env-Datei der Unit,
+`--token-file`), etwa für den GPU-Orc eines Rechners, der die Container freigibt, die die Suite dort betreibt.
+Die Rechner, die GPU-Regeln und die Vorgaben je Engine setzt man mit `POST /config`; siehe die
+[Schnittstelle](docs/INTERFACE.de.md).
+
+Ein Rechner mit eigenem GPU-Orc (`gpu_orc_url`, sein Token in `gpu_orc_token_file`) wird vor jedem Start dort
+gefragt: Solange auf ihm ein großes Modell lädt oder jemand seine Karten freihält (`POST /hold` dort), startet
+die Suite dort nichts und nimmt den nächsten Eintrag der Liste.
 
 ## Parallel arbeiten
 

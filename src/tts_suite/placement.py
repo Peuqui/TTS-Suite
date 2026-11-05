@@ -12,8 +12,9 @@ import json
 import subprocess
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 
-from .api import SuiteConfig
+from .api import Host, SuiteConfig
 from .constants import GPU_ORC_LOADING_TIMEOUT_S, NVIDIA_SMI_QUERY_TIMEOUT_S
 from .engines.base import TTSEngine
 
@@ -89,18 +90,40 @@ def vram_needed_mib(engine: TTSEngine, config: SuiteConfig) -> int | None:
     return None if budget is None else budget + config.headroom_mib
 
 
-def refuse_while_a_model_loads(url: str | None) -> None:
-    """GPU-Orc's traffic light before a start. :class:`PlacementRefused` while a big model loads, and when
-    GPU-Orc gives no usable answer: nobody can then say that the cards really are as empty as they look."""
+def read_host_token(host: Host) -> str | None:
+    """The token for the GPU-Orc of ``host`` (``None`` without a token file). :class:`PlacementRefused` when
+    the file is named but unreadable or empty: without it that GPU-Orc gives no answer."""
+    if host.gpu_orc_token_file is None:
+        return None
+    path = Path(host.gpu_orc_token_file).expanduser()
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise PlacementRefused(f"GPU-Orc token file of {host.name} unreadable: {exc}") from exc
+    if not token:
+        raise PlacementRefused(f"GPU-Orc token file of {host.name} is empty: {path}")
+    return token
+
+
+def refuse_unless_the_cards_are_free(url: str | None, token: str | None = None) -> None:
+    """GPU-Orc's traffic light before a start (``GET /loading``). :class:`PlacementRefused` while a big model
+    loads, while somebody holds the cards (``POST /hold`` there), and when GPU-Orc gives no usable answer:
+    nobody can then say that the cards really are as empty as they look. ``token``: for the GPU-Orc of
+    another machine, which answers only its own loopback without one."""
     if url is None:
         return
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    request = urllib.request.Request(f"{url.rstrip('/')}/loading", headers=headers)
     try:
-        with urllib.request.urlopen(f"{url.rstrip('/')}/loading", timeout=GPU_ORC_LOADING_TIMEOUT_S) as response:
-            loading = json.load(response)["loading"]
+        with urllib.request.urlopen(request, timeout=GPU_ORC_LOADING_TIMEOUT_S) as response:
+            light = json.load(response)
+        loading, held = light["loading"], light["held"]
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise PlacementRefused(f"GPU-Orc at {url} gave no usable answer: {exc!r}") from exc
     if loading:
         raise PlacementRefused(f"{', '.join(loading)} is loading")
+    if held:
+        raise PlacementRefused(f"the cards are held: {held.get('reason', '')}")
 
 
 def _candidates(cards: list[GpuInfo], config: SuiteConfig) -> list[tuple[GpuInfo, int]]:

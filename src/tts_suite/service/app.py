@@ -135,7 +135,7 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
         return JSONResponse(bad_request(str(error)).body(), status_code=400)
 
     def check(request: Request, changes_something: bool) -> None:
-        access.check(request.headers, changes_something)
+        access.check(request.headers, changes_something, request.client.host if request.client else None)
 
     @app.middleware("http")
     async def page_headers(request: Request, call_next: Any) -> Response:
@@ -308,7 +308,7 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
     @app.websocket("/speak/stream")
     async def speak_stream(socket: WebSocket) -> None:
         try:
-            access.check(socket.headers, False)
+            access.check(socket.headers, False, socket.client.host if socket.client else None)
         except ServiceError:
             await socket.close(code=REFUSED_CLOSE_CODE)
             return

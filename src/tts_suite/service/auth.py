@@ -1,8 +1,7 @@
-"""Who may do what. While the service listens only on a loopback address, speaking and every
-``GET`` ask for nothing. A command that changes something (configuration, containers, voices
-uploaded to a cloud) always needs the token, also locally, since every program on the machine
-reaches localhost. Listening elsewhere, everything needs it and the service refuses to start
-without one."""
+"""Who may do what. A client on this machine (loopback) speaks and asks (every ``GET``) without a
+token. A command that changes something (configuration, containers, voices uploaded to a cloud)
+always needs the token, also locally, since every program on the machine reaches localhost. A client
+on another machine needs it for everything; the service listens beyond loopback only with a token."""
 
 from __future__ import annotations
 
@@ -33,11 +32,12 @@ def is_loopback(host: str) -> bool:
 @dataclass(frozen=True)
 class Access:
     token: str | None
-    # Every request needs the token, not only the ones that change something.
+    # The service listens beyond loopback: every request from another machine needs the token.
     token_for_everything: bool
 
-    def check(self, headers: Mapping[str, str], changes_something: bool) -> None:
-        if not (changes_something or self.token_for_everything):
+    def check(self, headers: Mapping[str, str], changes_something: bool, client_host: str | None) -> None:
+        """``client_host``: the address the request came from (``None`` = unknown, counts as remote)."""
+        if not changes_something and (not self.token_for_everything or is_loopback(client_host or "")):
             return
         if self.token is None:
             raise ServiceError(401, "unauthorized", "this needs a token and none is configured")

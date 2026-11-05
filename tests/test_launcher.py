@@ -23,6 +23,7 @@ from tts_suite.api import (
     EngineInUse,
     EngineStarting,
     GpuRule,
+    Host,
     ReadingAborted,
     SuiteConfig,
     TraceStep,
@@ -30,7 +31,7 @@ from tts_suite.api import (
 from tts_suite.escalation import Skip
 from tts_suite.holds import EngineHolds
 from tts_suite.launcher import SuiteLauncher
-from tts_suite.placement import GpuInfo
+from tts_suite.placement import GpuInfo, PlacementRefused
 from tts_suite.speaker import Speaker
 
 
@@ -189,6 +190,26 @@ def test_a_remote_entry_is_started_over_ssh_and_awaited(tmp_path: Path) -> None:
     skip = run_async(_launcher(tmp_path, ssh=ssh).ensure_serving(remote_entry(engine), wait=True))
     assert skip is None and ssh.commands == [("Aragon", "start", "q")]
     assert engine.ready_calls == 0 and engine.placements == []  # the host chooses its card, not the suite
+
+
+def test_a_host_whose_gpu_orc_holds_its_cards_gets_no_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tts_suite import launcher
+
+    asked: list[tuple[str, str | None]] = []
+
+    def held(url: str, token: str | None = None) -> None:
+        asked.append((url, token))
+        raise PlacementRefused("the cards are held: gaming")
+
+    monkeypatch.setattr(launcher, "refuse_unless_the_cards_are_free", held)
+    token_file = tmp_path / "token"
+    token_file.write_text("s3cret", encoding="utf-8")
+    host = Host("Aragon", "10.9.9.9", gpu_orc_url="http://gpu-orc.test", gpu_orc_token_file=str(token_file))
+    ssh = FakeSsh()
+    skip = run_async(_launcher(tmp_path, ssh=ssh).ensure_serving(
+        remote_entry(ContainerEngine("q", remote=True), host), wait=True))
+    assert skip == Skip("no_vram", "Aragon: the cards are held: gaming")
+    assert ssh.commands == [] and asked == [("http://gpu-orc.test", "s3cret")]
 
 
 def test_a_failing_ssh_command_is_a_skip_with_the_hosts_message(tmp_path: Path) -> None:

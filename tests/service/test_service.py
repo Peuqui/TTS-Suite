@@ -111,6 +111,16 @@ def test_without_a_token_configured_the_commands_stay_locked(tmp_path: Path) -> 
     assert refused.status_code == 401 and "none is configured" in refused.json()["detail"]
 
 
+def test_on_a_network_a_client_on_this_machine_speaks_and_asks_without_the_token(tmp_path: Path) -> None:
+    suite = FakeSuite(default_config(tmp_path))
+    store = ConfigStore(tmp_path / "state" / "config.json")
+    app = create_app(suite, Access(token=TOKEN, token_for_everything=True), store, MAX_TEXT_CHARS)
+    local = TestClient(app, client=("127.0.0.1", 50000))
+    assert local.get("/engines").status_code == 200
+    assert local.post("/engines/reload").status_code == 401  # a command still needs it, also locally
+    assert TestClient(app, client=("10.9.9.9", 50000)).get("/engines").status_code == 401
+
+
 def test_on_a_network_everything_needs_the_token(tmp_path: Path) -> None:
     client, _, _ = build(tmp_path, token_for_everything=True)
     assert client.get("/health").status_code == 200

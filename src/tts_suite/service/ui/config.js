@@ -44,13 +44,16 @@ export function configView({ show, fail }) {
 
   function hostsTable() {
     return h('div', {}, h('h3', {}, t('hosts')),
-      cardTable(['hostName', 'hostAddress', 'sshUser', 'sshPort', ''].map((key) => (key ? t(key) : '')), config.hosts.map((host, index) => [
+      cardTable(['hostName', 'hostAddress', 'sshUser', 'sshPort', 'hostGpuOrc', 'hostGpuOrcToken', ''].map((key) => (key ? t(key) : '')), config.hosts.map((host, index) => [
         textInput(host.name, (value) => (host.name = value)),
         textInput(host.address, (value) => (host.address = value)),
         textInput(host.ssh_user, (value) => (host.ssh_user = value)),
         numberInput(host.ssh_port, (value) => (host.ssh_port = value ?? 22)),
+        // Empty = that machine has no GPU-Orc (no traffic light before a start there).
+        textInput(host.gpu_orc_url ?? '', (value) => (host.gpu_orc_url = value || null)),
+        textInput(host.gpu_orc_token_file ?? '', (value) => (host.gpu_orc_token_file = value || null)),
         h('button', { class: 'small', onclick: () => { config.hosts.splice(index, 1); render() } }, t('remove'))])),
-      h('div', { class: 'actions' }, h('button', { class: 'small', onclick: () => { config.hosts.push({ name: '', address: '', ssh_port: 22, ssh_user: '' }); render() } }, t('add'))))
+      h('div', { class: 'actions' }, h('button', { class: 'small', onclick: () => { config.hosts.push({ name: '', address: '', ssh_port: 22, ssh_user: '', gpu_orc_url: null, gpu_orc_token_file: null }); render() } }, t('add'))))
   }
 
   function gpusTable() {

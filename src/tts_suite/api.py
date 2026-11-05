@@ -40,12 +40,17 @@ triggers the announcement of a voice change)."""
 
 @dataclass(frozen=True)
 class Host:
-    """Another machine the suite starts and stops containers on over SSH."""
+    """Another machine the suite starts and stops containers on over SSH. ``gpu_orc_url``: the GPU-Orc of
+    that machine; before a start there the suite asks its traffic light (a big model loading, the cards
+    held for somebody) and starts nothing while it is red. That GPU-Orc answers another machine only with
+    its token (``gpu_orc_token_file``, a file on this machine). ``None`` = the machine has no GPU-Orc."""
 
     name: str
     address: str
     ssh_port: int = 22
     ssh_user: str = ""
+    gpu_orc_url: str | None = None
+    gpu_orc_token_file: str | None = None
 
 
 @dataclass(frozen=True)
