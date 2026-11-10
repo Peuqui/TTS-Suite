@@ -64,6 +64,10 @@ def serve(arguments: argparse.Namespace) -> None:
         create_app(create_suite(config), access, store, arguments.max_text_chars),
         host=arguments.host,
         port=arguments.port,
+        # The peer is the one on the connection: behind nginx that is this machine (loopback), which the access
+        # rules (auth.py) and the README rely on. With the default, uvicorn would take the browser's address from
+        # X-Forwarded-For, and a service listening beyond loopback would ask every page behind the proxy for the token.
+        proxy_headers=False,
     )
 
 
