@@ -65,7 +65,6 @@ def test_english_keeps_the_figure_one() -> None:
     "written",
     [
         "5mal versucht",  # a unit is a word of its own, not the start of one
-        "Es ist 14:30 h",  # a time, not thirty hours
         "das m und das h",  # no number before it
         "5m Abstand",  # a single letter needs a space after the number
         "Er kam 5 Minuten später",  # already a word
@@ -187,3 +186,99 @@ def test_the_table_has_no_duplicate_keys_and_complete_forms() -> None:
             }
             assert used <= set(table["one"]) - {"dative_after", "accusative_after"}, language
         assert all(key.endswith(".") for key in table["abbreviations"]), language
+
+
+@pytest.mark.parametrize(
+    ("written", "spoken"),
+    [
+        ("Foto 3840 x 2160 Pixel", "Foto 3840 mal 2160 Pixel"),
+        ("Auflösung 3840×2160", "Auflösung 3840 mal 2160"),
+        ("Format 1920x1080x3", "Format 1920 mal 1080 mal 3"),
+        ("Zimmer 3x4 m", "Zimmer 3 mal 4 Meter"),
+        ("Platte 2,5 X 4,5", "Platte 2 Komma 5 mal 4 Komma 5"),
+    ],
+)
+def test_dimensions_are_said_as_a_product(written: str, spoken: str) -> None:
+    assert DE.expand(written) == spoken
+    assert EN.expand("Photo 3840 x 2160") == "Photo 3840 by 2160"
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "Nummer 0x1F4A",  # a hexadecimal number
+        "Faktor 2x schneller",  # no number after the x
+        "Version x86 und A4x",  # no number before it
+        "Das Modell X3 kommt",
+    ],
+)
+def test_what_only_looks_like_a_dimension_stays(written: str) -> None:
+    assert DE.expand(written) == written
+
+
+@pytest.mark.parametrize(
+    ("written", "spoken"),
+    [
+        ("5 + 3 = 8", "5 plus 3 gleich 8"),
+        ("Tom & Jerry", "Tom und Jerry"),
+        ("Wert ≥ 5 und ≤ 10", "Wert größer gleich 5 und kleiner gleich 10"),
+        ("x != 3 und a >= b", "x ungleich 3 und a größer gleich b"),
+        ("5 ± 2 und 3 ÷ 4 und ≈ 7", "5 plus minus 2 und 3 geteilt durch 4 und ungefähr 7"),
+        ("a < b und c > d", "a kleiner als b und c größer als d"),
+        ("Ruf +49 151 an", "Ruf plus 49 151 an"),
+        ("2 × 3", "2 mal 3"),
+    ],
+)
+def test_the_signs_of_a_calculation_are_spoken(written: str, spoken: str) -> None:
+    assert DE.expand(written).split() == spoken.split()  # the words, whatever the spaces around them
+
+
+def test_english_signs() -> None:
+    assert EN.expand("5 + 3 = 8 and a <= b").split() == ["5", "plus", "3", "equals", "8", "and", "a", "less", "than", "or", "equal", "to", "b"]
+
+
+@pytest.mark.parametrize("written", ["C++ ist gut", "Tabelle &amp; Stuhl", "a->b und c=>d", "a==b"])
+def test_signs_inside_something_else_stay_unspoken_words(written: str) -> None:
+    spoken = DE.expand(written)
+    assert "plus" not in spoken and "gleich" not in spoken and "kleiner" not in spoken and "größer" not in spoken
+
+
+@pytest.mark.parametrize(
+    ("written", "spoken"),
+    [
+        ("um 14:30 Uhr", "um 14 Uhr 30"),
+        ("um 9:05 und 18:00", "um 9 Uhr 5 und 18 Uhr"),
+        ("Es ist 14:30 h", "Es ist 14 Uhr 30"),
+        ("am 12.11.2026", "am 12. November 2026"),
+        ("am 1.3.2026", "am 1. März 2026"),
+        ("Stand 2026-11-12", "Stand 12. November 2026"),
+        ("1/2 Liter und 3/4 Stunde", "ein halb Liter und drei Viertel Stunde"),
+    ],
+)
+def test_times_dates_and_fractions_are_spoken(written: str, spoken: str) -> None:
+    assert DE.expand(written) == spoken
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "Verhältnis 3:1",  # a ratio, minutes have two digits
+        "Uhrzeit 14:30:15",  # hours, minutes and seconds
+        "Datum 1/2/2026",  # not a fraction
+        "Version 1.2.3 und 12.11.26",
+        "Seite 5/8",
+        "Zeit 24:00 und 12:75",
+    ],
+)
+def test_what_only_looks_like_a_time_a_date_or_a_fraction_stays(written: str) -> None:
+    assert DE.expand(written) == written
+
+
+def test_english_dates_and_the_hour_stay_as_the_engine_reads_them() -> None:
+    assert EN.expand("On 2026-11-12 at 14:30, 1/2 cup") == "On November 12, 2026 at 14:30, one half cup"
+
+
+def test_the_cleaner_speaks_them_for_every_engine() -> None:
+    assert TextCleaner("de", {}).clean("Das Foto hat 3840×2160 Pixel, 5 + 3 = 8.") == "Das Foto hat 3840 mal 2160 Pixel, 5 plus 3 gleich 8."
+    assert TextCleaner("de", {}).clean("Ist a < b und c > d?") == "Ist a kleiner als b und c größer als d?"
+    assert TextCleaner("de", {}).clean("Zeile <b>fett</b> bleibt Text") == "Zeile fett bleibt Text"  # a real tag still goes

@@ -109,6 +109,15 @@ Eine Einheit zählt nur direkt nach einer Zahl, eine aus einem Buchstaben nur mi
 ein Punkt innerhalb einer mehrteiligen Abkürzung („z.“ in „z. B.“) auch nicht. Kein Container
 erweitert selbst etwas.
 
+**Weitere Sprachformen (12.11.2026):** Maße („3840 x 2160“, „1920×1080“ → „3840 mal 2160“;
+englisch „by“), die Zeichen einer Rechnung oder eines Vergleichs (+ = < > <= >= != ± ÷ ≈ &, die
+der Cleaner bisher still strich: „5 + 3 = 8“ wurde „5 3 8“ gelesen), eine Uhrzeit (nur deutsch,
+„14:30“ → „14 Uhr 30“), ein Datum („12.11.2026“ und „2026-11-12“ → „12. November 2026“) und die
+gängigen Brüche („1/2“ → „ein halb“). Die Wörter stehen in derselben Tabelle. Was nur so aussieht,
+bleibt („0x1F4A“, „2x schneller“, „C++“, „3:1“, „14:30:15“, „1/2/2026“). Ein Tag der HTML-Bereinigung
+beginnt jetzt mit einem Buchstaben: „a < b und c > d“ ist ein Vergleich, kein Tag. Offen: Pfeile,
+Versionsnummern, die Ordnungszahl nach einem Datum („am 12.“ als „zwölften“).
+
 ## Vorausschau bei der Satz-Einheit
 
 Ein Satz gilt als beendet, wenn mehr als 10 Zeichen darauf folgen oder der Text zu Ende

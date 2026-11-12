@@ -36,7 +36,7 @@ def test_markdown_html_urls_and_links_are_cleaned() -> None:
 
 
 def test_dashes_become_commas_and_unspeakable_symbols_vanish() -> None:
-    assert cleaner().clean("Text – mehr Text → und ± das.") == "Text , mehr Text und das."
+    assert cleaner().clean("Text – mehr Text → und ♪ das.") == "Text , mehr Text und das."
 
 
 def test_emojis_go_but_laughter_stays_for_the_container() -> None:

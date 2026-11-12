@@ -102,6 +102,15 @@ nothing. A unit counts only right after a number, one of a single letter only wi
 does a period inside an abbreviation of several parts ("z." in "z. B."). No container
 expands anything itself.
 
+**More speech forms (2026-11-12):** dimensions ("3840 x 2160", "1920×1080" → "3840 mal 2160";
+English "by"), the signs of a calculation or comparison (+ = < > <= >= != ± ÷ ≈ &, which the
+cleaner used to drop silently: "5 + 3 = 8" was read "5 3 8"), a clock time (German only,
+"14:30" → "14 Uhr 30"), a date ("12.11.2026" and "2026-11-12" → "12. November 2026") and the
+common fractions ("1/2" → "ein halb"). Words in the same table. What only looks like them stays
+("0x1F4A", "2x faster", "C++", "3:1", "14:30:15", "1/2/2026"). A tag of the HTML cleaning begins
+with a letter now: "a < b and c > d" is a comparison, not a tag. Not covered (open): arrows,
+versions, ordinals after a date ("am 12." as "zwölften").
+
 ## Look-ahead for the sentence unit
 
 A sentence counts as finished when more than 10 characters follow it or the text has ended

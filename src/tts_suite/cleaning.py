@@ -46,7 +46,7 @@ READABLE_WORD = re.compile(r"[^\W\d_]{2,}")  # two letters in a row: there is so
 LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])\s+")
 
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
-_HTML_TAG = re.compile(r"<[^>]+>")
+_HTML_TAG = re.compile(r"</?[A-Za-z][^<>]*>")  # a tag begins with a letter: "a < b and c > d" is a comparison
 _CODE_BLOCK = re.compile(re.escape(CODE_FENCE) + r".*?" + re.escape(CODE_FENCE), re.DOTALL)
 _TABLE_BLOCK = re.compile(r"(\|[^\n]+\|\n?)+", re.MULTILINE)
 _LIST_BLOCK = re.compile(r"(?:^[ \t]*(?:[-*+]|\d+[.)])\s+[^\n]*\n?){2,}", re.MULTILINE)
