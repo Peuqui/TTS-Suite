@@ -2,6 +2,7 @@ import { service } from './api.js'
 import { cardTable, h, replaceChildren } from './dom.js'
 import { hostLabel, t } from './i18n.js'
 import { Player } from './player.js'
+import { loadSpeaker, speakerIcon } from './speaker-icon.js'
 
 const UNITS = ['sentence', 'paragraph', 'whole']
 const UNIT_KEYS = { sentence: 'unitSentence', paragraph: 'unitParagraph', whole: 'unitWhole' }
@@ -44,6 +45,7 @@ export function speakView({ show, fail }) {
 
   async function load() {
     try {
+      await loadSpeaker()
       if (!restored) await restore()
       const catalog = (await service.engines()).filter((row) => !row.browser)
       // Keep the order and the choices made so far; new rows join at the end. The first time, the saved order counts.
@@ -140,7 +142,7 @@ export function speakView({ show, fail }) {
       h('textarea', { oninput: (event) => { text = event.target.value; grow(event.target) } }, text),
       h('div', { class: 'actions' },
         h('button', { onclick: save }, t('save')),
-        h('button', { class: 'primary', onclick: run, disabled: speaking !== null }, speaking === null ? t('speak') : t('speaking')),
+        h('button', { class: 'primary', onclick: run, disabled: speaking !== null }, speakerIcon({ playing: speaking !== null }), speaking === null ? t('speak') : t('speaking')),
         speaking === null ? null : h('button', { onclick: cancel }, t('stopPlaying'))),
       traceTable(),
     )

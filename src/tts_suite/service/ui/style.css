@@ -57,6 +57,8 @@ button.link { background: none; border: 0; padding: 0; text-align: left; color: 
 button.link[aria-pressed="true"] { font-weight: 700; }
 .editor { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
 button:disabled { opacity: 0.5; cursor: default; }
+/* A button with the speaker symbol before its text. */
+button:has(.speaker) { display: inline-flex; align-items: center; gap: 6px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
 .muted { color: var(--muted); }

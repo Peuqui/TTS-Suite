@@ -63,6 +63,12 @@ auf jedem Rechner), bearbeitet die Konfiguration, listet die Stimmen (mit dem Ab
 probiert ein Vorlesen mit einer eigenen Liste. Das Token wird einmal auf der Seite eingetragen, für alles, was
 etwas ändert.
 
+Der Lautsprecher-Knopf für jedes Programm, das vorliest (das Logo der TTS-Suite, mit einem kleinen Pfeil für „ab hier“;
+beim Vorlesen bewegen sich die Balken), liegt in `src/tts_suite/service/ui/speaker/` (`speaker.svg`, `speaker-from.svg`,
+`speaker.css`; die Farben und die Größe sind CSS-Variablen, die ein Programm setzt). Das ist die eine Quelle:
+`python3 scripts/sync_speaker.py` verteilt sie an die Programme aus `scripts/speaker-consumers.json`, `--check` zeigt, wo
+eine Kopie veraltet ist.
+
 Ein Aufrufer auf diesem Rechner (Loopback) spricht und fragt (jedes `GET`) ohne Token; ein Befehl, der etwas
 ändert (`POST /config`, Container starten und stoppen, Stimmen hochladen), braucht es immer
 (`X-TTS-Suite-Token: <Token>`). Ein Aufrufer auf einem anderen Rechner braucht es für alles. Über Loopback

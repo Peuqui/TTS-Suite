@@ -1,0 +1,35 @@
+{
+  "_comment": "The programs that show the speaker button (read aloud, with or without the arrow for 'from here on'). The one list the sync script (scripts/sync_speaker.py) reads; a program that starts to read aloud comes in here, and a copy that is not in it never gets the button. Paths are relative to the folder that holds the repos next to this one.",
+  "buttons": [
+    {
+      "name": "TTS-Suite",
+      "kind": "source",
+      "repo": "TTS-Suite",
+      "uses": "src/tts_suite/service/ui/speak.js and speaker-icon.js (the page's test reading) read speaker/ itself"
+    },
+    {
+      "name": "AIfred-Intelligence",
+      "kind": "vue",
+      "repo": "AIfred-Intelligence",
+      "css": "frontend/src/assets/speaker/speaker.css",
+      "component": "frontend/src/components/TtsIcon.vue",
+      "uses": "App.vue, AudioView.vue, ChatView.vue, MessageBubble.vue (playing)"
+    },
+    {
+      "name": "Agent-Orc",
+      "kind": "vue",
+      "repo": "Agent-Orc",
+      "css": "frontend/src/assets/speaker/speaker.css",
+      "component": "frontend/src/components/SpeakerIcon.vue",
+      "uses": "WorkspaceView.vue, AnswersFeed.vue (playing, from)"
+    },
+    {
+      "name": "AI-ATC",
+      "kind": "vue",
+      "repo": "AI-ATC",
+      "css": "frontend/src/assets/speaker/speaker.css",
+      "component": "frontend/src/components/SpeakerIcon.vue",
+      "uses": "ScenarioPicker.vue (the switch for reading aloud: the symbol, dimmed while it is off, moving while it reads)"
+    }
+  ]
+}
