@@ -65,9 +65,10 @@ etwas ändert.
 
 Der Lautsprecher-Knopf für jedes Programm, das vorliest (das Logo der TTS-Suite, mit einem kleinen Pfeil für „ab hier“;
 beim Vorlesen bewegen sich die Balken), liegt in `src/tts_suite/service/ui/speaker/` (`speaker.svg`, `speaker-from.svg`,
-`speaker.css`; die Farben und die Größe sind CSS-Variablen, die ein Programm setzt). Das ist die eine Quelle:
-`python3 scripts/sync_speaker.py` verteilt sie an die Programme aus `scripts/speaker-consumers.json`, `--check` zeigt, wo
-eine Kopie veraltet ist.
+`speaker.css`; die Farben und die Größe sind CSS-Variablen, die ein Programm setzt). Das ist die eine Quelle.
+Verteilt wird sie vom einen Sync-Skript beider Suiten, das in der STT-Suite liegt (neben der Quelle des Diktier-Knopfs):
+`python3 ../STT-Suite/scripts/sync_ui.py` schreibt die Kopien für die Programme aus `../STT-Suite/scripts/ui-consumers.json`,
+`--check` zeigt, wo eine Kopie veraltet ist.
 
 Ein Aufrufer auf diesem Rechner (Loopback) spricht und fragt (jedes `GET`) ohne Token; ein Befehl, der etwas
 ändert (`POST /config`, Container starten und stoppen, Stimmen hochladen), braucht es immer

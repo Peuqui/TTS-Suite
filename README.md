@@ -64,8 +64,9 @@ of its own. Enter the token once on the page for what changes something.
 
 The speaker button for every program that reads aloud (the TTS-Suite's logo, with a small arrow for "from here on"; its
 bars move while it is read) is in `src/tts_suite/service/ui/speaker/` (`speaker.svg`, `speaker-from.svg`, `speaker.css`;
-the colours and the size are CSS variables a program sets). It is the one source: `python3 scripts/sync_speaker.py` hands it
-to the programs in `scripts/speaker-consumers.json`, `--check` shows where a copy is out of date.
+the colours and the size are CSS variables a program sets). It is the one source. It is handed to the programs by the one sync script of both suites, which lives in the STT-Suite
+(next to the dictation button's source): `python3 ../STT-Suite/scripts/sync_ui.py` writes the copies for the programs in
+`../STT-Suite/scripts/ui-consumers.json`, `--check` shows where a copy is out of date.
 
 A client on this machine (loopback) speaks and asks (every `GET`) without a token; a command that changes
 something (`POST /config`, starting and stopping containers, uploading voices) always needs it
