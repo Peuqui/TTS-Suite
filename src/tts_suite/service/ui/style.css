@@ -91,7 +91,8 @@ code, .hint { font-family: ui-monospace, monospace; font-size: 13px; background:
   table.cards td:first-child input { width: 100%; }
 }
 /* A group of settings, and the rows of a list that can be switched off and moved (the same as the STT-Suite's page). */
-fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0; padding: 8px 14px 12px; }
+/* min-width 0: a fieldset is at least as wide as its content by default, so a wide table would not scroll inside it. */
+fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0; padding: 8px 14px 12px; min-width: 0; }
 legend { color: var(--heading); font-weight: 600; padding: 0 6px; }
 fieldset > p { margin: 4px 0 8px; }
 .chain { margin: 6px 0; }
@@ -105,3 +106,8 @@ label.switch span { position: absolute; inset: 0; background: var(--line); borde
 label.switch span::before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: var(--panel); border-radius: 50%; transition: transform 0.15s; }
 label.switch input:checked + span { background: var(--heading); }
 label.switch input:checked + span::before { transform: translateX(18px); }
+/* A form of labels and their fields, two columns; one under the other on a narrow screen (as on the STT-Suite's page). */
+.fields { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; align-items: center; margin: 8px 0; }
+.fields > label { color: var(--muted); }
+@media (max-width: 640px) { .fields { grid-template-columns: 1fr; gap: 2px; } .fields > label { margin-top: 8px; } }
+td input[type="checkbox"] { width: 18px; height: 18px; }

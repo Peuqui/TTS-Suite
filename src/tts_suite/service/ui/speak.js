@@ -1,8 +1,9 @@
-import { service } from './api.js'
+import { ApiError, service } from './api.js'
 import { cardTable, h, replaceChildren } from './dom.js'
 import { place, unitSelect } from './entries.js'
 import { hostLabel, t } from './i18n.js'
 import { Player } from './player.js'
+import { TEST_LANGUAGE, TEST_LANGUAGES, TEST_PAUSE_MS, TEST_PAUSE_STEP_MS, TEST_TEXT } from './settings.js'
 import { loadSpeaker, speakerIcon } from './speaker-icon.js'
 
 // Trying a reading: a text and a list of {engine, host, unit} put together here, played as it arrives, and
@@ -15,10 +16,11 @@ export function speakView({ show, fail }) {
   let units = {}      // "engine@host" -> unit
   let voices = {}     // "engine@host" -> chosen voice: every row has its own
   let voiceLists = {} // engine -> [{name, label}]
-  let text = 'Hallo Welt. Das ist ein Test der Sprachausgabe.'
-  let language = 'de'
-  // The service requires the pause; this page starts with a usual one.
-  let pauseMs = 700
+  let text = TEST_TEXT
+  let language = TEST_LANGUAGE
+  let pauseMs = TEST_PAUSE_MS
+  // Who speaks: the ticked rows one after the other (a comparison), or one reading by the auto list.
+  let mode = 'compare'
   let savedOrder = [] // the order kept on the server: it counts the first time the list is built
   let restored = false
   let speaking = null // the AbortController of a reading in progress
@@ -32,6 +34,7 @@ export function speakView({ show, fail }) {
     if (saved.text === undefined) return
     ;({ text, language } = saved)
     pauseMs = saved.pause_ms
+    mode = saved.mode
     use = saved.use
     units = saved.units
     voices = saved.voices
@@ -72,7 +75,7 @@ export function speakView({ show, fail }) {
 
   async function save() {
     try {
-      await service.saveSpeakTest({ text, language, pause_ms: pauseMs, order: rows.map(place), use, units, voices })
+      await service.saveSpeakTest({ text, language, pause_ms: pauseMs, mode, order: rows.map(place), use, units, voices })
       show(t('saved'))
     } catch (error) { fail(error) }
   }
@@ -93,24 +96,28 @@ export function speakView({ show, fail }) {
         if (part === null) break
         summary.trace.push(...part.trace)
         summary.switch = part.switch ?? summary.switch
-      } catch (error) { if (controller.signal.aborted) break; fail(error) }
+      } catch (error) {
+        if (controller.signal.aborted) break
+        // No engine could speak: the course says why, and with the auto list the page says where to look.
+        if (error instanceof ApiError) summary.trace.push(...error.trace)
+        fail(error instanceof ApiError && error.code === 'no_engine' && list.engines === 'auto' ? new Error(`${error.message} — ${t('noEngineAuto')}`) : error)
+      }
       render()
     }
     speaking = null
     render()
   }
 
-  // Every ticked row speaks, one after the other in the order of the list: a comparison. Each gets a
-  // reading of its own, so one that fails or is not up does not stop the rest (it shows in the course).
+  // Compare: every ticked row speaks, one after the other in the order of the list, each in a reading of its
+  // own, so one that fails or is not up does not stop the rest (it shows in the course). Auto: one reading by
+  // the suite's own list (Configuration, Automatic), the way a program that says "auto" gets it; the voices
+  // are this page's.
   function run() {
+    if (mode === 'auto') { readAll([{ engines: 'auto', voices: voiceSettings(rows) }]); return }
     const chosen = rows.filter((row) => use[place(row)])
     if (chosen.length === 0) { fail(new Error(t('nothingChosen'))); return }
     readAll(chosen.map((row) => ({ engines: [{ engine: row.engine, unit: units[place(row)], host: row.host }], voices: voiceSettings([row]) })))
   }
-
-  // One reading by the suite's own list (Configuration, Automatic), the way a program that says "auto"
-  // gets it: the course shows who was passed over, who failed and who spoke. The voices are this page's.
-  function runAuto() { readAll([{ engines: 'auto', voices: voiceSettings(rows) }]) }
 
   function cancel() { speaking?.abort(); player.cancel() }
 
@@ -127,26 +134,33 @@ export function speakView({ show, fail }) {
   }
 
   function render() {
-    replaceChildren(root, 
+    // With the auto list the order, the switch and the unit are the list's (Configuration); only the voice counts here.
+    const auto = mode === 'auto'
+    replaceChildren(root,
       h('h2', {}, t('tabSpeak')),
       h('p', { class: 'muted' }, t('speakHint')),
+      h('div', { class: 'fields' },
+        h('label', {}, t('modeField')),
+        h('select', { onchange: (event) => { mode = event.target.value; render() } },
+          ['compare', 'auto'].map((value) => h('option', { value, selected: value === mode }, t(value === 'auto' ? 'modeAuto' : 'modeCompare'))))),
       cardTable(['engine', 'use', 'order', 'host', 'unit', 'voice'].map((key) => t(key)), rows.map((row, index) => [
         h('code', {}, row.engine),
-        h('input', { type: 'checkbox', checked: use[place(row)], onchange: (event) => (use[place(row)] = event.target.checked) }),
-        h('div', { class: 'row' }, h('button', { class: 'small', onclick: () => move(index, -1) }, '↑'), h('button', { class: 'small', onclick: () => move(index, 1) }, '↓')),
+        h('input', { type: 'checkbox', disabled: auto, checked: use[place(row)], onchange: (event) => (use[place(row)] = event.target.checked) }),
+        h('div', { class: 'row' }, h('button', { class: 'small', disabled: auto, onclick: () => move(index, -1) }, '↑'), h('button', { class: 'small', disabled: auto, onclick: () => move(index, 1) }, '↓')),
         hostLabel(row),
-        unitSelect(units[place(row)], (unit) => (units[place(row)] = unit)),
+        unitSelect(units[place(row)], (unit) => (units[place(row)] = unit), auto),
         (voiceLists[row.engine]?.length ?? 0) === 0 ? '' : h('select', { onchange: (event) => (voices[place(row)] = event.target.value) },
           voiceLists[row.engine].map((voice) => h('option', { value: voice.name, selected: voices[place(row)] === voice.name }, voice.label)))])),
-      h('div', { class: 'row' }, h('label', {}, t('language2') + ' ',
-        h('select', { onchange: (event) => (language = event.target.value) }, ['de', 'en'].map((code) => h('option', { value: code, selected: code === language }, code)))),
-        h('label', {}, t('pause') + ' ',
-          h('input', { type: 'number', min: '0', step: '50', value: String(pauseMs), oninput: (event) => (pauseMs = Math.max(0, Number(event.target.value) || 0)) }))),
-      h('textarea', { oninput: (event) => { text = event.target.value; grow(event.target) } }, text),
+      h('div', { class: 'fields' },
+        h('label', {}, t('language2')),
+        h('select', { onchange: (event) => (language = event.target.value) }, TEST_LANGUAGES.map((code) => h('option', { value: code, selected: code === language }, code))),
+        h('label', {}, t('pause')),
+        h('input', { type: 'number', min: '0', step: String(TEST_PAUSE_STEP_MS), value: String(pauseMs), oninput: (event) => (pauseMs = Math.max(0, Number(event.target.value) || 0)) }),
+        h('label', {}, t('text')),
+        h('textarea', { oninput: (event) => { text = event.target.value; grow(event.target) } }, text)),
       h('div', { class: 'actions' },
         h('button', { onclick: save }, t('save')),
         h('button', { class: 'primary', onclick: run, disabled: speaking !== null }, speakerIcon({ playing: speaking !== null }), speaking === null ? t('speak') : t('speaking')),
-        h('button', { onclick: runAuto, disabled: speaking !== null, title: t('speakAutoHint') }, t('speakAuto')),
         speaking === null ? null : h('button', { onclick: cancel }, t('stopPlaying'))),
       traceTable(),
     )

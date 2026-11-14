@@ -154,6 +154,11 @@ SYNTHESIS_THREADS = 64
 #: Requests that may wait for a free slot of an engine, beyond ``max_parallel_requests``, before ``Overloaded``.
 ENGINE_QUEUE_DEFAULT = 8
 
+#: Margin on top of a GPU engine's budget when a card is chosen (MiB), for a fresh configuration; the
+#: configuration (``headroom_mib``) holds the value in use. Source: AIfred's ``LLAMACPP_TTS_BURNIN_HEADROOM_MB``
+#: (2026-05-27): it covers the drift between the burn-in and real readings and a container restart. Set, not measured.
+HEADROOM_MIB_DEFAULT = 512
+
 #: Speed and pitch when neither the request nor the configuration names one (1.0 = unchanged).
 SPEED_DEFAULT = 1.0
 PITCH_DEFAULT = 1.0
@@ -251,6 +256,8 @@ LABEL_LANGUAGES = ("de", "en")
 #: Source: AIfred ``TTS_HOST_SSH_KEY`` (there ``~/.ssh/aifred_tts_host``).
 TTS_HOST_SSH_KEY_ENV = "TTS_SUITE_SSH_KEY"
 TTS_HOST_SSH_KEY_DEFAULT = Path.home() / ".ssh" / "tts_suite_host"
+#: The SSH port of a host whose configuration names none.
+SSH_PORT_DEFAULT = 22
 #: Connecting to the host, and one control command (``start`` returns once ``docker compose up -d`` is done).
 #: Source: ``TTS_HOST_SSH_CONNECT_TIMEOUT_S`` / ``TTS_HOST_SSH_COMMAND_TIMEOUT_S``.
 TTS_HOST_SSH_CONNECT_TIMEOUT_S = 3

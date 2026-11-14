@@ -9,7 +9,7 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import TypeAdapter
 
@@ -48,11 +48,12 @@ class ConfigStore:
 @dataclass(frozen=True)
 class SpeakTestState:
     """What the page remembers of the test reading, the same on every device: the text, the language,
-    the pause, the order of the engines and what was chosen for each (keys are ``engine@host``)."""
+    the pause, who speaks, the order of the engines and what was chosen for each (keys are ``engine@host``)."""
 
     text: str
     language: str
     pause_ms: int
+    mode: Literal["compare", "auto"] = "compare"  # the ticked rows one after the other, or one reading by the auto list
     order: list[str] = field(default_factory=list)
     use: dict[str, bool] = field(default_factory=dict)
     units: dict[str, Unit] = field(default_factory=dict)

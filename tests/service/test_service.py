@@ -132,7 +132,7 @@ def test_on_a_network_everything_needs_the_token(tmp_path: Path) -> None:
 
 
 SPEAK_TEST = {
-    "text": "Hallo Welt.", "language": "de", "pause_ms": 700, "order": ["edge@", "xtts@Aragon"],
+    "text": "Hallo Welt.", "language": "de", "pause_ms": 700, "mode": "auto", "order": ["edge@", "xtts@Aragon"],
     "use": {"edge@": True, "xtts@Aragon": False}, "units": {"edge@": "sentence", "xtts@Aragon": "whole"},
     "voices": {"edge": "Deutsch (Katja)"},
 }
@@ -151,7 +151,7 @@ def test_the_test_reading_of_the_page_is_kept_on_the_server_for_every_device(tmp
 
 def test_a_test_reading_that_is_no_valid_state_is_refused(tmp_path: Path) -> None:
     client, _, _ = build(tmp_path)
-    for wrong in ({**SPEAK_TEST, "pause_ms": "much"}, {**SPEAK_TEST, "units": {"edge@": "line"}}, {"text": "x"}):
+    for wrong in ({**SPEAK_TEST, "pause_ms": "much"}, {**SPEAK_TEST, "units": {"edge@": "line"}}, {**SPEAK_TEST, "mode": "all"}, {"text": "x"}):
         answer = client.put("/speak-test", json=wrong, headers=TOKEN_HEADERS)
         assert answer.status_code == 400 and answer.json()["error"] == "bad_request"
     assert client.get("/speak-test").json() == {}

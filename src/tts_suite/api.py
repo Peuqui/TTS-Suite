@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
 
+from .constants import HEADROOM_MIB_DEFAULT, SSH_PORT_DEFAULT
+
 # ── Vocabulary ──────────────────────────────────────────────────────
 
 Unit = Literal["sentence", "paragraph", "whole"]
@@ -47,7 +49,7 @@ class Host:
 
     name: str
     address: str
-    ssh_port: int = 22
+    ssh_port: int = SSH_PORT_DEFAULT
     ssh_user: str = ""
     gpu_orc_url: str | None = None
     gpu_orc_token_file: str | None = None
@@ -90,11 +92,6 @@ class GpuRule:
 
     gpu: str  # index as ``nvidia-smi`` lists it, or the card's UUID
     reserve_mib: int = 0  # VRAM that stays free for other programs on this card
-
-
-HEADROOM_MIB_DEFAULT = 512
-"""Safety margin on top of an engine's budget when a card is chosen; the value AIfred
-Intelligence has used for its burn-in peaks so far."""
 
 
 @dataclass(frozen=True)

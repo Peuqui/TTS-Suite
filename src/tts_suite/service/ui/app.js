@@ -3,6 +3,7 @@ import { catalogView } from './catalog.js'
 import { configView } from './config.js'
 import { h } from './dom.js'
 import { currentLanguage, onLanguageChange, t, toggleLanguage } from './i18n.js'
+import { NOTICE_MS } from './settings.js'
 import { speakView } from './speak.js'
 import { voicesView } from './voices.js'
 
@@ -10,7 +11,6 @@ import { voicesView } from './voices.js'
 // the colours. Light or dark follows the system until one is chosen.
 const message = document.getElementById('message')
 // A message fades after a few seconds (an error stays longer) and goes at a tap.
-const NOTICE_MS = { ok: 4000, error: 10000 }
 let hideTimer
 function say(text, kind) {
   clearTimeout(hideTimer)
@@ -21,7 +21,8 @@ function say(text, kind) {
 }
 message.addEventListener('click', () => { message.hidden = true })
 const show = (text) => say(text, 'ok')
-const fail = (error) => say(error instanceof ApiError && error.status === 401 ? `${t('needsToken')} (${error.message})` : error.message, 'error')
+const fail = (error) => say(error instanceof ApiError && error.status === 401 ? `${t('needsToken')} (${error.message})`
+  : error instanceof Error ? error.message : String(error), 'error')
 
 const views = {
   catalog: catalogView({ show, fail }),

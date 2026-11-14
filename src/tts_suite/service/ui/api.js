@@ -1,3 +1,5 @@
+import { RELEASE_REASON } from './settings.js'
+
 // The calls to the service. The token is kept in this browser (localStorage, so that closing the tab does not lose it) and sent with
 // every call; the service asks for it only where something is changed (or everywhere on a network).
 const TOKEN_KEY = 'tts-suite-token'
@@ -10,10 +12,12 @@ export const token = {
 }
 
 export class ApiError extends Error {
-  constructor(status, code, detail) {
+  constructor(status, code, detail, trace = []) {
     super(detail)
     this.status = status
     this.code = code
+    // `no_engine`: the course of the escalation, who was passed over and who failed.
+    this.trace = trace
   }
 }
 
@@ -34,7 +38,7 @@ export async function fetchChecked(path, { method = 'GET', body, signal } = {}) 
   if (!response.ok) {
     let data = {}
     try { data = await response.json() } catch { /* an answer that is no JSON has no code */ }
-    throw new ApiError(response.status, data.error ?? `http${response.status}`, data.detail ?? response.statusText)
+    throw new ApiError(response.status, data.error ?? `http${response.status}`, data.detail ?? response.statusText, data.trace ?? [])
   }
   return response
 }
@@ -44,13 +48,12 @@ export async function json(path, options) {
   return response.status === 204 ? null : response.json()
 }
 
-// Who asks, in the log of the service.
-const RELEASE_REASON = 'TTS-Suite page'
 
-// The common GPU release API answers 409 (one is busy) and 500 (one failed) with its results as well.
-async function gpuRelease(items) {
+// The common GPU release API answers 409 (one is busy) and 500 (one failed) with its results as well. With
+// `force` a reading that holds an engine ends (`reading_aborted`) and the engine is released.
+async function gpuRelease(items, force) {
   const response = await fetch('../gpu/release', {
-    method: 'POST', headers: headers(true), body: JSON.stringify({ items, force: false, reason: RELEASE_REASON }),
+    method: 'POST', headers: headers(true), body: JSON.stringify({ items, force, reason: RELEASE_REASON }),
   })
   let data = {}
   try { data = await response.json() } catch { /* an answer that is no JSON has no results */ }
