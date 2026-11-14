@@ -20,7 +20,8 @@ Programm Text sprechen, ohne selbst Sprachausgabe zu bauen. Das Schwesterprojekt
 - **Jede Anfrage bringt ihre eigene Liste.** Der Dienst bietet alle seine Engines an (ein Katalog: jede
   Engine auf jedem Rechner, auf dem sie laufen kann, und die Cloud). Eine Anfrage nennt die gewünschten Engines
   in Reihenfolge, mit Rechner und Textmenge auf einmal; der erste Eintrag, der sprechen kann, spricht, und fällt
-  er aus, übernimmt der nächste. Keine Liste wird geteilt: Jeder Client hält seine eigene.
+  er aus, übernimmt der nächste. Ein Client hält seine eigene Liste oder sagt `"auto"` und bekommt die
+  Automatik-Liste des Dienstes, eingestellt auf der Seite des Dienstes (Konfiguration, Automatik).
 - **Kein Programm hängt von einem anderen ab.** Ein Client kennt nur die Adresse des Dienstes. Ohne den
   Dienst hat er seinen eigenen Ersatz (zum Beispiel die Stimme des Browsers).
 - **Stimmen sind Dateien** in einem gemeinsamen Ordner, für jede Engine nur lesbar.
@@ -86,12 +87,12 @@ die Suite dort nichts und nimmt den nächsten Eintrag der Liste.
 
 Anfragen sind unabhängig und wiedereintrittsfähig: beliebig viele Programme können den Dienst gleichzeitig
 aufrufen. Der Dienst besitzt die Container und die Karten, ein Programm sagt nur, was es will (seine eigene
-Liste von Engines), den Rest erledigt der Dienst. Nichts wird doppelt geladen, und was gerade spricht, wird
+Liste von Engines oder `"auto"`), den Rest erledigt der Dienst. Nichts wird doppelt geladen, und was gerade spricht, wird
 niemandem weggenommen.
 
 ```mermaid
 flowchart TD
-    R[Anfrage: Text + eigene Liste von Engines] --> C{Nächster Eintrag der Liste}
+    R[Anfrage: Text + eigene Liste von Engines oder auto] --> C{Nächster Eintrag der Liste}
     C -->|keiner mehr| E[Fehler: keine Engine kann sprechen, mit der Spur]
     C -->|Cloud- oder CPU-Engine| S[Sprechen]
     C -->|Engine auf einem Rechner| L{Geladen und bereit?}

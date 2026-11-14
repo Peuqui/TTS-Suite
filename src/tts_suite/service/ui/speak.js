@@ -1,11 +1,9 @@
 import { service } from './api.js'
 import { cardTable, h, replaceChildren } from './dom.js'
+import { place, unitSelect } from './entries.js'
 import { hostLabel, t } from './i18n.js'
 import { Player } from './player.js'
 import { loadSpeaker, speakerIcon } from './speaker-icon.js'
-
-const UNITS = ['sentence', 'paragraph', 'whole']
-const UNIT_KEYS = { sentence: 'unitSentence', paragraph: 'unitParagraph', whole: 'unitWhole' }
 
 // Trying a reading: a text and a list of {engine, host, unit} put together here, played as it arrives, and
 // the course of the reading afterwards (who spoke, who failed or was passed over, and why).
@@ -25,9 +23,6 @@ export function speakView({ show, fail }) {
   let restored = false
   let speaking = null // the AbortController of a reading in progress
   let summary = null
-
-  // "engine@host", or "engine@" for this machine: the key of a row here and in the request's `voices`.
-  const place = (row) => `${row.engine}@${row.host ?? ''}`
 
   // What Save keeps on the server (the same on every device): the first time this tab is opened it is
   // read; after that what is on the page counts until Save.
@@ -82,31 +77,40 @@ export function speakView({ show, fail }) {
     } catch (error) { fail(error) }
   }
 
-  // Every ticked row speaks, one after the other in the order of the list: a comparison. Each gets a
-  // reading of its own, so one that fails or is not up does not stop the rest (it shows in the course).
-  async function run() {
-    const chosen = rows.filter((row) => use[place(row)])
-    if (chosen.length === 0) { fail(new Error(t('nothingChosen'))); return }
+  // The voice chosen on this page for each of these rows, as a request's `voices`.
+  const voiceSettings = (chosen) => Object.fromEntries(chosen.filter((row) => voices[place(row)]).map((row) => [place(row), { voice: voices[place(row)] }]))
+
+  // One reading per list, one after the other; the course of all of them goes into one table.
+  async function readAll(lists) {
     const controller = new AbortController()
     speaking = controller
     summary = { trace: [], switch: null }
     render()
-    for (const row of chosen) {
-      const head = {
-        text, language, paragraph_pause_ms: pauseMs,
-        engines: [{ engine: row.engine, unit: units[place(row)], host: row.host }],
-        voices: voices[place(row)] ? { [place(row)]: { voice: voices[place(row)] } } : {},
-      }
+    for (const list of lists) {
+      const head = { text, language, paragraph_pause_ms: pauseMs, ...list }
       try {
         const part = await player.play(await service.speak(head, controller.signal), controller.signal)
         if (part === null) break
         summary.trace.push(...part.trace)
+        summary.switch = part.switch ?? summary.switch
       } catch (error) { if (controller.signal.aborted) break; fail(error) }
       render()
     }
     speaking = null
     render()
   }
+
+  // Every ticked row speaks, one after the other in the order of the list: a comparison. Each gets a
+  // reading of its own, so one that fails or is not up does not stop the rest (it shows in the course).
+  function run() {
+    const chosen = rows.filter((row) => use[place(row)])
+    if (chosen.length === 0) { fail(new Error(t('nothingChosen'))); return }
+    readAll(chosen.map((row) => ({ engines: [{ engine: row.engine, unit: units[place(row)], host: row.host }], voices: voiceSettings([row]) })))
+  }
+
+  // One reading by the suite's own list (Configuration, Automatic), the way a program that says "auto"
+  // gets it: the course shows who was passed over, who failed and who spoke. The voices are this page's.
+  function runAuto() { readAll([{ engines: 'auto', voices: voiceSettings(rows) }]) }
 
   function cancel() { speaking?.abort(); player.cancel() }
 
@@ -131,8 +135,7 @@ export function speakView({ show, fail }) {
         h('input', { type: 'checkbox', checked: use[place(row)], onchange: (event) => (use[place(row)] = event.target.checked) }),
         h('div', { class: 'row' }, h('button', { class: 'small', onclick: () => move(index, -1) }, '↑'), h('button', { class: 'small', onclick: () => move(index, 1) }, '↓')),
         hostLabel(row),
-        h('select', { onchange: (event) => (units[place(row)] = event.target.value) },
-          UNITS.map((unit) => h('option', { value: unit, selected: units[place(row)] === unit }, t(UNIT_KEYS[unit])))),
+        unitSelect(units[place(row)], (unit) => (units[place(row)] = unit)),
         (voiceLists[row.engine]?.length ?? 0) === 0 ? '' : h('select', { onchange: (event) => (voices[place(row)] = event.target.value) },
           voiceLists[row.engine].map((voice) => h('option', { value: voice.name, selected: voices[place(row)] === voice.name }, voice.label)))])),
       h('div', { class: 'row' }, h('label', {}, t('language2') + ' ',
@@ -143,6 +146,7 @@ export function speakView({ show, fail }) {
       h('div', { class: 'actions' },
         h('button', { onclick: save }, t('save')),
         h('button', { class: 'primary', onclick: run, disabled: speaking !== null }, speakerIcon({ playing: speaking !== null }), speaking === null ? t('speak') : t('speaking')),
+        h('button', { onclick: runAuto, disabled: speaking !== null, title: t('speakAutoHint') }, t('speakAuto')),
         speaking === null ? null : h('button', { onclick: cancel }, t('stopPlaying'))),
       traceTable(),
     )

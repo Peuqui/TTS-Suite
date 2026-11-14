@@ -90,3 +90,18 @@ code, .hint { font-family: ui-monospace, monospace; font-size: 13px; background:
   table.cards td:first-child::before { content: none; }
   table.cards td:first-child input { width: 100%; }
 }
+/* A group of settings, and the rows of a list that can be switched off and moved (the same as the STT-Suite's page). */
+fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0; padding: 8px 14px 12px; }
+legend { color: var(--heading); font-weight: 600; padding: 0 6px; }
+fieldset > p { margin: 4px 0 8px; }
+.chain { margin: 6px 0; }
+.chain.off > :not(.switch):not(button) { opacity: 0.45; }
+.chain .muted { flex: 1; text-align: right; }
+/* The names take the same width in every row, so the choices after them stand one under the other. */
+.chain .name { flex: 0 1 26em; }
+label.switch { position: relative; display: inline-block; width: 40px; height: 22px; flex: none; }
+label.switch input { opacity: 0; width: 0; height: 0; }
+label.switch span { position: absolute; inset: 0; background: var(--line); border-radius: 22px; cursor: pointer; transition: background 0.15s; }
+label.switch span::before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: var(--panel); border-radius: 50%; transition: transform 0.15s; }
+label.switch input:checked + span { background: var(--heading); }
+label.switch input:checked + span::before { transform: translateX(18px); }

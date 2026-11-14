@@ -98,6 +98,29 @@ Intelligence has used for its burn-in peaks so far."""
 
 
 @dataclass(frozen=True)
+class EngineRef:
+    """One entry of a list: an engine on this machine or on a host, and its unit. Nothing is
+    optional: ``host=None`` is the explicit value "this machine"."""
+
+    engine: str
+    unit: Unit  # how much text this entry takes at once; the text is cut by the unit of the entry that speaks
+    host: str | None  # name of a configured Host; None = this machine
+
+
+@dataclass(frozen=True)
+class AutoEntry(EngineRef):
+    """One entry of the suite's own list (``SuiteConfig.auto_engines``). A switched-off entry keeps its
+    place in the list, so switching it on again puts it back where it was."""
+
+    enabled: bool
+
+
+Auto = Literal["auto"]
+AUTO: Auto = "auto"
+"""The value of ``SpeakRequest.engines`` that stands for the suite's own list."""
+
+
+@dataclass(frozen=True)
 class SuiteConfig:
     """Everything the suite needs; loaded and saved by the service.
 
@@ -106,8 +129,10 @@ class SuiteConfig:
 
     GPU placement is a rule set, not a callback: the suite owns the cards' use for all
     programs that talk to it. The suite offers every engine it knows (the catalog,
-    :meth:`TTSSuite.engines`); it keeps NO escalation list: each request brings its own, so no
-    program owns a list the others share. ``gpu_mode`` ``auto`` puts an engine on a card no program uses
+    :meth:`TTSSuite.engines`). A request brings its own escalation list, or says ``"auto"`` and gets
+    ``auto_engines``: the suite's own list, in its order, its switched-off entries left out. That list
+    belongs to the suite (the user sets it on the service's page), not to a program; a program that
+    brings its own list never touches it. ``gpu_mode`` ``auto`` puts an engine on a card no program uses
     (``memory.used`` 0) that fits, else on the card with the most free VRAM that fits (the default); ``list`` only on the cards of ``gpus``, the first
     one whose free VRAM (``nvidia-smi``) minus ``reserve_mib`` covers the engine's ``vram_budget_mib``
     plus ``headroom_mib``. The container gets the budget itself as its cap; the headroom
@@ -142,6 +167,9 @@ class SuiteConfig:
     gpu_orc_url: str | None = None  # the GPU-Orc of this machine: is a big model loading?
     placement_lock_file: Path | None = None  # shared with other programs that place models on the cards
     pronunciations: Mapping[str, str] = field(default_factory=dict)
+    # The list of a request that says "auto", in escalation order. Each engine@host at most once, no
+    # browser entry (it never speaks in the suite); empty = "auto" finds nothing to speak with.
+    auto_engines: tuple[AutoEntry, ...] = ()
 
 
 # ── What the suite reports ──────────────────────────────────────────
@@ -247,27 +275,18 @@ class TraceStep:
 
 
 @dataclass(frozen=True)
-class EngineRef:
-    """One entry of the list a request brings. Nothing is optional: ``host=None`` is the explicit
-    value "this machine"."""
-
-    engine: str
-    unit: Unit  # how much text this entry takes at once; the text is cut by the unit of the entry that speaks
-    host: str | None  # name of a configured Host; None = this machine
-
-
-@dataclass(frozen=True)
 class SpeakRequest:
     """Header of one reading; the text itself is given whole to :meth:`TTSSuite.speak`
     or in pieces to the stream from :meth:`TTSSuite.open_stream`."""
 
     language: str  # must be one the suite has texts in, else ``UnsupportedLanguage`` at ``speak`` / ``open_stream``
-    # The list of THIS request, in escalation order: the first entry that can speak speaks. The suite
-    # keeps no list of its own and no program shares one with another (list per request, no shared
-    # list). Empty, a repeated engine@host, an unknown engine or host, or an engine without REST API on
-    # a host is refused at once (``InvalidRequest``, ``UnknownEngine``, ``UnknownHost``). Not to be
-    # confused with ``SuiteConfig.engines`` (defaults per engine).
-    engines: tuple[EngineRef, ...]
+    # The list of THIS request, in escalation order: the first entry that can speak speaks. No program
+    # shares its list with another. Empty, a repeated engine@host, an unknown engine or host, or an
+    # engine without REST API on a host is refused at once (``InvalidRequest``, ``UnknownEngine``,
+    # ``UnknownHost``). ``"auto"`` (``AUTO``) = the switched-on entries of ``SuiteConfig.auto_engines``;
+    # none switched on is ``NoEngineAvailable``. Not to be confused with ``SuiteConfig.engines``
+    # (defaults per engine).
+    engines: tuple[EngineRef, ...] | Auto
     # Silence between two paragraphs of the input (a blank line), in ms; 0 = none, negative = ``InvalidRequest``.
     # The suite does not make the silence: it delivers a pause marker (``AudioSegment.pause_ms``) at each
     # paragraph boundary for the units sentence and paragraph; an engine with the unit ``whole`` sets the

@@ -20,7 +20,8 @@ text spoken without implementing speech output itself. The sister project is
 - **Every request brings its own list.** The service offers all its engines (a catalog: each engine on
   each machine it can run on, and the cloud). A request names the engines it wants, in order, with the
   machine and how much text at once; the first entry that can speak does, and if it fails, the next
-  takes over. No list is shared: every client keeps its own.
+  takes over. A client keeps its own list, or says `"auto"` and gets the service's automatic list, which is
+  set on the service's page (Configuration, Automatic).
 - **No program depends on another.** A client only knows the address of the service. Without the
   service it has its own fallback (the browser's voice, for example).
 - **Voices are files** in one shared folder, read-only for every engine.
@@ -82,12 +83,12 @@ suite starts nothing on it and takes the next entry of the list.
 ## Working in parallel
 
 Requests are independent and re-entrant: any number of programs can call the service at the same time. The
-service owns the containers and the cards, so a program only says what it wants (its own list of engines)
+service owns the containers and the cards, so a program only says what it wants (its own list of engines, or `"auto"`)
 and the service sees to the rest. Nothing is loaded twice, and nothing that speaks is taken away from it.
 
 ```mermaid
 flowchart TD
-    R[Request: text + own list of engines] --> C{Next entry of the list}
+    R[Request: text + own list of engines or auto] --> C{Next entry of the list}
     C -->|none left| E[Error: no engine can speak, with the trace]
     C -->|cloud or CPU engine| S[Speak]
     C -->|engine on a machine| L{Is it loaded and serving?}

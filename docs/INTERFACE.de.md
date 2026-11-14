@@ -18,9 +18,10 @@ Intelligence (`docs/de/architecture/tts-container-conventions.md`) unverändert 
    weitere) dieselben Karten teilen. Er versucht die Engines, **die die Anfrage nennt**, in ihrer Reihenfolge, **zerlegt den Text nach
    der Einheit des Eintrags, der spricht**, bearbeitet das Audio nach (Tempo und Tonhöhe mit ffmpeg für Engines
    ohne eigene Unterstützung) und schickt es als Strom zurück. Ein Client spricht nie direkt mit einem
-   Container. Weitere Rechner (SSH) sind eine optionale Liste von Hosts; der Normalfall ist dieser Rechner. **Der Dienst
-   hat keine Liste von Engines, die jemand mitbenutzt:** Er bietet alle seine Engines an (der Katalog), und
-   jede Anfrage bringt ihre eigene Liste.
+   Container. Weitere Rechner (SSH) sind eine optionale Liste von Hosts; der Normalfall ist dieser Rechner. **Kein Programm
+   besitzt eine Liste, die ein anderes mitbenutzt:** Der Dienst bietet alle seine Engines an (der Katalog); eine
+   Anfrage bringt ihre eigene Liste mit oder sagt `"auto"` und bekommt die Automatik-Liste des Dienstes
+   (`auto_engines`, eingestellt auf der Seite des Dienstes).
 
 Der Dienst bereinigt den Text fürs Sprechen je Einheit (Markdown, Zahlen, Emoji, Adressen; ein Codeblock wird
 durch einen kurzen gesprochenen Hinweis ersetzt, einmal je Block; `pronunciations` der Konfiguration tauschen
@@ -74,9 +75,9 @@ Ein Objekt: `voices_dir`; `hosts` (optional, die Rechner, auf die Anfragen mit N
 `address`, `ssh_port`, `ssh_user`, `gpu_orc_url` und `gpu_orc_token_file` seines GPU-Orc, vor jedem Start dort gefragt); `engines` (Vorgaben je Engine-Schlüssel: `voice` mit `voice`, `speed`,
 `pitch`; `voice_tuning`, Tempo und Tonhöhe je Stimmenname, gelten immer, wenn diese Stimme spricht, nach den Werten der
 Anfrage und vor den Vorgaben der Engine; `vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` und `headroom_mib` (siehe unten); `gpu_orc_url` (der GPU-Orc dieses Rechners: Vor einem Start auf einer Karte fragt die Suite `GET /loading`; lädt ein großes Modell oder kommt keine brauchbare Antwort, wird der Start mit `no_vram` abgelehnt und die Lesung geht zum nächsten Eintrag ihrer Liste; leer = kein GPU-Orc); `placement_lock_file` (eine Datei, die jedes Programm mit `flock` sperrt, das Modelle auf die Karten legt, während es eine Karte wählt und darauf lädt, auch die STT-Suite; `null` = die Suite ist allein auf den Karten);
-`pronunciations` (ein Wort zur Form, die stattdessen gesprochen wird). `POST` prüft einmal, im Engine-Paket;
-was nicht funktionieren kann, ist `400` mit dem Grund. Ein geändertes `voices_dir` gibt die laufenden Container frei (einer, den eine Lesung hält, wird ins Log geschrieben und behält den alten Ordner); die nächste Anfrage startet sie mit dem neuen. Es gibt keine Liste von Einträgen: Wer spricht, in
-welcher Reihenfolge, ist Sache der Anfrage. Cloud-Schlüssel gehören nicht dazu (unten).
+`pronunciations` (ein Wort zur Form, die stattdessen gesprochen wird); `auto_engines` (die Liste einer Anfrage, die `"auto"` sagt, in Sprechreihenfolge: Einträge mit `engine`, `unit`, `host` und `enabled`; ein ausgeschalteter Eintrag behält seinen Platz; jede Engine auf einem Rechner höchstens einmal, keine Browser-Zeile, nur was auch eine Anfrage nennen könnte). `POST` prüft einmal, im Engine-Paket;
+was nicht funktionieren kann, ist `400` mit dem Grund. Ein geändertes `voices_dir` gibt die laufenden Container frei (einer, den eine Lesung hält, wird ins Log geschrieben und behält den alten Ordner); die nächste Anfrage startet sie mit dem neuen. Wer spricht, in
+welcher Reihenfolge, ist Sache der Anfrage: ihre eigene Liste oder mit `"auto"` die Liste `auto_engines`. Cloud-Schlüssel gehören nicht dazu (unten).
 
 **Die Platzierung auf der GPU ist ein Regelsatz**, kein Rückruf an ein Programm. `gpu_mode` `auto` (Vorgabe) stellt
 eine Engine auf eine Karte, die kein Programm belegt und auf die sie passt, sonst auf die Karte mit dem meisten freien VRAM, auf die sie passt; `list` nur auf die erste passende
@@ -101,11 +102,14 @@ Anfrage wählt neu).
 
 - `language` und `paragraph_pause_ms` sind Pflicht. `paragraph_pause_ms` (ganze Zahl, 0: keine Pause; negativ: `invalid_request`; fehlt: `bad_request`) ist die Stille zwischen Absätzen, geliefert als Pause-Marker. `POST /speak` trägt Kopf und Text als `{"text": "...", ...Kopf}`; der WebSocket
   beginnt mit dem Kopf allein.
-- **`engines` ist Pflicht, es gibt keinen Standard.** Seine Einträge sind die Liste dieses einen Vorlesens, in
+- **`engines` ist Pflicht: eine Liste oder `"auto"`.** Die Einträge einer Liste sind die Liste dieses einen Vorlesens, in
   Sprechreihenfolge: `engine`, `unit` (`sentence`, `paragraph` oder `whole`: wie viel Text die Engine auf
   einmal bekommt; der Dienst zerlegt danach) und `host` (null: dieser Rechner, sonst ein Name aus `/config`).
   Eine Engine darf mehrfach vorkommen, aber nicht dieselbe Engine auf demselben Host zweimal. Niemand besitzt
-  eine Liste, die andere mitbenutzen: Jeder Client hält seine eigene. Eine leere Liste, ein doppelter Eintrag,
+  eine Liste, die andere mitbenutzen: Jeder Client hält seine eigene oder sagt `"auto"`: die eingeschalteten
+  Einträge von `auto_engines` (`/config`) in ihrer Reihenfolge. Ist keiner eingeschaltet, endet die Lesung mit
+  `503` `no_engine` (und leerer Spur); ein Lauf mit `"auto"` ist an der Liste erkennbar, zu der es aufgelöst
+  wurde, eine geänderte Liste beginnt also einen neuen Lauf. Eine leere Liste, ein doppelter Eintrag,
   eine Engine ohne REST-API auf diesem Host oder eine ungültige Einheit ist `422` (`invalid_request`); ein
   unbekannter Host `404` (`unknown_host`), eine unbekannte Engine `404` (`unknown_engine`).
 - **Eine Stimme gehört zu einer Engine.** `voices` nennt Stimme, Tempo und Tonhöhe je Engine-Schlüssel (ein
@@ -197,7 +201,7 @@ laufende Container nicht neu anlegt. Die Suite hält ihre eigenen Daten (Piper-M
 `~/.local/share/tts-suite` oder dem Ordner, den `TTS_SUITE_DATA_DIR` nennt. Die Stimmen (`voices/`) und ihre Quellaufnahmen (`voice-sources/`) gehören zum Repository; der Pfad
 des Stimmenordners ist eine Einstellung (`voices_dir`), und Suite wie AIfred (Agent-Bündel) nutzen diesen einen Ort. Die
 Rechner, heute in AIfreds `settings.json`, ziehen nach `/config` als den einen Ort; die Listen der Engines bleiben
-bei den Clients (AIfred behält seine, Agent-Orc hat eine eigene): Jede Anfrage bringt ihre Liste. AIfred liest und
+bei den Clients (AIfred behält seine, Agent-Orc hat eine eigene): Jede Anfrage bringt ihre Liste (seit 14.11.2026 kann eine Anfrage stattdessen `"auto"` für die Liste des Dienstes sagen). AIfred liest und
 schreibt die Rechner über HTTP mit einem dünnen Client, mit einmaliger Migration und ohne Parallelbetrieb.
 Bei AIfred bleibt: `resolve_voice` und die Stimmen der Agenten, Dateinamen und Ablage des Audios und ein
 Client-Test.

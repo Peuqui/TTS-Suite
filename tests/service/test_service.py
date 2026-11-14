@@ -11,7 +11,9 @@ from service_fakes import FakeStream, FakeSuite, audio, default_config
 from starlette.testclient import TestClient, WebSocketDisconnect
 
 from tts_suite.api import (
+    AUTO,
     AudioSegment,
+    AutoEntry,
     ConfigInvalid,
     EngineControlFailed,
     EngineInUse,
@@ -172,6 +174,34 @@ def test_a_new_configuration_is_set_and_kept(tmp_path: Path) -> None:
     assert suite._config == saved
 
 
+def test_the_auto_list_is_part_of_the_configuration_and_is_kept_in_its_order(tmp_path: Path) -> None:
+    client, suite, store = build(tmp_path)
+    auto_engines = [
+        {"engine": "qwen3local", "unit": "whole", "host": None, "enabled": True},
+        {"engine": "xtts", "unit": "sentence", "host": "aragon", "enabled": False},
+        {"engine": "piper", "unit": "sentence", "host": None, "enabled": True},
+    ]
+    answer = client.post("/config", json={"voices_dir": str(tmp_path), "auto_engines": auto_engines}, headers=TOKEN_HEADERS)
+    assert answer.status_code == 200
+    assert answer.json()["auto_engines"] == auto_engines
+    saved = store.load()
+    assert saved is not None and saved.auto_engines == (
+        AutoEntry("qwen3local", "whole", None, True), AutoEntry("xtts", "sentence", "aragon", False), AutoEntry("piper", "sentence", None, True),
+    )
+    assert suite._config == saved
+
+
+@pytest.mark.parametrize("entry", [
+    {"engine": "xtts", "unit": "sentence", "host": None},                        # no switch
+    {"engine": "xtts", "unit": "word", "host": None, "enabled": True},           # no unit
+])
+def test_an_auto_entry_without_its_fields_is_a_bad_request(tmp_path: Path, entry: dict[str, object]) -> None:
+    client, _, store = build(tmp_path)
+    answer = client.post("/config", json={"voices_dir": str(tmp_path), "auto_engines": [entry]}, headers=TOKEN_HEADERS)
+    assert answer.json()["error"] == "bad_request"
+    assert store.load() is None
+
+
 def test_a_configuration_the_suite_refuses_is_not_kept(tmp_path: Path) -> None:
     client, suite, store = build(tmp_path)
     suite.rejects_config = ConfigInvalid("no engine 'nope'")
@@ -276,6 +306,24 @@ def test_the_head_may_carry_the_voices_of_the_engines_and_the_run(tmp_path: Path
     assert (request.run, request.wait, request.engines) == ("r-42", False, (EngineRef("edge", "paragraph", "aragon"),))
     assert request.voices["edge"].voice == "de-DE-KatjaNeural" and request.voices["edge"].speed == 1.1
     assert request.paragraph_pause_ms == 700
+
+
+def test_a_reading_may_say_auto_instead_of_bringing_a_list(tmp_path: Path) -> None:
+    client, suite, _ = build(tmp_path)
+    assert client.post("/speak", json={"text": "Hi", "language": "de", "engines": "auto", "paragraph_pause_ms": 0}).status_code == 200
+    with client.websocket_connect("/speak/stream") as socket:
+        socket.send_text(json.dumps({"type": "start", "language": "de", "engines": "auto", "paragraph_pause_ms": 0}))
+        socket.send_text(json.dumps({"type": "finish"}))
+        decode_frames(socket.receive_bytes())
+    assert [request.engines for _, request in suite.requests] == [AUTO, AUTO]
+
+
+@pytest.mark.parametrize("engines", ["Auto", "xtts", None])
+def test_a_list_that_is_neither_a_list_nor_auto_is_a_bad_request(tmp_path: Path, engines: object) -> None:
+    client, suite, _ = build(tmp_path)
+    answer = client.post("/speak", json={"text": "Hi", "language": "de", "engines": engines, "paragraph_pause_ms": 0})
+    assert answer.status_code == 400 and answer.json()["error"] == "bad_request"
+    assert suite.requests == []
 
 
 def test_a_failure_after_the_first_frame_ends_the_stream_with_an_error_frame(tmp_path: Path) -> None:

@@ -26,6 +26,19 @@ bleibt, was die Karten betrifft: die Engine-Instanzen und die Plätze je Engine 
 (`max_parallel` gilt über alle Anfragen und Programme), denn die Kapazität gehört dem Dienst.
 Start und Stopp arbeiten auf jeder Zeile des Katalogs, ohne Liste.
 
+**Automatik-Liste des Dienstes neben der Liste je Anfrage (14.11.2026).** Eine Anfrage darf statt einer Liste
+`"engines": "auto"` sagen und bekommt dann `auto_engines` aus der Konfiguration: die eigene Liste des Dienstes,
+in ihrer Reihenfolge, ohne die ausgeschalteten Einträge, eingestellt auf der Seite des Dienstes. Die Liste je
+Anfrage bleibt, wie sie ist. Warum: AIfred und Agent-Orc bauten ihre Liste jeweils fast gleich aus dem Katalog
+zusammen (neue Engines ausgeschaltet ans Ende, Reihenfolge und Schalter je Eintrag), und jedes weitere Programm
+hätte es ein drittes Mal gebaut; die STT-Suite hat dasselbe mit `device=auto` und ihrer Liste. Die Entscheidung
+vom 11.10.2026 gilt weiter: Die Automatik-Liste gehört dem Dienst (der Benutzer stellt sie ein), nicht einem
+Programm, und ein Programm mit eigener Liste berührt sie nie. Die Konfiguration lehnt einen Eintrag ab, den
+keine Anfrage nennen könnte, und die Browser-Zeile, die im Dienst nie spricht (die eigene Stimme des Clients
+bleibt dessen letzte Stufe nach `no_engine`). Ist kein Eintrag eingeschaltet, endet „auto“ mit `no_engine`.
+Ein Lauf mit „auto“ ist an der Liste erkennbar, zu der es aufgelöst wurde; eine geänderte Liste beginnt also
+einen neuen Lauf.
+
 
 **Status einer Katalogzeile (2026-10-11).** `running` = sie spricht; `starting` = ein Start läuft;
 `stopped` = der Host ist erreichbar (oder es ist dieser Rechner) und der Container läuft nicht, sie

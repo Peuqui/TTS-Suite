@@ -18,9 +18,9 @@ one. Where an engine container is concerned, the convention of AIfred Intelligen
    (AIfred, Agent-Orc, others) share the same cards. It tries the engines **the request names**, in the order it names them, **cuts the
    text by the unit of the entry that speaks**, post-processes the audio (speed and pitch with ffmpeg for
    engines without native support) and streams it back. A client never talks to a container directly. Other
-   machines (SSH) are an optional list of hosts; the normal case is this machine. **There is no list of
-   engines in the service that anyone shares:** it offers all its engines (the catalog), and every request
-   brings its own list.
+   machines (SSH) are an optional list of hosts; the normal case is this machine. **No program owns a list
+   another one shares:** the service offers all its engines (the catalog); a request brings its own list, or
+   says `"auto"` and gets the service's automatic list (`auto_engines`, set on the service's page).
 
 The service cleans the text for speech by unit (Markdown, numbers, emoji, URLs; a block of code is replaced by
 a short spoken hint, once per block; `pronunciations` of the configuration swap words for the form that is
@@ -73,9 +73,9 @@ One object: `voices_dir`; `hosts` (optional, the machines requests refer to by n
 `ssh_port`, `ssh_user`, `gpu_orc_url` and `gpu_orc_token_file` of its GPU-Orc, asked before every start there); `engines` (defaults per engine key: `voice` with `voice`, `speed`, `pitch`; `voice_tuning`, speed and pitch per
 voice name, which apply whenever that voice speaks, after the request's own values and before the engine's defaults;
 `vram_budget_mib`, `max_parallel`, `max_queue`); `gpus` and `headroom_mib` (see below); `gpu_orc_url` (the GPU-Orc of this machine: before a start on a card the suite asks `GET /loading`; while a big model loads or without a usable answer the start is refused with `no_vram` and the reading goes to the next entry of its list; empty = no GPU-Orc); `placement_lock_file` (a file every program placing models on the cards locks with `flock` while it chooses a card and loads onto it, the STT suite among them; `null` = the suite is alone on the cards);
-`pronunciations` (a word to the form spoken instead). `POST` validates once, in the engine package; a changed `voices_dir` releases the running containers (one a reading holds is logged and keeps the old folder), the next request starts them with the new one;
-what cannot work is `400` with the reason. There is no list of entries: who speaks, in which order, is the
-request's business. Cloud keys are not part of it (below).
+`pronunciations` (a word to the form spoken instead); `auto_engines` (the list of a request that says `"auto"`, in speaking order: entries with `engine`, `unit`, `host` and `enabled`; a switched-off entry keeps its place; each engine on a host at most once, no browser row, only what a request could name). `POST` validates once, in the engine package; a changed `voices_dir` releases the running containers (one a reading holds is logged and keeps the old folder), the next request starts them with the new one;
+what cannot work is `400` with the reason. Who speaks, in which order, is the request's business: its own list, or
+with `"auto"` the list `auto_engines`. Cloud keys are not part of it (below).
 
 **GPU placement is a rule set**, no callback to a program. `gpu_mode` `auto` (the default) puts an engine on a card no program
 uses that fits, else on the card with the most free VRAM that fits; `list` only on the first card of `gpus` that fits
@@ -99,11 +99,13 @@ with `no_vram` (not remembered: the next request chooses again).
 
 - `language` and `paragraph_pause_ms` are required. `paragraph_pause_ms` (integer, 0: no pause; negative: `invalid_request`; missing: `bad_request`) is the silence between paragraphs, given as pause markers. `POST /speak` carries the head and the text as `{"text": "...", ...head}`; the
   WebSocket opens with the head alone.
-- **`engines` is required, there is no default.** Its entries are the list of this one reading, in the
+- **`engines` is required: a list, or `"auto"`.** A list's entries are the list of this one reading, in the
   order of speaking: `engine`, `unit` (`sentence`, `paragraph` or `whole`: how much text the engine is given
   at once; the service cuts by it) and `host` (null: this machine, otherwise a name from `/config`). An engine
   may appear more than once, but not the same engine on the same host twice. Nobody owns a list that others
-  use: every client keeps its own. An empty list, a double entry, an engine without a REST API on that host or
+  use: every client keeps its own, or says `"auto"`: the switched-on entries of `auto_engines` (`/config`), in
+  their order. With none switched on the reading ends with `503` `no_engine` (and an empty trace); a run with
+  `"auto"` is identified by the list it resolved to, so a changed list starts a new run. An empty list, a double entry, an engine without a REST API on that host or
   an invalid unit is `422` (`invalid_request`); an unknown host `404` (`unknown_host`), an unknown engine `404`
   (`unknown_engine`).
 - **A voice belongs to an engine.** `voices` names voice, speed and pitch per engine key (a folder of the shared
@@ -194,7 +196,7 @@ containers. The suite keeps its own data (Piper models, the DashScope voice mapp
 or the folder `TTS_SUITE_DATA_DIR` names. The voices (`voices/`) and their source recordings (`voice-sources/`) are part of the repository; the path
 of the voices folder is a setting (`voices_dir`), and both the suite and AIfred (agent bundles) use that one place. The hosts, today in AIfred's
 `settings.json`, move to `/config` as the one place; the lists of engines stay with the clients (AIfred keeps
-his, Agent-Orc its own): each request brings its list. AIfred reads and writes the hosts over HTTP through a
+his, Agent-Orc its own): each request brings its list (since 2026-11-14 a request may say `"auto"` for the service's own list instead). AIfred reads and writes the hosts over HTTP through a
 thin client, with a one-time migration and no parallel operation. Stays with AIfred: `resolve_voice` and the
 agents' voices, file names and storage of the audio, and a client test.
 

@@ -19,7 +19,9 @@ from speech_fakes import (
 )
 
 from tts_suite.api import (
+    AUTO,
     AudioSegment,
+    AutoEntry,
     ConfigInvalid,
     EngineDefaults,
     EngineRef,
@@ -153,7 +155,7 @@ def test_an_entry_on_a_host_is_labelled_with_the_host(tmp_path: Path, monkeypatc
     head = SpeakRequest(language="de", paragraph_pause_ms=0, engines=(
         EngineRef("twofake", "sentence", None), EngineRef("onefake", "sentence", ARAGON.name), EngineRef("onefake", "sentence", None),
     ))
-    assert [entry.label for entry in speaker._entries_for(head)] == ["twofake", f"onefake@{ARAGON.name}", "onefake"]
+    assert [entry.label for entry in speaker._bind(speaker._refs_for(head))] == ["twofake", f"onefake@{ARAGON.name}", "onefake"]
 
 
 # ── Units per entry ─────────────────────────────────────────────────
@@ -232,9 +234,9 @@ def test_the_same_engine_on_the_same_host_twice_is_refused(tmp_path: Path, monke
 def test_one_engine_on_this_machine_and_on_a_host_are_two_entries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, _remote_capable(FakeEngine("onefake")))
     speaker = _speaker(tmp_path, hosts=(ARAGON,))
-    assert len(speaker._entries_for(SpeakRequest(language="de", paragraph_pause_ms=0, engines=(
+    assert len(speaker._bind(speaker._refs_for(SpeakRequest(language="de", paragraph_pause_ms=0, engines=(
         EngineRef("onefake", "sentence", None), EngineRef("onefake", "sentence", ARAGON.name),
-    )))) == 2
+    ))))) == 2
 
 
 def test_an_unknown_engine_or_host_is_refused_at_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -387,3 +389,106 @@ def test_a_broken_configuration_leaves_the_old_one_in_place(tmp_path: Path, monk
 
     assert len(run_async(scenario())) == 3
 
+
+
+# ── The suite's own list ("auto") ───────────────────────────────────
+
+
+def _auto(*entries: tuple[str, bool]) -> tuple[AutoEntry, ...]:
+    return tuple(AutoEntry(key, "sentence", None, enabled) for key, enabled in entries)
+
+
+def _auto_request(**kwargs: object) -> SpeakRequest:
+    return SpeakRequest(language="de", paragraph_pause_ms=0, engines=AUTO, **kwargs)  # type: ignore[arg-type]
+
+
+def test_auto_speaks_by_the_switched_on_entries_of_the_configured_list_in_its_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    off, broken, healthy, spare = FakeEngine("offfake"), FakeEngine("brokenfake", fail="engine"), FakeEngine("healthyfake"), FakeEngine("sparefake")
+    install(monkeypatch, off, broken, healthy, spare)
+    launcher = FakeLauncher()
+    speaker = _speaker(tmp_path, launcher, auto_engines=_auto(("offfake", False), ("brokenfake", True), ("healthyfake", True)))
+
+    async def scenario() -> list[AudioSegment]:
+        return await collect(speaker.speak(SENTENCES[0], _auto_request()))
+
+    assert [segment.engine for segment in run_async(scenario()) if segment.audio] == ["healthyfake"]
+    assert len(broken.texts) == 1                      # tried first, failed before the first sound
+    assert off.texts == [] and spare.texts == []       # switched off, and not in the list
+    assert "offfake" not in launcher.asked and "sparefake" not in launcher.asked
+
+
+@pytest.mark.parametrize("auto_engines", [(), _auto(("onefake", False))])
+def test_auto_without_a_switched_on_entry_has_nothing_to_speak_with_and_starts_nothing(
+    auto_engines: tuple[AutoEntry, ...], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install(monkeypatch, FakeEngine("onefake"))
+    launcher = FakeLauncher({"onefake": None})
+    speaker = _speaker(tmp_path, launcher, auto_engines=auto_engines)
+    with pytest.raises(NoEngineAvailable, match="auto list"):
+        speaker.open_stream(_auto_request())
+    assert launcher.asked == [] and launcher.starts == []
+
+
+def test_a_request_with_its_own_list_does_not_use_the_auto_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    listed, own = FakeEngine("listedfake"), FakeEngine("ownfake")
+    install(monkeypatch, listed, own)
+    speaker = _speaker(tmp_path, auto_engines=_auto(("listedfake", True)))
+
+    async def scenario() -> list[AudioSegment]:
+        return await collect(speaker.speak(SENTENCES[0], request("ownfake")))
+
+    assert [segment.engine for segment in run_async(scenario())] == ["ownfake"]
+    assert listed.texts == []
+
+
+def test_a_changed_auto_list_is_a_new_run_for_the_same_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    broken, healthy = FakeEngine("brokenfake", fail="engine"), FakeEngine("healthyfake")
+    install(monkeypatch, broken, healthy)
+    speaker = _speaker(tmp_path, auto_engines=_auto(("brokenfake", True), ("healthyfake", True)))
+    named = _auto_request(run="r-1")
+
+    async def scenario() -> None:
+        await collect(speaker.speak(SENTENCES[0], named))     # brokenfake fails inside this run
+        broken.fail = None
+        await collect(speaker.speak(SENTENCES[1], named))     # same list: the run remembers the failure
+        assert len(broken.texts) == 1
+        speaker.set_config(SuiteConfig(voices_dir=tmp_path, auto_engines=_auto(("brokenfake", True))))
+        await collect(speaker.speak(SENTENCES[2], named))     # another list behind "auto": a run of its own
+        assert len(broken.texts) == 2
+
+    run_async(scenario())
+
+
+def _browser(key: str) -> FakeEngine:
+    engine = FakeEngine(key)
+    engine.renders_in_browser = True
+    return engine
+
+
+@pytest.mark.parametrize(("auto_engines", "message"), [
+    ((AutoEntry("onefake", "sentence", "Ghost", True),), "unknown host"),
+    ((AutoEntry("onefake", "sentence", None, True), AutoEntry("onefake", "whole", None, False)), "twice"),
+    ((AutoEntry("nope", "sentence", None, True),), "unknown TTS engine"),
+    ((AutoEntry("onefake", "sentence", ARAGON.name, True),), "no REST API"),
+    ((AutoEntry("browserfake", "sentence", None, True),), "browser"),
+    ((AutoEntry("onefake", "word", None, True),), "unit"),  # type: ignore[arg-type]
+])
+def test_an_auto_list_no_request_could_name_is_refused_and_the_old_configuration_stays(
+    auto_engines: tuple[AutoEntry, ...], message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install(monkeypatch, FakeEngine("onefake"), _browser("browserfake"))  # onefake has no REST API
+    speaker = _speaker(tmp_path, hosts=(ARAGON,), auto_engines=_auto(("onefake", True)))
+    with pytest.raises(ConfigInvalid, match=message):
+        speaker.set_config(SuiteConfig(voices_dir=tmp_path, hosts=(ARAGON,), auto_engines=auto_engines))
+    assert speaker.config.auto_engines == _auto(("onefake", True))
+
+
+def test_one_engine_on_this_machine_and_on_a_host_are_two_entries_of_the_auto_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install(monkeypatch, _remote_capable(FakeEngine("onefake")))
+    both = (AutoEntry("onefake", "sentence", ARAGON.name, True), AutoEntry("onefake", "whole", None, True))
+    speaker = _speaker(tmp_path, hosts=(ARAGON,), auto_engines=both)
+    assert [entry.label for entry in speaker._bind(speaker._refs_for(_auto_request()))] == [f"onefake@{ARAGON.name}", "onefake"]

@@ -1,10 +1,11 @@
 import { service } from './api.js'
 import { cardTable, h, replaceChildren } from './dom.js'
 import { factorInput } from './factor.js'
-import { t } from './i18n.js'
+import { place, unitSelect } from './entries.js'
+import { currentLanguage, hostLabel, t } from './i18n.js'
 
-// Everything /config knows: the voices folder, the machines, the GPU rules, the margin, the defaults per
-// engine and the pronunciations. Fields the page does not edit (a voice default of an engine) are kept.
+// Everything /config knows: the voices folder, the auto list, the machines, the GPU rules, the margin, the
+// defaults per engine and the pronunciations. Fields the page does not edit (a voice default of an engine) are kept.
 // Speed and pitch of 1 leave the audio as the engine made it.
 const NEUTRAL_FACTOR = 1
 
@@ -17,6 +18,7 @@ export function configView({ show, fail }) {
   async function load() {
     try {
       ;[config, catalog] = await Promise.all([service.config(), service.engines()])
+      joinCatalog()
       const engines = [...new Set(catalog.filter((row) => !row.browser).map((row) => row.engine))]
       voiceLists = Object.fromEntries(await Promise.all(engines.map(async (engine) => [engine, await service.voices(engine)])))
       render()
@@ -42,10 +44,48 @@ export function configView({ show, fail }) {
     render()
   }
 
+  // The catalog's row of an entry, while the entry can still be named: a machine removed or renamed in
+  // this form takes its entries out at once (the catalog itself only knows it after Save).
+  const catalogRow = (entry) => (entry.host === null || config.hosts.some((host) => host.name === entry.host)
+    ? catalog.find((row) => place(row) === place(entry)) : undefined)
+
+  // Every engine of the catalog has its row in the auto list: one the list does not have yet joins at the
+  // end, switched off (an engine may cost money). The browser's voice never speaks in the suite.
+  function joinCatalog() {
+    const listed = new Set(config.auto_engines.map(place))
+    for (const row of catalog) {
+      if (!row.browser && !listed.has(place(row))) config.auto_engines.push({ engine: row.engine, unit: row.unit_default, host: row.host, enabled: false })
+    }
+  }
+
+  // Where an entry runs and what it needs, at the right of its row.
+  function needs(row) {
+    if (row.needed_mib !== null) return t('needsFree', { mib: row.needed_mib })
+    if (row.cloud) return t('cloud')
+    return row.needs_gpu ? t('needsGpu') : t('cpuAlways')
+  }
+
+  // The list a request with `"engines": "auto"` goes through from the top: each entry can be switched off,
+  // moved and given its unit. An entry that is no longer offered (its machine removed) can only be removed.
+  function autoList() {
+    return h('fieldset', {}, h('legend', {}, t('groupAuto')), h('p', { class: 'muted' }, t('groupAutoHint')),
+      config.auto_engines.map((entry, index) => {
+        const row = catalogRow(entry)
+        return h('div', { class: `row chain ${entry.enabled ? '' : 'off'}` },
+          h('button', { class: 'small', title: t('up'), onclick: () => move(config.auto_engines, index, -1) }, '↑'),
+          h('button', { class: 'small', title: t('down'), onclick: () => move(config.auto_engines, index, 1) }, '↓'),
+          h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: entry.enabled, onchange: (event) => { entry.enabled = event.target.checked; render() } }), h('span')),
+          h('span', { class: 'name' }, row ? (row.label[currentLanguage()] ?? row.label.en) : h('code', {}, entry.engine), ' · ', row ? hostLabel(row) : (entry.host ?? t('thisMachine'))),
+          unitSelect(entry.unit, (unit) => (entry.unit = unit)),
+          row ? h('span', { class: 'muted' }, needs(row))
+            : h('span', { class: 'muted' }, t('notOffered'), ' ', h('button', { class: 'small', onclick: () => { config.auto_engines.splice(index, 1); render() } }, t('remove'))))
+      }))
+  }
+
   function hostsTable() {
     return h('div', {}, h('h3', {}, t('hosts')),
       cardTable(['hostName', 'hostAddress', 'sshUser', 'sshPort', 'hostGpuOrc', 'hostGpuOrcToken', ''].map((key) => (key ? t(key) : '')), config.hosts.map((host, index) => [
-        textInput(host.name, (value) => (host.name = value)),
+        textInput(host.name, (value) => { host.name = value; render() }),
         textInput(host.address, (value) => (host.address = value)),
         textInput(host.ssh_user, (value) => (host.ssh_user = value)),
         numberInput(host.ssh_port, (value) => (host.ssh_port = value ?? 22)),
@@ -136,7 +176,7 @@ export function configView({ show, fail }) {
       h('h2', {}, t('tabConfig')),
       field(t('voicesDir'), textInput(config.voices_dir, (value) => (config.voices_dir = value))),
       field(t('headroom'), numberInput(config.headroom_mib, (value) => (config.headroom_mib = value ?? 0))),
-      hostsTable(), gpusTable(), defaultsTable(), pronunciationsTable(),
+      autoList(), hostsTable(), gpusTable(), defaultsTable(), pronunciationsTable(),
       h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: save }, t('save')), h('button', { onclick: load }, t('reload'))),
     )
   }

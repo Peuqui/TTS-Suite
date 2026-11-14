@@ -50,7 +50,7 @@ from .api import (
 )
 from .cleaning import TextCleaner
 from .constants import HOST_ADDRESS_PATTERN, HOST_SSH_USER_PATTERN, PITCH_DEFAULT, RUN_TTL_S, SPEED_DEFAULT
-from .engines.base import DeactivatedEngine, TTSEngine, TTSFailure
+from .engines.base import SPEECH_UNITS, DeactivatedEngine, TTSEngine, TTSFailure
 from .engines.registry import get_engine, is_deactivated
 from .i18n import translate
 from .synthesis import synthesize
@@ -152,16 +152,38 @@ def _check_gpus(config: SuiteConfig) -> None:
         raise ConfigInvalid("gpu_mode list needs at least one card in gpus")
 
 
+def _check_auto_engines(config: SuiteConfig, hosts: Mapping[str, Host]) -> None:
+    """Every entry of the suite's own list must be one a request could name, and not the browser's."""
+    labels: set[str] = set()
+    for entry in config.auto_engines:
+        if entry.host is not None and entry.host not in hosts:
+            raise ConfigInvalid(f"auto_engines: unknown host {entry.host!r}")
+        host = None if entry.host is None else hosts[entry.host]
+        label = entry_label(entry.engine, host)
+        if label in labels:
+            raise ConfigInvalid(f"auto_engines: {label!r} is in the list twice")
+        labels.add(label)
+        if entry.unit not in SPEECH_UNITS:
+            raise ConfigInvalid(f"auto_engines[{label}]: unit must be one of {SPEECH_UNITS}, got {entry.unit!r}")
+        try:
+            engine = bind_engine(entry.engine, host, config.voices_dir)
+        except (UnknownEngine, InvalidRequest) as error:
+            raise ConfigInvalid(f"auto_engines[{label}]: {error}") from error
+        if engine.renders_in_browser:
+            raise ConfigInvalid(f"auto_engines[{label}]: the browser's voice speaks only in the client")
+
+
 def check_config(config: SuiteConfig) -> dict[str, Host]:
     """THE check of a configuration: whatever cannot work (a missing ``voices_dir``, a bad host,
-    defaults for an unknown engine or with bad limits) is :class:`ConfigInvalid`. Returns the hosts
-    by name — what a request's entries are bound to."""
+    defaults for an unknown engine or with bad limits, an entry of ``auto_engines`` no request could
+    name) is :class:`ConfigInvalid`. Returns the hosts by name — what a request's entries are bound to."""
     if not config.voices_dir.is_dir():
         raise ConfigInvalid(f"voices_dir {config.voices_dir} is not a directory")
     hosts = _index_hosts(config)
     _check_defaults(config)
     _check_pronunciations(config)
     _check_gpus(config)
+    _check_auto_engines(config, hosts)
     return hosts
 
 

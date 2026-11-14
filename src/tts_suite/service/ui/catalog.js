@@ -1,5 +1,6 @@
 import { service } from './api.js'
 import { cardTable, h, replaceChildren } from './dom.js'
+import { place } from './entries.js'
 import { hostLabel, t } from './i18n.js'
 
 // How often the page asks for the progress of a running burn-in.
@@ -14,7 +15,6 @@ export function catalogView({ show, fail }) {
   // The rows with a command under way: place -> the command. Its buttons stay off until it is done, so a
   // slow start is not pressed twice.
   const busy = new Map()
-  const place = (row) => `${row.engine}@${row.host ?? ''}`
 
   async function load() {
     try {

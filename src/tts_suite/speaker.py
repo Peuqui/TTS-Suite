@@ -1,7 +1,8 @@
 """The speaking part of the suite: configuration -> runs and streams.
 
 Owns what readings share — the bound engines, the engine slots, the table of runs — and
-opens the streams. It keeps no escalation list: every request brings its own, bound here.
+opens the streams. Every request brings its escalation list or says "auto" for the configured one
+(``SuiteConfig.auto_engines``); either is bound here.
 ``TTSSuite`` (api) wraps it together with the engine management.
 """
 
@@ -15,8 +16,11 @@ from functools import partial
 from typing import Any
 
 from .api import (
+    AUTO,
+    EngineRef,
     Host,
     InvalidRequest,
+    NoEngineAvailable,
     SpeakRequest,
     SuiteConfig,
     Unit,
@@ -130,10 +134,10 @@ class Speaker:
         self._require_supported_language(request)
         if request.paragraph_pause_ms < 0:
             raise InvalidRequest(f"paragraph_pause_ms must not be negative, got {request.paragraph_pause_ms}")
-        entries = self._entries_for(request)
-        run = self._run_for(request, entries)
+        refs = self._refs_for(request)
+        run = self._run_for(request.run, refs, self._bind(refs))
         return AttachedStream(
-            request, run, partial(self._run_ended, request),
+            request, run, partial(self._run_ended, request.run, refs),
             keepalive_s=self._keepalive_s, pronunciations=self._config.pronunciations,
         )
 
@@ -157,11 +161,22 @@ class Speaker:
                 f"the suite has no texts in language {request.language!r} (have {sorted(languages)})"
             )
 
-    def _entries_for(self, request: SpeakRequest) -> tuple[EscalationEntry, ...]:
-        """The request's list, bound, in its order. Nothing is optional: an empty list is refused."""
+    def _refs_for(self, request: SpeakRequest) -> tuple[EngineRef, ...]:
+        """The list the request speaks by: its own, or for "auto" the switched-on entries of the
+        configured list. Nothing is optional: an empty list is refused; "auto" with no switched-on
+        entry has nothing to speak with."""
+        if request.engines == AUTO:
+            refs = tuple(entry for entry in self._config.auto_engines if entry.enabled)
+            if not refs:
+                raise NoEngineAvailable("the suite's auto list has no entry switched on", ())
+            return refs
         if not request.engines:
             raise InvalidRequest("the request's list of engines is empty")
-        entries = tuple(self.entry_for(ref.engine, ref.host, ref.unit) for ref in request.engines)
+        return request.engines
+
+    def _bind(self, refs: tuple[EngineRef, ...]) -> tuple[EscalationEntry, ...]:
+        """The list bound, in its order; an engine@host named twice is refused."""
+        entries = tuple(self.entry_for(ref.engine, ref.host, ref.unit) for ref in refs)
         labels = [entry.label for entry in entries]
         for label in labels:
             if labels.count(label) > 1:
@@ -175,14 +190,16 @@ class Speaker:
             run.abort(reason)
         return len(runs)
 
-    def _run_ended(self, request: SpeakRequest) -> None:
-        if request.run is not None:
-            self._runs.touch((request.run, request.engines))
+    def _run_ended(self, run_id: str | None, refs: tuple[EngineRef, ...]) -> None:
+        if run_id is not None:
+            self._runs.touch((run_id, refs))
 
-    def _run_for(self, request: SpeakRequest, entries: tuple[EscalationEntry, ...]) -> SpeechRun:
+    def _run_for(self, run_id: str | None, refs: tuple[EngineRef, ...], entries: tuple[EscalationEntry, ...]) -> SpeechRun:
+        """A run is identified by its ID and the list it speaks by; for "auto" that is the resolved
+        list, so a changed auto list starts a new run."""
         def create() -> SpeechRun:
             return SpeechRun(entries, self._launcher, self._slots, lambda: self._config.engines, self._executor)
 
-        run = create() if request.run is None else self._runs.get_or_create((request.run, request.engines), create)
+        run = create() if run_id is None else self._runs.get_or_create((run_id, refs), create)
         self._active.add(run)
         return run

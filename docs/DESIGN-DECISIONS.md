@@ -25,6 +25,18 @@ instances and the slots per engine and address (`max_parallel` holds across all 
 programs), because the capacity belongs to the service. Start and stop work on any row of
 the catalog, without a list.
 
+**The service's automatic list next to the list per request (2026-11-14).** A request may say
+`"engines": "auto"` instead of bringing a list and then gets `auto_engines` of the configuration: the
+service's own list, in its order, its switched-off entries left out, set on the service's page. The list per
+request stays as it is. Why: AIfred and Agent-Orc each put their list together from the catalog in nearly
+the same way (new engines joining at the end, switched off, order and switch per entry), and every further
+program would have built it a third time; the STT-Suite has the same with `device=auto` and its list. The
+decision of 2026-10-11 still holds: the automatic list belongs to the service (the user sets it), not to a
+program, and a program that brings its own list never touches it. The configuration refuses an entry no
+request could name, and the browser's row, which never speaks in the service (the client's own voice stays
+its last step after `no_engine`). With no entry switched on, "auto" ends with `no_engine`. A run with
+"auto" is identified by the list it resolved to, so a changed list starts a new run.
+
 **Status of a catalog row (2026-10-11).** `running` = it speaks; `starting` = a start is under way;
 `stopped` = the host is up (or it is this machine) and the container is not running, so it can be
 started; `unreachable` = the host does not answer (for a cloud engine: no access). The difference
