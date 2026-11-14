@@ -21,7 +21,9 @@ function say(text, kind) {
 }
 message.addEventListener('click', () => { message.hidden = true })
 const show = (text) => say(text, 'ok')
-const fail = (error) => say(error instanceof ApiError && error.status === 401 ? `${t('needsToken')} (${error.message})`
+// Refused for the token: whether none is entered or the one entered is wrong, and where it is; not the
+// service's wording for programs (the name of its HTTP header).
+const fail = (error) => say(error instanceof ApiError && error.status === 401 ? t(token.get() ? 'tokenWrong' : 'needsToken')
   : error instanceof Error ? error.message : String(error), 'error')
 
 const views = {

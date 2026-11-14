@@ -43,7 +43,7 @@ class Access:
             raise ServiceError(401, "unauthorized", "this needs a token and none is configured")
         sent = headers.get(TOKEN_HEADER.lower(), "")
         if not secrets.compare_digest(sent, self.token):
-            raise ServiceError(401, "unauthorized", f"a valid token is needed ({TOKEN_HEADER})")
+            raise ServiceError(401, "unauthorized", f"a valid token of the service is needed, sent in the header {TOKEN_HEADER}")
 
 
 def access_for(host: str, token: str | None) -> Access:
