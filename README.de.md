@@ -81,7 +81,9 @@ Die Rechner, die GPU-Regeln und die Vorgaben je Engine setzt man mit `POST /conf
 
 Ein Rechner mit eigenem GPU-Orc (`gpu_orc_url`, sein Token in `gpu_orc_token_file`) wird vor jedem Start dort
 gefragt: Solange auf ihm ein großes Modell lädt oder jemand seine Karten freihält (`POST /hold` dort), startet
-die Suite dort nichts und nimmt den nächsten Eintrag der Liste.
+die Suite dort nichts und nimmt den nächsten Eintrag der Liste. Gefragt wird über
+`src/tts_suite/gpu_orc_client.py`, eine Kopie des gemeinsamen Clients aus [GPU-Orc](https://github.com/Peuqui/GPU-Orc)
+(`clients/python/`); Änderungen dort, nicht hier. Ohne `gpu_orc_url` wird nichts gefragt.
 
 ## Parallel arbeiten
 

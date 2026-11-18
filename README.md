@@ -78,7 +78,9 @@ rules and the defaults per engine are set with `POST /config`; see the [interfac
 
 A host with its own GPU-Orc (`gpu_orc_url`, and its token in `gpu_orc_token_file`) gets asked before
 every start there: while a big model loads on it or somebody holds its cards (`POST /hold` there), the
-suite starts nothing on it and takes the next entry of the list.
+suite starts nothing on it and takes the next entry of the list. The question is asked by
+`src/tts_suite/gpu_orc_client.py`, a copy of the shared client from [GPU-Orc](https://github.com/Peuqui/GPU-Orc)
+(`clients/python/`); change it there, not here. Without `gpu_orc_url` nothing is asked.
 
 ## Working in parallel
 
