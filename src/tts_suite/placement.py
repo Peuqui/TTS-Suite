@@ -118,7 +118,7 @@ def refuse_unless_the_cards_are_free(url: str | None, token: str | None = None) 
     if light.loading:
         raise PlacementRefused(f"{', '.join(light.loading)} is loading")
     if light.held:
-        raise PlacementRefused(f"the cards are held: {light.held['reason']}")
+        raise PlacementRefused(f"the cards are held: {light.held.reason}")
 
 
 def _candidates(cards: list[GpuInfo], config: SuiteConfig) -> list[tuple[GpuInfo, int]]:

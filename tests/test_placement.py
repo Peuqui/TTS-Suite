@@ -144,7 +144,7 @@ def test_a_burn_in_refuses_when_every_card_is_in_use(tmp_path: Path) -> None:
 @pytest.fixture
 def gpu_orc() -> Iterator[tuple[str, dict[str, object]]]:
     """A GPU-Orc on a loopback port; ``answer["body"]`` is what ``GET /loading`` says."""
-    answer: dict[str, object] = {"status": 200, "body": {"loading": [], "held": None}, "authorization": None}
+    answer: dict[str, object] = {"status": 200, "body": {"loading": [], "held": None, "hold_requested": None}, "authorization": None}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -176,7 +176,7 @@ def test_a_green_light_lets_the_start_go_on(gpu_orc: tuple[str, dict[str, object
 
 def test_a_loading_model_refuses_the_start_and_is_named(gpu_orc: tuple[str, dict[str, object]]) -> None:
     url, answer = gpu_orc
-    answer["body"] = {"loading": ["DeepSeek-vllm"], "held": None}
+    answer["body"] = {"loading": ["DeepSeek-vllm"], "held": None, "hold_requested": None}
     with pytest.raises(PlacementRefused, match="DeepSeek-vllm is loading"):
         refuse_unless_the_cards_are_free(url)
 
@@ -196,9 +196,15 @@ def test_a_gpu_orc_that_is_down_is_no_green_light() -> None:
 
 def test_held_cards_refuse_the_start_and_say_why(gpu_orc: tuple[str, dict[str, object]]) -> None:
     url, answer = gpu_orc
-    answer["body"] = {"loading": [], "held": {"since": "2026-11-05T09:00:00+01:00", "reason": "gaming"}}
+    answer["body"] = {"loading": [], "held": {"owner": "vllm-research", "reason": "gaming", "since": "2026-11-05T09:00:00+01:00", "state": "active", "free": None}, "hold_requested": None}
     with pytest.raises(PlacementRefused, match="held: gaming"):
         refuse_unless_the_cards_are_free(url)
+
+
+def test_a_requested_hold_does_not_refuse_the_start_yet(gpu_orc: tuple[str, dict[str, object]]) -> None:
+    url, answer = gpu_orc
+    answer["body"] = {"loading": [], "held": None, "hold_requested": {"owner": "vllm-research", "reason": "gaming", "since": "2026-11-05T09:00:00+01:00", "state": "requested", "free": None}}
+    refuse_unless_the_cards_are_free(url)
 
 
 def test_the_token_of_another_machines_gpu_orc_is_sent(gpu_orc: tuple[str, dict[str, object]]) -> None:
