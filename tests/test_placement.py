@@ -196,14 +196,14 @@ def test_a_gpu_orc_that_is_down_is_no_green_light() -> None:
 
 def test_held_cards_refuse_the_start_and_say_why(gpu_orc: tuple[str, dict[str, object]]) -> None:
     url, answer = gpu_orc
-    answer["body"] = {"loading": [], "held": {"owner": "vllm-research", "reason": "gaming", "since": "2026-11-05T09:00:00+01:00", "state": "active", "free": None}, "hold_requested": None}
+    answer["body"] = {"loading": [], "held": {"owner": "vllm-research", "reason": "gaming", "model": None, "model_server": None, "since": "2026-11-05T09:00:00+01:00", "state": "active", "free": None, "granted_by": None}, "hold_requested": None}
     with pytest.raises(PlacementRefused, match="held: gaming"):
         refuse_unless_the_cards_are_free(url)
 
 
 def test_a_requested_hold_does_not_refuse_the_start_yet(gpu_orc: tuple[str, dict[str, object]]) -> None:
     url, answer = gpu_orc
-    answer["body"] = {"loading": [], "held": None, "hold_requested": {"owner": "vllm-research", "reason": "gaming", "since": "2026-11-05T09:00:00+01:00", "state": "requested", "free": None}}
+    answer["body"] = {"loading": [], "held": None, "hold_requested": {"owner": "vllm-research", "reason": "gaming", "model": None, "model_server": None, "since": "2026-11-05T09:00:00+01:00", "state": "requested", "free": None, "granted_by": None}}
     refuse_unless_the_cards_are_free(url)
 
 
