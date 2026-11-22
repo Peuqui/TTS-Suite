@@ -3,7 +3,7 @@
 # the service control page (www-data) and AIfred can start and stop it through polkit.
 # Run as root: sudo deploy/switch-to-system-unit.sh [user]
 # The unit and the polkit rule come from deploy/system/ of this repository. Same port as before (5090),
-# so the two units must never run together: the user unit is stopped and disabled first.
+# so the two units must never run together: the user unit is stopped, disabled and removed first.
 # Optional, only on a machine that has such a setup: MINIPC=<folder with system-config/> also installs
 # the nginx snippet and names the service control page (steps 4 and 5).
 set -euo pipefail
@@ -29,8 +29,12 @@ done
 POLKIT_RULES=/etc/polkit-1/rules.d
 [[ -d $POLKIT_RULES ]] || { echo "No $POLKIT_RULES: polkit is missing. Install it first (Debian/Ubuntu: sudo apt install polkitd; Fedora: sudo dnf install polkit; Arch: sudo pacman -S polkit), then run this again." >&2; exit 1; }
 
-echo "== 1/3 Stopping and disabling the user unit of $SERVICE_USER (port 5090 must be free)"
+echo "== 1/3 Stopping, disabling and removing the user unit of $SERVICE_USER (port 5090 must be free)"
 sudo -u "$SERVICE_USER" XDG_RUNTIME_DIR="/run/user/$USER_ID" systemctl --user disable --now tts-suite || echo "(no user unit was running)"
+# Removed, not only disabled: left behind, `systemctl --user restart tts-suite` looks like the right command and
+# starts a second service that fails on the taken port (found on the Mini, 22.11.2026).
+rm -fv "$HOME_DIR/.config/systemd/user/tts-suite.service"
+sudo -u "$SERVICE_USER" XDG_RUNTIME_DIR="/run/user/$USER_ID" systemctl --user daemon-reload || echo "(no user manager running: nothing to reload)"
 
 echo "== 2/3 Installing the system unit and the polkit rule"
 install -v -m 644 "$SYSTEM_FILES/tts-suite@.service" /etc/systemd/system/tts-suite@.service
