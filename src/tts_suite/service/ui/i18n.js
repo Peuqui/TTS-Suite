@@ -6,13 +6,13 @@ const TEXTS = {
     reload: 'Neu laden', save: 'Speichern', saved: 'Gespeichert.', add: 'Hinzufügen', remove: 'Entfernen',
     up: 'Nach oben', down: 'Nach unten', start: 'Starten', stop: 'Stoppen', started: 'Gestartet.', stopped: 'Gestoppt.', busyStart: 'startet und lädt …', busyStop: 'stoppt …', busyRelease: 'gibt frei …',
     release: 'Freigeben', releaseAll: 'Alle freigeben', releaseStopped: 'freigegeben', releaseReleased: 'freigegeben', releaseNot_running: 'lief nicht', releaseIn_use: 'in Benutzung, nicht angefasst', releaseBusy: 'in Benutzung oder startet, nicht angefasst', releaseUnreachable: 'Rechner nicht erreichbar', releaseFailed: 'fehlgeschlagen',
-    needsToken: 'Dafür braucht die Seite das Token der TTS-Suite: oben rechts bei „Token“ eintragen. Es steht auf dem Rechner der TTS-Suite in der Datei „token“ in ihrem Konfigurationsordner.',
+    needsToken: 'Dafür braucht die Seite das Token der TTS-Suite: oben rechts bei „Token“ eintragen. Es steht auf {machine}, dem Rechner der TTS-Suite, in der Datei „token“ in ihrem Konfigurationsordner.',
     tokenWrong: 'Das eingetragene Token gehört nicht zu dieser TTS-Suite: oben rechts bei „Token“ das richtige eintragen (Datei „token“ im Konfigurationsordner der TTS-Suite).',
     tokenKept: 'Token gespeichert (in diesem Browser).', tokenCleared: 'Token entfernt.',
     catalogHint: 'Jede Engine auf jedem Rechner, auf dem sie laufen kann. Eine Anfrage wählt daraus ihre eigene Liste oder nimmt mit „auto“ die Automatik der Suite (Konfiguration).',
     statusRunning: 'bereit', statusStarting: 'startet', statusStopped: 'aus', statusUnreachable: 'nicht erreichbar',
     stateRunning: 'bereit – antwortet sofort auf Anfragen (Piper, eSpeak und Cloud-Engines ohne eigenen Prozess)', stateStarting: 'startet', stateStopped: 'Rechner da, Container aus', stateUnreachable: 'Rechner nicht erreichbar (aus oder nicht im Netz)',
-    engine: 'Engine', host: 'Rechner', thisMachine: 'dieser Rechner', status: 'Zustand', installed: 'Installiert',
+    engine: 'Engine', host: 'Rechner', status: 'Zustand', installed: 'Installiert',
     gpuMemory: 'Grafikspeicher (MiB)', memoryNeeded: 'Bedarf auf der Karte (MiB)', hint: 'Hinweis', yes: 'ja', no: 'nein', cloud: 'Cloud', needsGpu: 'GPU',
     unit: 'Einheit', unitSentence: 'Satz', unitParagraph: 'Absatz', unitWhole: 'ganzer Text',
     voicesDir: 'Stimmenordner', hosts: 'Rechner (SSH)', hostName: 'Name', hostAddress: 'Adresse', sshUser: 'SSH-Benutzer', sshPort: 'SSH-Port', hostGpuOrc: 'GPU-Orc dort (Adresse)', hostGpuOrcToken: 'Token-Datei dieses GPU-Orc',
@@ -49,13 +49,13 @@ const TEXTS = {
     reload: 'Reload', save: 'Save', saved: 'Saved.', add: 'Add', remove: 'Remove',
     up: 'Up', down: 'Down', start: 'Start', stop: 'Stop', started: 'Started.', stopped: 'Stopped.', busyStart: 'starting and loading …', busyStop: 'stopping …', busyRelease: 'releasing …',
     release: 'Release', releaseAll: 'Release all', releaseStopped: 'released', releaseReleased: 'released', releaseNot_running: 'was not running', releaseIn_use: 'in use, left alone', releaseBusy: 'in use or starting, left alone', releaseUnreachable: 'machine not reachable', releaseFailed: 'failed',
-    needsToken: 'This needs the token of the TTS-Suite: enter it at Token, top right. It is on the TTS-Suite\'s machine, in the file "token" in its configuration folder.',
+    needsToken: 'This needs the token of the TTS-Suite: enter it at Token, top right. It is on {machine}, the TTS-Suite\'s machine, in the file "token" in its configuration folder.',
     tokenWrong: 'The token entered does not belong to this TTS-Suite: enter the right one at Token, top right (the file "token" in the TTS-Suite\'s configuration folder).',
     tokenKept: 'Token saved (in this browser).', tokenCleared: 'Token removed.',
     catalogHint: 'Every engine on every machine it can run on. A request chooses its own list from them, or takes the suite\'s automatic list with "auto" (Configuration).',
     statusRunning: 'ready', statusStarting: 'starting', statusStopped: 'off', statusUnreachable: 'unreachable',
     stateRunning: 'ready – answers requests at once (Piper, eSpeak and cloud engines have no process of their own)', stateStarting: 'starting', stateStopped: 'machine there, container off', stateUnreachable: 'machine not reachable (off or not on the network)',
-    engine: 'Engine', host: 'Machine', thisMachine: 'this machine', status: 'Status', installed: 'Installed',
+    engine: 'Engine', host: 'Machine', status: 'Status', installed: 'Installed',
     gpuMemory: 'GPU memory (MiB)', memoryNeeded: 'Needed on a card (MiB)', hint: 'Hint', yes: 'yes', no: 'no', cloud: 'cloud', needsGpu: 'GPU',
     unit: 'Unit', unitSentence: 'sentence', unitParagraph: 'paragraph', unitWhole: 'whole text',
     voicesDir: 'Voices folder', hosts: 'Machines (SSH)', hostName: 'Name', hostAddress: 'Address', sshUser: 'SSH user', sshPort: 'SSH port', hostGpuOrc: 'GPU-Orc there (address)', hostGpuOrcToken: 'Token file of that GPU-Orc',
@@ -100,13 +100,17 @@ export function toggleLanguage() {
   document.documentElement.lang = language
   listeners.forEach((listener) => listener())
 }
+// The name of the machine the service runs on (`machine` of its /health): what the pages call "this machine".
+export let machineName = ''
+export function setMachineName(name) { machineName = name }
 export function t(key, values = {}) {
   const text = TEXTS[language][key] ?? TEXTS.en[key] ?? key
-  return text.replace(/\{(\w+)\}/g, (_, name) => String(values[name] ?? ''))
+  const all = { machine: machineName, ...values }
+  return text.replace(/\{(\w+)\}/g, (_, name) => String(all[name] ?? ''))
 }
 
 // Where an engine of the catalog runs, as the pages show it: a cloud engine in the cloud, else the
 // machine named, else this one.
 export function hostLabel(row) {
-  return row.cloud ? t('cloud') : (row.host ?? t('thisMachine'))
+  return row.cloud ? t('cloud') : (row.host ?? machineName)
 }

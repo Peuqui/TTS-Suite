@@ -3,7 +3,7 @@ import { cardTable, h, replaceChildren } from './dom.js'
 import { factorInput } from './factor.js'
 import { place, unitSelect } from './entries.js'
 import { formatNumber } from './format.js'
-import { currentLanguage, hostLabel, t } from './i18n.js'
+import { currentLanguage, hostLabel, machineName, t } from './i18n.js'
 
 // Everything /config knows: the voices folder, the auto list, the machines, the GPU rules, the margin, the
 // defaults per engine and the pronunciations. Fields the page does not edit (a voice default of an engine) are kept.
@@ -79,7 +79,7 @@ export function configView({ show, fail }) {
           h('button', { class: 'small', title: t('up'), onclick: () => move(config.auto_engines, index, -1) }, '↑'),
           h('button', { class: 'small', title: t('down'), onclick: () => move(config.auto_engines, index, 1) }, '↓'),
           h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: entry.enabled, onchange: (event) => { entry.enabled = event.target.checked; render() } }), h('span')),
-          h('span', { class: 'name' }, row ? (row.label[currentLanguage()] ?? row.label.en) : h('code', {}, entry.engine), ' · ', row ? hostLabel(row) : (entry.host ?? t('thisMachine'))),
+          h('span', { class: 'name' }, row ? (row.label[currentLanguage()] ?? row.label.en) : h('code', {}, entry.engine), ' · ', row ? hostLabel(row) : (entry.host ?? machineName)),
           unitSelect(entry.unit, (unit) => (entry.unit = unit)),
           row ? h('span', { class: 'muted' }, needs(row))
             : h('span', { class: 'muted' }, t('notOffered'), ' ', h('button', { class: 'small', onclick: () => { config.auto_engines.splice(index, 1); render() } }, t('remove'))))

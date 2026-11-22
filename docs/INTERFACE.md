@@ -31,7 +31,7 @@ agents (which agent has which voice). The service gets text and answers with aud
 
 | Method and path | Purpose |
 |---|---|
-| `GET /health` | `200` with `{"status": "ok"}` while the service runs. |
+| `GET /health` | `200` with `{"status": "ok", "machine": "<name>"}` while the service runs. `machine` is the machine's hostname (the page shows it instead of "this machine"; the STT-Suite returns the same field). |
 | `GET /ui/` | The page of the service (plain HTML, CSS and JavaScript, light or dark, German or English): the catalog with start and stop, the configuration, the voices with sync, and trying a reading with a list of its own and its course. It holds no data and needs no token; what it asks for follows the rules below (the token is entered once and kept in `localStorage` of the browser). |
 | `GET /engines` | The catalog: every engine on every machine it can run on; fields below. |
 | `GET /speak-test`, `PUT /speak-test` | What the page keeps of the test reading (text, language, pause, who speaks: the ticked rows or the auto list, order and choices per engine), on the server, so that every device sees the same (`speak-test.json` next to the configuration). `PUT` needs the token. |

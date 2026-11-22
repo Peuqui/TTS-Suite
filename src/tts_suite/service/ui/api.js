@@ -69,6 +69,7 @@ const query = (parameters) => {
 }
 
 export const service = {
+  health: () => json('../health'),
   engines: () => json('../engines'),
   config: () => json('../config'),
   saveConfig: (config) => json('../config', { method: 'POST', body: config }),

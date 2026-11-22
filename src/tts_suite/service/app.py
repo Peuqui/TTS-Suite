@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
@@ -152,7 +153,8 @@ def create_app(suite: TTSSuite, access: Access, store: ConfigStore, max_text_cha
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok"}
+        # `machine`: the name this machine goes by, which the pages show for "this machine" (the same field in every suite)
+        return {"status": "ok", "machine": socket.gethostname()}
 
     @app.get("/engines")
     async def engines(request: Request) -> Any:

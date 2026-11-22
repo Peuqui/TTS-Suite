@@ -32,7 +32,7 @@ Agenten kennt (welcher Agent welche Stimme hat). Der Dienst bekommt Text und ant
 
 | Methode und Pfad | Zweck |
 |---|---|
-| `GET /health` | `200` mit `{"status": "ok"}`, solange der Dienst läuft. |
+| `GET /health` | `200` mit `{"status": "ok", "machine": "<Name>"}`, solange der Dienst läuft. `machine` ist der Hostname des Rechners (so nennt ihn die Oberfläche statt „dieser Rechner“; dasselbe Feld liefert die STT-Suite). |
 | `GET /ui/` | Die Seite des Dienstes (reines HTML, CSS und JavaScript, hell oder dunkel, Deutsch oder Englisch): der Katalog mit Starten und Stoppen, die Konfiguration, die Stimmen mit Abgleich und das Probesprechen mit eigener Liste und ihrem Verlauf. Sie enthält keine Daten und braucht kein Token; was sie abfragt, folgt den Regeln unten (das Token wird einmal eingetragen und in `localStorage` des Browsers gehalten). |
 | `GET /engines` | Der Katalog: jede Engine auf jedem Rechner, auf dem sie laufen kann; Felder unten. |
 | `GET /speak-test`, `PUT /speak-test` | Was die Seite vom Probesprechen behält (Text, Sprache, Pause, wer spricht: die angehakten Zeilen oder die Automatik, Reihenfolge und Auswahl je Engine), auf dem Server, damit jedes Gerät dasselbe sieht (`speak-test.json` neben der Konfiguration). `PUT` braucht das Token. |

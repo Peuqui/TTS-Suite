@@ -1,14 +1,16 @@
-import { ApiError, token } from './api.js'
+import { ApiError, service, token } from './api.js'
 import { catalogView } from './catalog.js'
 import { configView } from './config.js'
 import { h } from './dom.js'
-import { currentLanguage, onLanguageChange, t, toggleLanguage } from './i18n.js'
+import { currentLanguage, onLanguageChange, setMachineName, t, toggleLanguage } from './i18n.js'
 import { NOTICE_MS } from './settings.js'
 import { speakView } from './speak.js'
 import { voicesView } from './voices.js'
 
 // The page: four views behind tabs, the token for the commands that change something, the language and
 // the colours. Light or dark follows the system until one is chosen.
+// Before any view draws: they name this machine by it (`host: null` in the catalog and the entries).
+setMachineName((await service.health()).machine)
 const message = document.getElementById('message')
 // A message fades after a few seconds (an error stays longer) and goes at a tap.
 let hideTimer

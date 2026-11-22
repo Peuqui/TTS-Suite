@@ -54,11 +54,17 @@ def build(tmp_path: Path, token_for_everything: bool = False) -> tuple[TestClien
 
 def test_health_and_the_lists_ask_for_nothing_on_this_machine(tmp_path: Path) -> None:
     client, _, _ = build(tmp_path)
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json()["status"] == "ok"
     engines = client.get("/engines").json()
     assert engines[0]["engine"] == "xtts" and engines[0]["vram_mib"] == {"GPU-1": 4000}
     assert client.get("/voices").json() == [{"name": "Alice", "label": "Alice"}]
     assert client.get("/config").json()["voices_dir"] == str(tmp_path / "voices")
+
+
+def test_health_names_the_machine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("tts_suite.service.app.socket.gethostname", lambda: "Testrechner")
+    client, _, _ = build(tmp_path)
+    assert client.get("/health").json() == {"status": "ok", "machine": "Testrechner"}
 
 
 def test_the_engine_of_the_voices_goes_to_the_suite(tmp_path: Path) -> None:
